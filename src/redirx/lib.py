@@ -1,14 +1,14 @@
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
+import aiohttp
+import asyncio
 
-def create_web_driver() -> webdriver.Chrome:
-    chrome_options = Options()
-    chrome_options.add_argument('--headless')
-    chrome_options.add_argument('--no-sandbox')
-    chrome_options.add_argument('--disable-dev-shm-usage')
-    driver = webdriver.Chrome(options=chrome_options)
-    return driver
+async def main():
+    async with aiohttp.ClientSession() as session:
+        async with session.get('http://python.org') as response:
 
-if __name__ == '__main__':
-    driver = create_web_driver()
-    
+            print("Status:", response.status)
+            print("Content-type:", response.headers['content-type'])
+
+            html = await response.text()
+            print("Body:", html)
+
+asyncio.run(main())

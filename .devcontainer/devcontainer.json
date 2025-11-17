@@ -1,0 +1,6 @@
+{
+    "name": "Redirx Dev Container",
+    "build": {
+        "dockerfile": "Dockerfile"
+    }
+}

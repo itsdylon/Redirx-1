@@ -25,7 +25,8 @@ class Pipeline:
         ]
     
     """
-    Used to contol pipeline advancement. Currently just yields the internal state but in the future should yield debug information about the iteration.
+    Used to contol pipeline advancement. Currently just yields the internal state,
+    but in the future should yield debug information about the iteration.
     """
     async def iterate(self) -> any:
         while self.__index < len(self.__stages):

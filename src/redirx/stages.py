@@ -63,11 +63,18 @@ class HtmlPruneStage(Stage):
         super().__init__()
 
     """
-    Scrapes all URLs for their HTML content, automatically pairs sites with duplicate content. 
+    Pairs sites with duplicate HTML content. 
     """
     async def execute(self, input: tuple[list[WebPage], list[WebPage]]) -> tuple[list[WebPage], list[WebPage], set[Mapping]]:
-        # TODO
-        pass
+        old_pages, new_pages = input
+        new_page_set = { hash(page) : page for page in new_pages }
+        mappings = set()
+
+        for page in old_pages:
+            if page in new_page_set:
+                mappings.add(Mapping(page, new_page_set[page]))
+        
+        return (old_pages, new_pages, mappings)
 
 # TODO
 class EmbedStage(Stage):
@@ -90,14 +97,19 @@ class WebPage:
     def __init__(self, url: str, html: str):
         self.url = url
         self.html = html
+        self.__html_cache = None
     
     @classmethod
     async def scrape(session: aiohttp.ClientSession, url: str) -> WebPage:
         async with session.get(url) as response:
-            html = await response.text()
+            if response.status == 200:
+                html = await response.text()
 
         return WebPage(url, html)
     
     # Potential performance improvement by caching hash?
     def __hash__(self) -> int:
-        return hash(self.html)
+        if self.__html_cache is None:
+            self.__html_cache = hash(self.html)
+
+        return self.__html_cache

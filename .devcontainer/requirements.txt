@@ -1,1 +1,6 @@
 aiohttp==3.13.2
+
+# Core ML / embedding stack
+sentence-transformers>=3.0.0
+torch>=2.2.0
+numpy>=1.26.0

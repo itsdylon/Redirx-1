@@ -31,3 +31,5 @@ Redirx is made up of multiple components:
    • Calculate confidence scores
    • Flag ambiguous cases
 8. Human review interface
+
+Test sites can be spun up locally using tests/mock_sites/start_servers.py 

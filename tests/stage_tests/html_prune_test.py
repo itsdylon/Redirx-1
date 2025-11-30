@@ -1,4 +1,11 @@
 import unittest
+import os
+import sys
+
+# Add project root to Python path
+parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '../..'))
+sys.path.insert(0, parent_dir)
+
 from src.redirx.stages import HtmlPruneStage
 
 class TestHtmlPruneStage(unittest.TestCase):

@@ -1,4 +1,4 @@
-import stages
+from src.redirx import stages
 from typing import Optional
 
 class Pipeline:

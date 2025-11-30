@@ -184,7 +184,7 @@ class WebPageEmbeddingDB:
             site_type: Optional filter by site type.
 
         Returns:
-            List of embedding records.
+            List of embedding records with parsed embedding vectors.
         """
         query = self.client.table('webpage_embeddings').select('*').eq(
             'session_id', str(session_id)
@@ -194,6 +194,13 @@ class WebPageEmbeddingDB:
             query = query.eq('site_type', site_type)
 
         result = query.execute()
+
+        # Parse embedding vectors if they're returned as strings
+        import json
+        for record in result.data:
+            if 'embedding' in record and isinstance(record['embedding'], str):
+                record['embedding'] = json.loads(record['embedding'])
+
         return result.data
 
 

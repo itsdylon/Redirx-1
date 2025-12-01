@@ -15,7 +15,7 @@ class Pipeline:
     Returns the default pipeline.
     """
     @classmethod
-    def default_pipeline() -> list[stages.Stage]:
+    def default_pipeline(cls) -> list[stages.Stage]:
         return [
             stages.UrlPruneStage(),
             stages.WebScraperStage(),

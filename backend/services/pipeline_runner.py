@@ -30,6 +30,9 @@ def run_pipeline(old_csv_file, new_csv_file):
 
     old_pages, new_pages, mappings = asyncio.run(_run_async())
 
-    session_id = old_pages[0].session_id
+    if hasattr(pipeline._Pipeline__stages[2], "session_id"):
+        session_id = pipeline._Pipeline__stages[2].session_id
+    else:
+        session_id = None
 
     return session_id

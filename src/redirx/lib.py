@@ -21,7 +21,7 @@ class Pipeline:
             stages.WebScraperStage(),
             stages.HtmlPruneStage(),
             stages.EmbedStage(),
-            stages.PairingStage(),
+            #stages.PairingStage(),
         ]
     
     """

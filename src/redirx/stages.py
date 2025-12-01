@@ -22,15 +22,77 @@ class Stage:
 # =========================
 
 class UrlPruneStage(Stage):
+    """
+    Filters out non-HTML URLs (assets like CSS, JS, images, etc.).
+    Only allows HTML pages and URLs without file extensions.
+    """
+
+    # File extensions that should be filtered out
+    BLOCKED_EXTENSIONS = {
+        '.css', '.js', '.json', '.xml',  # Web assets
+        '.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico', '.webp',  # Images
+        '.woff', '.woff2', '.ttf', '.eot', '.otf',  # Fonts
+        '.pdf', '.zip', '.tar', '.gz', '.rar',  # Documents/Archives
+        '.mp4', '.mp3', '.avi', '.mov', '.wav',  # Media
+        '.txt', '.csv', '.log',  # Data files
+    }
+
     def __init__(self):
         super().__init__()
 
     @staticmethod
-    def _sanitizer(url: str):
-        # TODO: add real rules
-        return True
+    def _sanitizer(url: str) -> bool:
+        """
+        Determine if a URL should be included in processing.
+
+        Args:
+            url: The URL to check
+
+        Returns:
+            True if URL should be processed (is HTML or no extension)
+            False if URL should be filtered out (is an asset file)
+        """
+        # Extract path from URL (handle both full URLs and paths)
+        from urllib.parse import urlparse
+
+        try:
+            parsed = urlparse(url)
+            path = parsed.path
+
+            # Get the file extension
+            if '.' in path:
+                # Get the last part after the last dot
+                extension = '.' + path.rsplit('.', 1)[-1].lower()
+
+                # Filter out if extension is in blocked list
+                if extension in UrlPruneStage.BLOCKED_EXTENSIONS:
+                    return False
+
+            # Allow HTML files explicitly
+            if path.endswith('.html') or path.endswith('.htm'):
+                return True
+
+            # Allow URLs without file extensions (likely pages)
+            if '.' not in path.split('/')[-1]:
+                return True
+
+            # Allow other cases (e.g., .html, .php, etc.)
+            return True
+
+        except Exception:
+            # If parsing fails, allow it (be permissive on errors)
+            return True
 
     async def execute(self, input: tuple[list[str], list[str]]) -> tuple[list[str], list[str]]:
+        """
+        Filter URLs to remove asset files.
+
+        Args:
+            input: Tuple of (old_urls, new_urls)
+
+        Returns:
+            Tuple of (filtered_old_urls, filtered_new_urls)
+        """
         raw_old_urls, raw_new_urls = input
 
         sanitized_old_urls = [url for url in raw_old_urls if UrlPruneStage._sanitizer(url)]
@@ -40,18 +102,190 @@ class UrlPruneStage(Stage):
 
 
 # =========================
+# Blog Prune Stage
+# =========================
+
+class BlogPruneStage(Stage):
+    """
+    Filters out individual blog posts from old site.
+    Keeps blog landing pages like /blog, /blogs/index.html, /news/index.html.
+
+    This stage runs BEFORE scraping to avoid wasting HTTP requests on pages
+    we don't want to redirect (individual blog posts should not be redirected for SEO).
+    """
+
+    def __init__(self):
+        super().__init__()
+
+    @staticmethod
+    def _is_blog_post(url: str) -> bool:
+        """
+        Detect if a URL is an individual blog post (not a landing page).
+
+        Patterns for blog posts:
+        - /blog/YYYY-*.html (dated posts)
+        - /blogs/YYYY-*.html (dated posts)
+        - /news/YYYY-*.html (dated news articles)
+        - /blogs/*.html EXCEPT /blogs/index.html
+        - /blog/*.html EXCEPT /blog/index.html
+
+        Keep landing pages:
+        - /blog (no file)
+        - /blogs/index.html
+        - /news/index.html
+        """
+        from urllib.parse import urlparse
+        import re
+
+        try:
+            parsed = urlparse(url)
+            path = parsed.path.lower()
+
+            # Keep landing pages explicitly
+            if path.endswith('/blog') or path.endswith('/blogs') or path.endswith('/news'):
+                return False
+            if path.endswith('/index.html') and ('/blog' in path or '/news' in path):
+                return False
+
+            # Detect dated blog posts (YYYY-MM-title or YYYY-title)
+            if re.search(r'/(blogs?|news)/\d{4}-', path):
+                return True
+
+            # Detect individual posts in blog/news directories (but not index)
+            if '/blog/' in path and not path.endswith('/index.html'):
+                if path.endswith('.html') or path.endswith('.htm'):
+                    return True
+            if '/news/' in path and not path.endswith('/index.html'):
+                if path.endswith('.html') or path.endswith('.htm'):
+                    return True
+
+            return False
+
+        except Exception:
+            # If parsing fails, keep it (be permissive on errors)
+            return False
+
+    async def execute(self, input: tuple[list[str], list[str]]) -> tuple[list[str], list[str]]:
+        """
+        Filter blog posts from old URLs.
+
+        Args:
+            input: Tuple of (old_urls, new_urls)
+
+        Returns:
+            Tuple of (filtered_old_urls, new_urls) - new_urls unchanged
+        """
+        old_urls, new_urls = input
+
+        # Filter blog posts from old site only
+        filtered_old_urls = [url for url in old_urls if not self._is_blog_post(url)]
+        removed_count = len(old_urls) - len(filtered_old_urls)
+
+        if removed_count > 0:
+            print(f"\nBlogPruneStage: Filtered {removed_count} individual blog posts from old site")
+            print(f"BlogPruneStage: Kept {len(filtered_old_urls)} old URLs")
+
+        return (filtered_old_urls, new_urls)
+
+
+# =========================
+# Exact URL Match Stage
+# =========================
+
+class ExactUrlMatchStage(Stage):
+    """
+    Matches URLs with identical paths (ignoring domain).
+    Runs BEFORE scraping to avoid wasting HTTP requests on obvious matches.
+
+    Example: http://old.com/products/index.html → http://new.com/products/index.html
+    """
+
+    def __init__(self, session_id: Optional[UUID] = None):
+        super().__init__()
+        self.session_id = session_id
+        self.mapping_db = URLMappingDB() if session_id else None
+
+    @staticmethod
+    def _get_path(url: str) -> str:
+        """Extract path from URL (ignoring domain)."""
+        from urllib.parse import urlparse
+        try:
+            parsed = urlparse(url)
+            return parsed.path
+        except Exception:
+            return url
+
+    async def execute(self, input: tuple[list[str], list[str]]) -> tuple[list[str], list[str]]:
+        """
+        Find and remove exact URL path matches.
+
+        Args:
+            input: Tuple of (old_urls, new_urls)
+
+        Returns:
+            Tuple of (unmatched_old_urls, unmatched_new_urls)
+
+        Note: Exact matches are inserted directly to the database via PairingStage later
+        """
+        old_urls, new_urls = input
+
+        print(f"\nExactUrlMatchStage: Checking {len(old_urls)} old vs {len(new_urls)} new URLs for exact path matches...")
+
+        # Build map of path -> new URL
+        new_url_map = {self._get_path(url): url for url in new_urls}
+
+        matched_pairs = []
+        unmatched_old = []
+        matched_new_paths = set()
+
+        for old_url in old_urls:
+            old_path = self._get_path(old_url)
+            if old_path in new_url_map:
+                new_url = new_url_map[old_path]
+                matched_pairs.append((old_url, new_url))
+                matched_new_paths.add(old_path)
+                print(f"✓ ExactUrlMatchStage: {old_path}")
+            else:
+                unmatched_old.append(old_url)
+
+        # Remove matched new URLs
+        unmatched_new = [url for url in new_urls if self._get_path(url) not in matched_new_paths]
+
+        print(f"ExactUrlMatchStage: Found {len(matched_pairs)} exact URL matches")
+        print(f"ExactUrlMatchStage: {len(unmatched_old)} old + {len(unmatched_new)} new URLs remain for scraping")
+
+        # Store exact matches to database if session_id is set
+        if self.session_id and self.mapping_db and matched_pairs:
+            print(f"ExactUrlMatchStage: Inserting {len(matched_pairs)} exact matches to database...")
+            for old_url, new_url in matched_pairs:
+                self.mapping_db.insert_mapping(
+                    session_id=self.session_id,
+                    old_url=old_url,
+                    new_url=new_url,
+                    confidence_score=1.0,
+                    match_type='exact_url',
+                    needs_review=False
+                )
+
+        return (unmatched_old, unmatched_new)
+
+
+# =========================
 # Web Scraper Stage
 # =========================
 
 class WebScraperStage(Stage):
+    """
+    Scrapes all URLs for their HTML content with comprehensive logging.
+    """
+
     def __init__(self):
         super().__init__()
 
-    """
-    Scrapes all URLs for their HTML content.
-    """
     async def execute(self, input: tuple[list[str], list[str]]) -> tuple[list[WebPage], list[WebPage]]:
         old_urls, new_urls = input
+
+        print(f"\nWebScraperStage: Scraping {len(old_urls)} old + {len(new_urls)} new URLs...")
 
         async with aiohttp.ClientSession() as session:
 
@@ -72,6 +306,37 @@ class WebScraperStage(Stage):
             old_webpages = old_task.result()
             new_webpages = new_task.result()
 
+        # Log scraping results
+        old_success = sum(1 for p in old_webpages if len(p.html) > 0)
+        old_failed = len(old_webpages) - old_success
+        new_success = sum(1 for p in new_webpages if len(p.html) > 0)
+        new_failed = len(new_webpages) - new_success
+
+        print(f"WebScraperStage: Old site - {old_success} succeeded, {old_failed} failed")
+        print(f"WebScraperStage: New site - {new_success} succeeded, {new_failed} failed")
+
+        # Log pages with empty HTML (scraping failures)
+        if old_failed > 0:
+            print(f"⚠️  WebScraperStage: Failed to scrape {old_failed} old pages:")
+            for page in old_webpages:
+                if len(page.html) == 0:
+                    print(f"   - {page.url}")
+
+        if new_failed > 0:
+            print(f"⚠️  WebScraperStage: Failed to scrape {new_failed} new pages:")
+            for page in new_webpages:
+                if len(page.html) == 0:
+                    print(f"   - {page.url}")
+
+        # Log HTML sizes for successful scrapes
+        if old_success > 0:
+            avg_old_size = sum(len(p.html) for p in old_webpages if len(p.html) > 0) / old_success
+            print(f"WebScraperStage: Old pages avg HTML size: {int(avg_old_size)} bytes")
+
+        if new_success > 0:
+            avg_new_size = sum(len(p.html) for p in new_webpages if len(p.html) > 0) / new_success
+            print(f"WebScraperStage: New pages avg HTML size: {int(avg_new_size)} bytes")
+
         return (old_webpages, new_webpages)
 
 # =========================
@@ -79,6 +344,14 @@ class WebScraperStage(Stage):
 # =========================
 
 class HtmlPruneStage(Stage):
+    """
+    Matches pages with identical HTML content.
+    Skips pages with empty or very short HTML to avoid false matches from scraping failures.
+    """
+
+    # Minimum HTML length to consider for matching (bytes)
+    MIN_HTML_LENGTH = 100
+
     def __init__(self):
         super().__init__()
 
@@ -88,20 +361,44 @@ class HtmlPruneStage(Stage):
     ) -> tuple[list[WebPage], list[WebPage], set[Mapping]]:
 
         old_pages, new_pages = input
-        new_page_map = {hash(page): page for page in new_pages}
-        mappings = set()
 
-        for page in old_pages:
-            if hash(page) in new_page_set:
+        # Filter out pages with empty/short HTML
+        valid_new_pages = [p for p in new_pages if len(p.html) >= self.MIN_HTML_LENGTH]
+        valid_old_pages = [p for p in old_pages if len(p.html) >= self.MIN_HTML_LENGTH]
+
+        # Log filtering
+        skipped_old = len(old_pages) - len(valid_old_pages)
+        skipped_new = len(new_pages) - len(valid_new_pages)
+        if skipped_old > 0 or skipped_new > 0:
+            print(f"⚠️  HtmlPruneStage: Skipped {skipped_old} old + {skipped_new} new pages with HTML < {self.MIN_HTML_LENGTH} bytes")
+
+        # Build hash map of valid new pages
+        new_page_map = {hash(page): page for page in valid_new_pages}
+
+        # Check for hash collisions (suspicious if many pages have same hash)
+        if len(new_page_map) < len(valid_new_pages):
+            collision_count = len(valid_new_pages) - len(new_page_map)
+            print(f"⚠️  HtmlPruneStage: {collision_count} hash collisions detected - some new pages have identical HTML")
+
+        mappings = set()
+        matched_new_hashes = set()
+
+        for page in valid_old_pages:
+            page_hash = hash(page)
+            if page_hash in new_page_map and page_hash not in matched_new_hashes:
                 # Exact HTML match - highest confidence, no review needed
+                new_page = new_page_map[page_hash]
                 mappings.add(Mapping(
                     old_page=page,
-                    new_page=new_page_set[hash(page)],
+                    new_page=new_page,
                     confidence_score=1.0,
                     match_type='exact_html',
                     needs_review=False
                 ))
+                matched_new_hashes.add(page_hash)
+                print(f"✓ HtmlPruneStage: Exact HTML match - {page.url} → {new_page.url}")
 
+        print(f"HtmlPruneStage: Found {len(mappings)} exact HTML matches")
         return (old_pages, new_pages, mappings)
 
 
@@ -505,11 +802,33 @@ class WebPage:
 
     @staticmethod
     async def scrape(session: aiohttp.ClientSession, url: str) -> WebPage:
-        async with session.get(url) as response:
-            if response.status == 200:
-                html = await response.text()
-            else:
-                html = ""
+        """
+        Scrape a URL and return a WebPage object.
+
+        Args:
+            session: aiohttp ClientSession for making requests
+            url: URL to scrape
+
+        Returns:
+            WebPage object with URL and HTML content (empty if scraping fails)
+        """
+        try:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=30)) as response:
+                if response.status == 200:
+                    html = await response.text()
+                else:
+                    print(f"Warning: Failed to scrape {url} - Status {response.status}")
+                    html = ""
+        except aiohttp.ClientError as e:
+            print(f"Warning: Connection error scraping {url}: {e}")
+            html = ""
+        except asyncio.TimeoutError:
+            print(f"Warning: Timeout scraping {url}")
+            html = ""
+        except Exception as e:
+            print(f"Warning: Unexpected error scraping {url}: {e}")
+            html = ""
+
         return WebPage(url, html)
 
     def extract_text(self) -> str:
@@ -564,6 +883,19 @@ class WebPage:
             return ""
 
     def __hash__(self):
+        """
+        Hash based on HTML content for detecting duplicate content across different URLs.
+        Note: Empty or very short HTML is filtered out before hashing in HtmlPruneStage.
+        """
         if self.__html_cache is None:
             self.__html_cache = hash(self.html)
         return self.__html_cache
+
+    def __eq__(self, other):
+        """
+        Equality based on HTML content.
+        This allows detecting renamed pages with identical content.
+        """
+        if not isinstance(other, WebPage):
+            return False
+        return self.html == other.html

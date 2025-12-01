@@ -1,10 +1,14 @@
 import sys
 import os
 
+# Get the absolute path to the project root
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 SRC_DIR = os.path.join(BASE_DIR, "src")
 REDIRX_DIR = os.path.join(SRC_DIR, "redirx")
+BACKEND_DIR = os.path.dirname(__file__)
 
+# Add directories to Python path
+sys.path.insert(0, BASE_DIR)  # Add project root so 'backend' module is found
 sys.path.insert(0, SRC_DIR)
 sys.path.insert(0, REDIRX_DIR)
 

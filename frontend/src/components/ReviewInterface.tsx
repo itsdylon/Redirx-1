@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Header } from './Header';
 import { StatsSidebar } from './StatsSidebar';
 import { ReviewToolbar } from './ReviewToolbar';
@@ -8,6 +8,7 @@ import { ExportModal } from './ExportModal';
 import { Button } from './ui/button';
 import { ArrowLeft } from 'lucide-react';
 import { toast } from 'sonner@2.0.3';
+import { getResults } from '../api/pipeline';
 import {
   Pagination,
   PaginationContent,
@@ -38,94 +39,14 @@ export interface RedirectMapping {
   contentSimilarity: number;
 }
 
-const mockData: RedirectMapping[] = [
-  {
-    id: '1',
-    oldUrl: '/products/widget-pro-2023',
-    newUrl: '/shop/widget-pro-2024',
-    confidence: 92,
-    confidenceBand: 'high',
-    matchScore: 92,
-    approved: false,
-    warnings: [],
-    pathSimilarity: 88,
-    titleSimilarity: 95,
-    contentSimilarity: 93,
-  },
-  {
-    id: '2',
-    oldUrl: '/blog/how-to-install-widgets',
-    newUrl: '/resources/widget-installation-guide',
-    confidence: 78,
-    confidenceBand: 'medium',
-    matchScore: 78,
-    approved: false,
-    warnings: ['near-tie'],
-    pathSimilarity: 65,
-    titleSimilarity: 82,
-    contentSimilarity: 87,
-  },
-  {
-    id: '3',
-    oldUrl: '/about/team',
-    newUrl: '/company/our-team',
-    confidence: 95,
-    confidenceBand: 'high',
-    matchScore: 95,
-    approved: true,
-    warnings: [],
-    pathSimilarity: 92,
-    titleSimilarity: 98,
-    contentSimilarity: 95,
-  },
-  {
-    id: '4',
-    oldUrl: '/contact-us',
-    newUrl: '/get-in-touch',
-    confidence: 52,
-    confidenceBand: 'low',
-    matchScore: 52,
-    approved: false,
-    warnings: ['duplicate-target', 'invalid-target'],
-    pathSimilarity: 45,
-    titleSimilarity: 58,
-    contentSimilarity: 53,
-  },
-  {
-    id: '5',
-    oldUrl: '/services/consulting',
-    newUrl: '/solutions/expert-consulting',
-    confidence: 88,
-    confidenceBand: 'high',
-    matchScore: 88,
-    approved: false,
-    warnings: [],
-    pathSimilarity: 85,
-    titleSimilarity: 90,
-    contentSimilarity: 89,
-  },
-  {
-    id: '6',
-    oldUrl: '/pricing/enterprise',
-    newUrl: '/plans/business',
-    confidence: 67,
-    confidenceBand: 'medium',
-    matchScore: 67,
-    approved: false,
-    warnings: ['near-tie'],
-    pathSimilarity: 62,
-    titleSimilarity: 71,
-    contentSimilarity: 68,
-  },
-];
-
 interface ReviewInterfaceProps {
+  sessionId: string | null;
   onBackToUpload: () => void;
   onNavigate: (view: 'dashboard' | 'upload' | 'review') => void;
 }
 
-export function ReviewInterface({ onBackToUpload, onNavigate }: ReviewInterfaceProps) {
-  const [redirects, setRedirects] = useState<RedirectMapping[]>(mockData);
+export function ReviewInterface({ sessionId, onBackToUpload, onNavigate }: ReviewInterfaceProps) {
+  const [redirects, setRedirects] = useState<RedirectMapping[]>([]);
   const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
   const [expandedRow, setExpandedRow] = useState<string | null>(null);
   const [editingRow, setEditingRow] = useState<RedirectMapping | null>(null);
@@ -133,6 +54,38 @@ export function ReviewInterface({ onBackToUpload, onNavigate }: ReviewInterfaceP
   const [confidenceFilter, setConfidenceFilter] = useState<string>('all');
   const [currentPage, setCurrentPage] = useState(1);
   const [exportModalOpen, setExportModalOpen] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  // Fetch results from backend when sessionId is available
+  useEffect(() => {
+    async function fetchResults() {
+      if (!sessionId) {
+        setError("No session ID provided");
+        setIsLoading(false);
+        return;
+      }
+
+      try {
+        setIsLoading(true);
+        setError(null);
+        const data = await getResults(sessionId);
+
+        if (data.success && data.mappings) {
+          setRedirects(data.mappings);
+        } else {
+          setError("Failed to load results");
+        }
+      } catch (err) {
+        console.error("Error fetching results:", err);
+        setError(err instanceof Error ? err.message : "Failed to fetch results");
+      } finally {
+        setIsLoading(false);
+      }
+    }
+
+    fetchResults();
+  }, [sessionId]);
 
   const handleToggleSelect = (id: string) => {
     const newSelected = new Set(selectedRows);
@@ -199,8 +152,42 @@ export function ReviewInterface({ onBackToUpload, onNavigate }: ReviewInterfaceP
     medium: redirects.filter(r => r.confidenceBand === 'medium').length,
     low: redirects.filter(r => r.confidenceBand === 'low').length,
     approved: redirects.filter(r => r.approved).length,
-    approvalProgress: Math.round((redirects.filter(r => r.approved).length / redirects.length) * 100),
+    approvalProgress: redirects.length > 0 ? Math.round((redirects.filter(r => r.approved).length / redirects.length) * 100) : 0,
   };
+
+  // Show loading state
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-gray-50">
+        <Header currentView="review" onNavigate={onNavigate} />
+        <div className="flex items-center justify-center h-screen">
+          <div className="text-center">
+            <div className="text-lg font-medium text-gray-900 mb-2">Loading results...</div>
+            <div className="text-sm text-gray-600">Fetching your redirect mappings</div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Show error state
+  if (error) {
+    return (
+      <div className="min-h-screen bg-gray-50">
+        <Header currentView="review" onNavigate={onNavigate} />
+        <div className="flex items-center justify-center h-screen">
+          <div className="text-center">
+            <div className="text-lg font-medium text-red-600 mb-2">Error Loading Results</div>
+            <div className="text-sm text-gray-600 mb-4">{error}</div>
+            <Button onClick={onBackToUpload}>
+              <ArrowLeft className="h-4 w-4 mr-2" />
+              Back to Dashboard
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gray-50">

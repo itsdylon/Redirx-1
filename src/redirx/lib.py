@@ -30,9 +30,18 @@ class Pipeline:
     Returns the default pipeline.
     """
     @classmethod
-    def default_pipeline(session_id: Optional[UUID] = None) -> list[stages.Stage]:
+    def default_pipeline(cls, session_id: Optional[UUID] = None) -> list[stages.Stage]:
         """
         Create the default pipeline with optional session ID.
+
+        Pipeline stages (in order):
+        1. UrlPruneStage - Filter out assets (.css, .js, images, etc.)
+        2. BlogPruneStage - Filter individual blog posts (keep landing pages)
+        3. ExactUrlMatchStage - Match identical URL paths (before scraping)
+        4. WebScraperStage - Scrape remaining HTML content
+        5. HtmlPruneStage - Match pages with identical HTML
+        6. EmbedStage - Generate vector embeddings
+        7. PairingStage - Semantic matching via vector similarity
 
         Args:
             session_id: Migration session ID for database operations.
@@ -42,6 +51,8 @@ class Pipeline:
         """
         return [
             stages.UrlPruneStage(),
+            stages.BlogPruneStage(),
+            stages.ExactUrlMatchStage(session_id=session_id),
             stages.WebScraperStage(),
             stages.HtmlPruneStage(),
             stages.EmbedStage(session_id=session_id),

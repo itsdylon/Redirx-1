@@ -27,6 +27,9 @@ export default function App() {
   const [oldCsvFile, setOldCsvFile] = useState<File | null>(null);
   const [newCsvFile, setNewCsvFile] = useState<File | null>(null);
 
+  // Store session_id from pipeline response
+  const [sessionId, setSessionId] = useState<string | null>(null);
+
   const handleFileUpload = (file: File, type: 'old' | 'new') => {
   const reader = new FileReader();
   reader.onload = (e) => {
@@ -64,8 +67,10 @@ export default function App() {
 
     console.log("Pipeline Response:", result);
 
-    // TODO: store session ID if you need it
-    // setSessionId(result.session_id);
+    // Store session ID for fetching results
+    if (result.session_id) {
+      setSessionId(result.session_id);
+    }
 
     setViewState('review');
   } catch (error) {
@@ -112,8 +117,9 @@ export default function App() {
   if (viewState === 'review') {
     return (
       <>
-        <ReviewInterface 
-          onBackToUpload={() => setViewState('dashboard')} 
+        <ReviewInterface
+          sessionId={sessionId}
+          onBackToUpload={() => setViewState('dashboard')}
           onNavigate={handleNavigate}
         />
         <Toaster position="top-right" />

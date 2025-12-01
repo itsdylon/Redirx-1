@@ -14,3 +14,16 @@ export async function uploadCSVs(oldFile: File, newFile: File) {
 
   return await response.json();
 }
+
+export async function getResults(sessionId: string) {
+  const response = await fetch(
+    `http://127.0.0.1:5001/api/results/${sessionId}`,
+    { method: "GET" }
+  );
+
+  if (!response.ok) {
+    throw new Error(`Failed to fetch results: ${response.status}`);
+  }
+
+  return await response.json();
+}

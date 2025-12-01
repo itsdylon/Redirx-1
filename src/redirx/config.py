@@ -24,8 +24,9 @@ class Config:
     EMBEDDING_DIMENSION: int = int(os.getenv('EMBEDDING_DIMENSION', '1536'))
 
     # Matching Thresholds
-    HIGH_CONFIDENCE_THRESHOLD: float = float(os.getenv('HIGH_CONFIDENCE_THRESHOLD', '0.8'))
-    MEDIUM_CONFIDENCE_THRESHOLD: float = float(os.getenv('MEDIUM_CONFIDENCE_THRESHOLD', '0.6'))
+    # HIGH = 0.9+, MEDIUM = 0.85-0.9, LOW = 0.7-0.85, < 0.7 = rejected (orphaned)
+    HIGH_CONFIDENCE_THRESHOLD: float = float(os.getenv('HIGH_CONFIDENCE_THRESHOLD', '0.85'))
+    MEDIUM_CONFIDENCE_THRESHOLD: float = float(os.getenv('MEDIUM_CONFIDENCE_THRESHOLD', '0.7'))
     AMBIGUITY_GAP_THRESHOLD: float = float(os.getenv('AMBIGUITY_GAP_THRESHOLD', '0.1'))
 
     @classmethod

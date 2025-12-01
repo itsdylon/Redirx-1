@@ -207,11 +207,27 @@ class ExactUrlMatchStage(Stage):
 
     @staticmethod
     def _get_path(url: str) -> str:
-        """Extract path from URL (ignoring domain)."""
+        """Extract and normalize path from URL (ignoring domain)."""
         from urllib.parse import urlparse
         try:
             parsed = urlparse(url)
-            return parsed.path
+            path = parsed.path
+
+            # Normalize root path variants: /, /index.html, /index.htm all become "/"
+            if path in ['/', '/index.html', '/index.htm']:
+                return '/'
+
+            # Remove trailing /index.html or /index.htm from other paths
+            if path.endswith('/index.html'):
+                path = path[:-11]  # Remove /index.html
+            elif path.endswith('/index.htm'):
+                path = path[:-10]  # Remove /index.htm
+
+            # Ensure path starts with /
+            if not path.startswith('/'):
+                path = '/' + path
+
+            return path
         except Exception:
             return url
 
@@ -231,17 +247,43 @@ class ExactUrlMatchStage(Stage):
 
         print(f"\nExactUrlMatchStage: Checking {len(old_urls)} old vs {len(new_urls)} new URLs for exact path matches...")
 
-        # Build map of path -> new URL
-        new_url_map = {self._get_path(url): url for url in new_urls}
+        # Deduplicate old URLs by normalized path (prefer shorter/cleaner URLs)
+        # e.g., if both "/" and "/index.html" exist, keep only "/"
+        old_url_by_path = {}
+        for url in old_urls:
+            path = self._get_path(url)
+            if path not in old_url_by_path:
+                old_url_by_path[path] = url
+            else:
+                # Prefer shorter URL (/ over /index.html)
+                if len(url) < len(old_url_by_path[path]):
+                    old_url_by_path[path] = url
+
+        # Build map of path -> new URL (also deduplicated)
+        new_url_by_path = {}
+        for url in new_urls:
+            path = self._get_path(url)
+            if path not in new_url_by_path:
+                new_url_by_path[path] = url
+            else:
+                # Prefer shorter URL
+                if len(url) < len(new_url_by_path[path]):
+                    new_url_by_path[path] = url
 
         matched_pairs = []
         unmatched_old = []
         matched_new_paths = set()
+        root_paths_skipped = 0
 
-        for old_url in old_urls:
-            old_path = self._get_path(old_url)
-            if old_path in new_url_map:
-                new_url = new_url_map[old_path]
+        for old_path, old_url in old_url_by_path.items():
+            # Skip root paths - homepage always exists on both sites, no redirect needed
+            if old_path == '/':
+                root_paths_skipped += 1
+                unmatched_old.append(old_url)
+                continue
+
+            if old_path in new_url_by_path:
+                new_url = new_url_by_path[old_path]
                 matched_pairs.append((old_url, new_url))
                 matched_new_paths.add(old_path)
                 print(f"✓ ExactUrlMatchStage: {old_path}")
@@ -250,6 +292,13 @@ class ExactUrlMatchStage(Stage):
 
         # Remove matched new URLs
         unmatched_new = [url for url in new_urls if self._get_path(url) not in matched_new_paths]
+
+        duplicates_removed = len(old_urls) - len(old_url_by_path)
+        if duplicates_removed > 0:
+            print(f"ExactUrlMatchStage: Deduplicated {duplicates_removed} old URL variants (e.g., / and /index.html)")
+
+        if root_paths_skipped > 0:
+            print(f"ℹ️  ExactUrlMatchStage: Skipped {root_paths_skipped} root path(s) - homepage doesn't need redirect")
 
         print(f"ExactUrlMatchStage: Found {len(matched_pairs)} exact URL matches")
         print(f"ExactUrlMatchStage: {len(unmatched_old)} old + {len(unmatched_new)} new URLs remain for scraping")
@@ -420,6 +469,29 @@ class EmbedStage(Stage):
     ):
         old_pages, new_pages, mappings = input
 
+        # Filter out pages with empty or very short HTML (scraping failures)
+        MIN_HTML_LENGTH = 100
+        valid_old_pages = [p for p in old_pages if len(p.html) >= MIN_HTML_LENGTH]
+        valid_new_pages = [p for p in new_pages if len(p.html) >= MIN_HTML_LENGTH]
+
+        skipped_old = len(old_pages) - len(valid_old_pages)
+        skipped_new = len(new_pages) - len(valid_new_pages)
+
+        print(f"\nEmbedStage: Filtering pages with HTML < {MIN_HTML_LENGTH} bytes...")
+        if skipped_old > 0:
+            print(f"⚠️  EmbedStage: Skipping {skipped_old} old pages (failed to scrape):")
+            for page in old_pages:
+                if len(page.html) < MIN_HTML_LENGTH:
+                    print(f"   - {page.url}")
+
+        if skipped_new > 0:
+            print(f"⚠️  EmbedStage: Skipping {skipped_new} new pages (failed to scrape):")
+            for page in new_pages:
+                if len(page.html) < MIN_HTML_LENGTH:
+                    print(f"   - {page.url}")
+
+        print(f"EmbedStage: Generating embeddings for {len(valid_old_pages)} old + {len(valid_new_pages)} new pages...")
+
         # Validate OpenAI config
         Config.validate_embeddings()
 
@@ -431,13 +503,15 @@ class EmbedStage(Stage):
         self.openai_client = AsyncOpenAI(api_key=Config.OPENAI_API_KEY)
 
         try:
-            if old_pages:
-                await self._process_pages(old_pages, "old")
-            if new_pages:
-                await self._process_pages(new_pages, "new")
+            if valid_old_pages:
+                await self._process_pages(valid_old_pages, "old")
+            if valid_new_pages:
+                await self._process_pages(valid_new_pages, "new")
         finally:
             if self.openai_client:
                 await self.openai_client.close()
+
+        print(f"EmbedStage: Successfully generated {len(valid_old_pages) + len(valid_new_pages)} embeddings")
 
         return input
 
@@ -545,6 +619,23 @@ class PairingStage(Stage):
         unmatched_old_pages = [p for p in old_pages if p not in matched_old_pages]
         unmatched_new_pages = [p for p in new_pages if p not in matched_new_pages]
 
+        # Filter out root paths - homepage doesn't need redirect
+        def is_root_path(url: str) -> bool:
+            from urllib.parse import urlparse
+            try:
+                path = urlparse(url).path
+                return path in ['/', '/index.html', '/index.htm']
+            except:
+                return False
+
+        root_pages_old = [p for p in unmatched_old_pages if is_root_path(p.url)]
+        unmatched_old_pages = [p for p in unmatched_old_pages if not is_root_path(p.url)]
+
+        if root_pages_old:
+            print(f"ℹ️  PairingStage: Skipping {len(root_pages_old)} root page(s) - homepage doesn't need redirect")
+            for page in root_pages_old:
+                print(f"   Orphaned: {page.url} (root path)")
+
         print(f"Finding semantic matches for {len(unmatched_old_pages)} unmatched old pages...")
 
         # Process each unmatched old page
@@ -576,10 +667,11 @@ class PairingStage(Stage):
                 match_threshold=0.0  # We'll filter by threshold ourselves
             )
 
-            # Filter out already matched pages
+            # Filter out already matched pages and root paths
             similar_pages = [
                 p for p in similar_pages
                 if not any(p['url'] == matched.url for matched in matched_new_pages)
+                and not is_root_path(p['url'])  # Don't redirect TO root/homepage
             ]
 
             if not similar_pages:
@@ -624,8 +716,8 @@ class PairingStage(Stage):
                     print(f"Matched: {old_page.url} -> {new_page.url} "
                           f"(score: {mapping.confidence_score:.3f}, type: {mapping.match_type}){review_flag}")
 
-        # Identify orphaned pages (old pages with no match)
-        final_orphaned = [p for p in old_pages if p not in matched_old_pages]
+        # Identify orphaned pages (old pages with no match, excluding root paths)
+        final_orphaned = [p for p in old_pages if p not in matched_old_pages and not is_root_path(p.url)]
         if final_orphaned:
             print(f"\nOrphaned pages (no suitable match found):")
             for page in final_orphaned:
@@ -801,33 +893,51 @@ class WebPage:
         self._title = None
 
     @staticmethod
-    async def scrape(session: aiohttp.ClientSession, url: str) -> WebPage:
+    async def scrape(session: aiohttp.ClientSession, url: str, max_retries: int = 3) -> WebPage:
         """
-        Scrape a URL and return a WebPage object.
+        Scrape a URL with retry logic and exponential backoff.
 
         Args:
             session: aiohttp ClientSession for making requests
             url: URL to scrape
+            max_retries: Maximum number of retry attempts (default: 3)
 
         Returns:
             WebPage object with URL and HTML content (empty if scraping fails)
         """
-        try:
-            async with session.get(url, timeout=aiohttp.ClientTimeout(total=30)) as response:
-                if response.status == 200:
-                    html = await response.text()
-                else:
-                    print(f"Warning: Failed to scrape {url} - Status {response.status}")
-                    html = ""
-        except aiohttp.ClientError as e:
-            print(f"Warning: Connection error scraping {url}: {e}")
-            html = ""
-        except asyncio.TimeoutError:
-            print(f"Warning: Timeout scraping {url}")
-            html = ""
-        except Exception as e:
-            print(f"Warning: Unexpected error scraping {url}: {e}")
-            html = ""
+        html = ""
+        last_error = None
+
+        for attempt in range(max_retries):
+            try:
+                # Add small delay between retries (exponential backoff)
+                if attempt > 0:
+                    delay = 0.5 * (2 ** (attempt - 1))  # 0.5s, 1s, 2s
+                    await asyncio.sleep(delay)
+
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=30)) as response:
+                    if response.status == 200:
+                        html = await response.text()
+                        return WebPage(url, html)
+                    else:
+                        last_error = f"Status {response.status}"
+                        if attempt == max_retries - 1:
+                            print(f"Warning: Failed to scrape {url} - {last_error} (after {max_retries} attempts)")
+
+            except aiohttp.ClientError as e:
+                last_error = f"Connection error: {e}"
+                if attempt == max_retries - 1:
+                    print(f"Warning: {last_error} scraping {url} (after {max_retries} attempts)")
+
+            except asyncio.TimeoutError:
+                last_error = "Timeout"
+                if attempt == max_retries - 1:
+                    print(f"Warning: Timeout scraping {url} (after {max_retries} attempts)")
+
+            except Exception as e:
+                last_error = f"Unexpected error: {e}"
+                if attempt == max_retries - 1:
+                    print(f"Warning: {last_error} scraping {url} (after {max_retries} attempts)")
 
         return WebPage(url, html)
 

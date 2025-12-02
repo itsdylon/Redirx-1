@@ -56,6 +56,8 @@ export function ReviewInterface({ sessionId, onBackToUpload, onNavigate }: Revie
   const [exportModalOpen, setExportModalOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [sortOption, setSortOption] = useState<string>('confidence-desc');
+  const PAGE_SIZE = 25;
 
   // Fetch results from backend when sessionId is available
   useEffect(() => {
@@ -112,16 +114,22 @@ export function ReviewInterface({ sessionId, onBackToUpload, onNavigate }: Revie
 
   const handleBulkAction = (action: string) => {
     if (action === 'approve-all-high') {
-      setRedirects(redirects.map(r => 
+      setRedirects(redirects.map((r) =>
         r.confidenceBand === 'high' ? { ...r, approved: true } : r
       ));
     } else if (action === 'approve-selected') {
-      setRedirects(redirects.map(r => 
+      setRedirects(redirects.map((r) =>
         selectedRows.has(r.id) ? { ...r, approved: true } : r
+      ));
+      setSelectedRows(new Set());
+    } else if (action === 'reject-selected') {
+      setRedirects(redirects.map((r) =>
+        selectedRows.has(r.id) ? { ...r, approved: false } : r
       ));
       setSelectedRows(new Set());
     }
   };
+  
 
   const handleExport = (format: string, confidenceLevels: string[]) => {
     // Generate filename
@@ -145,6 +153,47 @@ export function ReviewInterface({ sessionId, onBackToUpload, onNavigate }: Revie
       duration: 3000,
     });
   };
+
+  const handleApproveRow = (id: string) => {
+    setRedirects(redirects.map((r) =>
+      r.id === id ? { ...r, approved: true } : r
+    ));
+  };
+
+  const filteredRedirects = redirects.filter((r) => {
+    const q = searchQuery.trim().toLowerCase();
+  
+    const matchesSearch =
+      q.length === 0 ||
+      r.oldUrl.toLowerCase().includes(q) ||
+      r.newUrl.toLowerCase().includes(q);
+  
+    const matchesConfidence =
+      confidenceFilter === 'all' || r.confidenceBand === confidenceFilter;
+  
+    return matchesSearch && matchesConfidence;
+  });
+  
+  // Sort according to toolbar selection
+  const sortedRedirects = [...filteredRedirects].sort((a, b) => {
+    switch (sortOption) {
+      case 'confidence-asc':
+        return a.matchScore - b.matchScore;
+      case 'url-asc':
+        return a.oldUrl.localeCompare(b.oldUrl);
+      case 'warnings':
+        return (b.warnings?.length ?? 0) - (a.warnings?.length ?? 0);
+      case 'confidence-desc':
+      default:
+        return b.matchScore - a.matchScore;
+    }
+  });
+  
+  // Pagination
+  const totalPages = Math.max(1, Math.ceil(sortedRedirects.length / PAGE_SIZE));
+  const currentPageSafe = Math.min(currentPage, totalPages);
+  const startIndex = (currentPageSafe - 1) * PAGE_SIZE;
+  const pageRedirects = sortedRedirects.slice(startIndex, startIndex + PAGE_SIZE);
 
   const stats = {
     total: redirects.length,
@@ -213,19 +262,23 @@ export function ReviewInterface({ sessionId, onBackToUpload, onNavigate }: Revie
             onSearchChange={setSearchQuery}
             confidenceFilter={confidenceFilter}
             onConfidenceFilterChange={setConfidenceFilter}
+            sortOption={sortOption}
+            onSortChange={setSortOption}
             onExportClick={() => setExportModalOpen(true)}
           />
 
           {/* Table */}
           <div className="mt-6">
-            <RedirectTable
-              redirects={redirects}
-              selectedRows={selectedRows}
-              expandedRow={expandedRow}
-              onToggleSelect={handleToggleSelect}
-              onToggleExpand={handleToggleExpand}
-              onEdit={handleEdit}
-            />
+          <RedirectTable
+            redirects={pageRedirects}
+            selectedRows={selectedRows}
+            expandedRow={expandedRow}
+            onToggleSelect={handleToggleSelect}
+            onToggleExpand={handleToggleExpand}
+            onEdit={handleEdit}
+            onApprove={handleApproveRow}
+          />
+
           </div>
 
           {/* Bottom Controls */}
@@ -251,20 +304,46 @@ export function ReviewInterface({ sessionId, onBackToUpload, onNavigate }: Revie
 
             <Pagination>
               <PaginationContent>
+                {/* Previous */}
                 <PaginationItem>
-                  <PaginationPrevious href="#" />
+                  <PaginationPrevious
+                    href="#"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      if (currentPageSafe > 1) {
+                        setCurrentPage(currentPageSafe - 1);
+                      }
+                    }}
+                  />
                 </PaginationItem>
+
+                {/* Page numbers */}
+                {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => (
+                  <PaginationItem key={page}>
+                    <PaginationLink
+                      href="#"
+                      isActive={page === currentPageSafe}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        setCurrentPage(page);
+                      }}
+                    >
+                      {page}
+                    </PaginationLink>
+                  </PaginationItem>
+                ))}
+
+                {/* Next */}
                 <PaginationItem>
-                  <PaginationLink href="#" isActive>1</PaginationLink>
-                </PaginationItem>
-                <PaginationItem>
-                  <PaginationLink href="#">2</PaginationLink>
-                </PaginationItem>
-                <PaginationItem>
-                  <PaginationLink href="#">3</PaginationLink>
-                </PaginationItem>
-                <PaginationItem>
-                  <PaginationNext href="#" />
+                  <PaginationNext
+                    href="#"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      if (currentPageSafe < totalPages) {
+                        setCurrentPage(currentPageSafe + 1);
+                      }
+                    }}
+                  />
                 </PaginationItem>
               </PaginationContent>
             </Pagination>
@@ -286,6 +365,7 @@ export function ReviewInterface({ sessionId, onBackToUpload, onNavigate }: Revie
         open={exportModalOpen}
         onOpenChange={setExportModalOpen}
         onExport={handleExport}
+        redirects={redirects}
       />
     </div>
   );

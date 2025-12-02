@@ -21,6 +21,7 @@ interface RedirectTableProps {
   onToggleSelect: (id: string) => void;
   onToggleExpand: (id: string) => void;
   onEdit: (redirect: RedirectMapping) => void;
+  onApprove: (id: string) => void;
 }
 
 export function RedirectTable({
@@ -30,6 +31,7 @@ export function RedirectTable({
   onToggleSelect,
   onToggleExpand,
   onEdit,
+  onApprove
 }: RedirectTableProps) {
   const getConfidenceBadge = (band: string) => {
     switch (band) {
@@ -77,7 +79,23 @@ export function RedirectTable({
           <TableRow className="bg-gray-100">
             <TableHead className="w-12"></TableHead>
             <TableHead className="w-12">
-              <Checkbox />
+              <Checkbox
+                checked={
+                  redirects.length > 0 &&
+                  redirects.every((r) => selectedRows.has(r.id))
+                }
+                onCheckedChange={(checked) => {
+                  const shouldSelect = !!checked;
+                  redirects.forEach((r) => {
+                    const isSelected = selectedRows.has(r.id);
+                    if (shouldSelect && !isSelected) {
+                      onToggleSelect(r.id);
+                    } else if (!shouldSelect && isSelected) {
+                      onToggleSelect(r.id);
+                    }
+                  });
+                }}
+              />
             </TableHead>
             <TableHead className="text-gray-900">Old URL</TableHead>
             <TableHead className="text-gray-900">Suggested New URL</TableHead>
@@ -216,13 +234,26 @@ export function RedirectTable({
                       )}
 
                       <div className="mt-4 flex gap-3">
-                        <Button variant="default" size="sm">
+                        <Button
+                          variant="default"
+                          size="sm"
+                          onClick={() => onApprove(redirect.id)}
+                        >
                           Approve Match
                         </Button>
-                        <Button variant="outline" size="sm" onClick={() => onEdit(redirect)}>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => onEdit(redirect)}
+                        >
                           Edit Mapping
                         </Button>
-                        <Button variant="outline" size="sm">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled
+                          title="Alternative matches coming soon"
+                        >
                           View Alternatives
                         </Button>
                       </div>

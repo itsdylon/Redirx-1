@@ -19,90 +19,132 @@ import {
 import { Alert, AlertDescription } from './ui/alert';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from './ui/collapsible';
 import { Separator } from './ui/separator';
-import { AlertTriangle, CheckCircle, ChevronDown, ChevronRight, X } from 'lucide-react';
+import { AlertTriangle, CheckCircle, ChevronDown, ChevronRight } from 'lucide-react';
+import type { RedirectMapping } from './ReviewInterface';
 
 interface ExportModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onExport: (format: string, confidenceLevels: string[]) => void;
+  redirects: RedirectMapping[];
 }
 
-export function ExportModal({ open, onOpenChange, onExport }: ExportModalProps) {
+export function ExportModal({ open, onOpenChange, onExport, redirects }: ExportModalProps) {
   const [format, setFormat] = useState<string>('');
   const [includeHigh, setIncludeHigh] = useState(true);
   const [includeMedium, setIncludeMedium] = useState(true);
   const [includeLow, setIncludeLow] = useState(false);
   const [previewExpanded, setPreviewExpanded] = useState(false);
 
-  // Mock data
-  const totalHigh = 89;
-  const totalMedium = 35;
-  const totalLow = 23;
-  const unapprovedHigh = 3;
-  const duplicateTargets = 2;
+  // Live counts from actual data
+  const totalHigh = redirects.filter((r) => r.confidenceBand === 'high').length;
+  const totalMedium = redirects.filter((r) => r.confidenceBand === 'medium').length;
+  const totalLow = redirects.filter((r) => r.confidenceBand === 'low').length;
 
-  const selectedCount = 
-    (includeHigh ? totalHigh : 0) + 
-    (includeMedium ? totalMedium : 0) + 
-    (includeLow ? totalLow : 0);
+  // Apply confidence filters
+  const filteredRedirects = redirects.filter((r) => {
+    if (r.confidenceBand === 'high' && !includeHigh) return false;
+    if (r.confidenceBand === 'medium' && !includeMedium) return false;
+    if (r.confidenceBand === 'low' && !includeLow) return false;
+    // Only export mappings that actually have a target
+    if (!r.oldUrl || !r.newUrl) return false;
+    return true;
+  });
 
-  const hasWarnings = unapprovedHigh > 0 && includeHigh;
+  const selectedCount = filteredRedirects.length;
+
+  // Warnings: unapproved high-confidence redirects in the export set
+  const unapprovedHigh = filteredRedirects.filter(
+    (r) => r.confidenceBand === 'high' && !r.approved
+  ).length;
+
+  const hasWarnings = unapprovedHigh > 0;
+
+  // Duplicate targets in the export set
+  const duplicateTargets = (() => {
+    const counts = new Map<string, number>();
+    for (const r of filteredRedirects) {
+      const key = r.newUrl;
+      if (!key) continue;
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    let dupCount = 0;
+    counts.forEach((c) => {
+      if (c > 1) dupCount += 1; // number of target URLs that are duplicated
+    });
+    return dupCount;
+  })();
+
   const hasDuplicates = duplicateTargets > 0;
 
-  const getPreviewRules = () => {
-    switch (format) {
+  // Single source of truth for export + preview content
+  const buildExportContent = (fmt: string, rules: RedirectMapping[]): string => {
+    if (!fmt) return 'Select a format to preview rules';
+    if (rules.length === 0) return 'No redirects match the selected confidence levels.';
+    console.log(fmt);
+    switch (fmt) {
       case 'apache':
-        return `# First 3 redirects
-Redirect 301 /old-page-1 /new-page-1
-Redirect 301 /products/item-123 /shop/item-123
-Redirect 301 /about/team /company/team
-
-# ... (${selectedCount - 6} more rules)
-
-# Last 3 redirects
-Redirect 301 /blog/post-456 /articles/post-456
-Redirect 301 /contact-us /contact
-Redirect 301 /services/web /solutions/web`;
+        // .htaccess style: Redirect 301 /old /new
+        // Assumes 301; update if you later track status per rule.
+        return rules
+          .map((r) => `Redirect 301 ${r.oldUrl} ${r.newUrl}`)
+          .join('\n');
 
       case 'nginx':
-        return `# First 3 redirects
-map $uri $new_uri {
-    /old-page-1 /new-page-1;
-    /products/item-123 /shop/item-123;
-    /about/team /company/team;
-
-    # ... (${selectedCount - 6} more rules)
-
-    # Last 3 redirects
-    /blog/post-456 /articles/post-456;
-    /contact-us /contact;
-    /services/web /solutions/web;
-}`;
+        // Nginx map: map $uri $new_uri { /old /new; ... }
+        return [
+          'map $uri $new_uri {',
+          ...rules.map((r) => `    ${r.oldUrl} ${r.newUrl};`),
+          '}',
+        ].join('\n');
 
       case 'wordpress':
-        return `# First 3 redirects
-/old-page-1,/new-page-1,301
-/products/item-123,/shop/item-123,301
-/about/team,/company/team,301
-
-# ... (${selectedCount - 6} more rows)
-
-# Last 3 redirects
-/blog/post-456,/articles/post-456,301
-/contact-us,/contact,301
-/services/web,/solutions/web,301`;
+        // WordPress Redirection CSV: /old,/new,301
+        return rules
+          .map((r) => `${r.oldUrl},${r.newUrl},301`)
+          .join('\n');
 
       default:
         return 'Select a format to preview rules';
     }
   };
 
+  const previewContent = buildExportContent(format, filteredRedirects);
+
   const handleDownload = () => {
+    if (!format || selectedCount === 0) return;
+
     const confidenceLevels: string[] = [];
     if (includeHigh) confidenceLevels.push('high');
     if (includeMedium) confidenceLevels.push('medium');
     if (includeLow) confidenceLevels.push('low');
 
+    // Use the same content as the preview
+    const content = buildExportContent(format, filteredRedirects);
+
+    const fileName =
+      format === 'apache'
+        ? 'redirects.htaccess'
+        : format === 'nginx'
+        ? 'redirects_nginx.conf'
+        : format === 'wordpress'
+        ? 'redirects_wordpress.csv'
+        : 'redirects.txt';
+
+    // Create a blob and trigger a download
+    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+    const url = window.URL.createObjectURL(blob);
+
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = fileName;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+
+    window.URL.revokeObjectURL(url);
+
+    // Still call onExport so your parent can show toasts, analytics, etc.
     onExport(format, confidenceLevels);
     onOpenChange(false);
   };
@@ -144,7 +186,7 @@ map $uri $new_uri {
                 <Checkbox
                   id="high"
                   checked={includeHigh}
-                  onCheckedChange={(checked) => setIncludeHigh(checked as boolean)}
+                  onCheckedChange={(checked) => setIncludeHigh(!!checked)}
                 />
                 <Label htmlFor="high" className="text-gray-900 cursor-pointer">
                   Include High Confidence ({totalHigh} redirects)
@@ -154,7 +196,7 @@ map $uri $new_uri {
                 <Checkbox
                   id="medium"
                   checked={includeMedium}
-                  onCheckedChange={(checked) => setIncludeMedium(checked as boolean)}
+                  onCheckedChange={(checked) => setIncludeMedium(!!checked)}
                 />
                 <Label htmlFor="medium" className="text-gray-900 cursor-pointer">
                   Include Medium Confidence ({totalMedium} redirects)
@@ -164,7 +206,7 @@ map $uri $new_uri {
                 <Checkbox
                   id="low"
                   checked={includeLow}
-                  onCheckedChange={(checked) => setIncludeLow(checked as boolean)}
+                  onCheckedChange={(checked) => setIncludeLow(!!checked)}
                 />
                 <Label htmlFor="low" className="text-gray-900 cursor-pointer">
                   Include Low Confidence ({totalLow} redirects)
@@ -186,7 +228,8 @@ map $uri $new_uri {
             <Alert variant="destructive">
               <AlertTriangle className="h-4 w-4" />
               <AlertDescription>
-                {unapprovedHigh} high-confidence redirects are unapproved. Review or override to continue.
+                {unapprovedHigh} high-confidence redirects in this export are unapproved. Review or
+                override before using in production.
               </AlertDescription>
             </Alert>
           )}
@@ -196,7 +239,8 @@ map $uri $new_uri {
             <Alert className="border-yellow-500 bg-yellow-50">
               <AlertTriangle className="h-4 w-4 text-yellow-600" />
               <AlertDescription className="text-yellow-900">
-                Warning: {duplicateTargets} duplicate target URLs detected.{' '}
+                Warning: {duplicateTargets} target URL
+                {duplicateTargets > 1 ? 's are' : ' is'} used by multiple redirects in this export.{' '}
                 <button className="underline">View Details</button>
               </AlertDescription>
             </Alert>
@@ -214,7 +258,7 @@ map $uri $new_uri {
                   )}
                   <span className="text-gray-900">Preview Rules</span>
                 </div>
-                {format && (
+                {format && selectedCount > 0 && (
                   <CheckCircle className="h-4 w-4 text-green-600" />
                 )}
               </div>
@@ -222,9 +266,11 @@ map $uri $new_uri {
             <CollapsibleContent>
               <div className="border border-gray-300 border-t-0 p-4 bg-gray-50">
                 <div className="bg-white border border-gray-300 p-4 font-mono text-xs overflow-x-auto">
-                  <pre className="text-gray-900 whitespace-pre">{getPreviewRules()}</pre>
+                  <pre className="text-gray-900 whitespace-pre">
+                    {previewContent}
+                  </pre>
                 </div>
-                {format && (
+                {format && selectedCount > 0 && (
                   <div className="flex items-center gap-2 mt-3 text-sm text-green-700">
                     <CheckCircle className="h-4 w-4" />
                     <span>Syntax validation passed</span>

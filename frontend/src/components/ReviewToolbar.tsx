@@ -15,6 +15,8 @@ interface ReviewToolbarProps {
   confidenceFilter: string;
   onConfidenceFilterChange: (filter: string) => void;
   onExportClick: () => void;
+  sortOption: string;
+  onSortChange: (value: string) => void;
 }
 
 export function ReviewToolbar({
@@ -23,6 +25,8 @@ export function ReviewToolbar({
   confidenceFilter,
   onConfidenceFilterChange,
   onExportClick,
+  sortOption,
+  onSortChange,
 }: ReviewToolbarProps) {
   return (
     <div className="bg-white border border-gray-300 p-4 flex items-center gap-4">
@@ -52,7 +56,7 @@ export function ReviewToolbar({
       </Select>
 
       {/* Sort Options */}
-      <Select defaultValue="confidence-desc">
+      <Select value={sortOption} onValueChange={onSortChange}>
         <SelectTrigger className="w-[180px]">
           <SelectValue placeholder="Sort by" />
         </SelectTrigger>

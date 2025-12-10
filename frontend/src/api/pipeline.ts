@@ -1,10 +1,18 @@
+const API_BASE_URL = 'http://127.0.0.1:5001';
+
+function getAuthHeaders(): HeadersInit {
+  const token = localStorage.getItem('access_token');
+  return token ? { 'Authorization': `Bearer ${token}` } : {};
+}
+
 export async function uploadCSVs(oldFile: File, newFile: File) {
   const formData = new FormData();
   formData.append("old_csv", oldFile);
   formData.append("new_csv", newFile);
 
-  const response = await fetch("http://127.0.0.1:5001/api/process", {
+  const response = await fetch(`${API_BASE_URL}/api/process`, {
     method: "POST",
+    headers: getAuthHeaders(),
     body: formData,
   });
 
@@ -17,8 +25,11 @@ export async function uploadCSVs(oldFile: File, newFile: File) {
 
 export async function getResults(sessionId: string) {
   const response = await fetch(
-    `http://127.0.0.1:5001/api/results/${sessionId}`,
-    { method: "GET" }
+    `${API_BASE_URL}/api/results/${sessionId}`,
+    {
+      method: "GET",
+      headers: getAuthHeaders()
+    }
   );
 
   if (!response.ok) {

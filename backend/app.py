@@ -15,12 +15,16 @@ sys.path.insert(0, REDIRX_DIR)
 from flask import Flask
 from flask_cors import CORS
 from backend.routes.pipeline_routes import pipeline_blueprint
+from backend.routes.auth_routes import auth_blueprint
+from backend.routes.user_routes import user_blueprint
 
 def create_app():
     app = Flask(__name__)
     CORS(app)  # allow frontend to call this backend
 
     app.register_blueprint(pipeline_blueprint, url_prefix="/api")
+    app.register_blueprint(auth_blueprint, url_prefix="/api/auth")
+    app.register_blueprint(user_blueprint, url_prefix="/api/user")
 
     @app.route("/")
     def home():

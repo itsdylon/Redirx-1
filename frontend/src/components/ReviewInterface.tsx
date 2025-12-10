@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
 import { Header } from './Header';
 import { StatsSidebar } from './StatsSidebar';
 import { ReviewToolbar } from './ReviewToolbar';
@@ -39,13 +40,9 @@ export interface RedirectMapping {
   contentSimilarity: number;
 }
 
-interface ReviewInterfaceProps {
-  sessionId: string | null;
-  onBackToUpload: () => void;
-  onNavigate: (view: 'dashboard' | 'upload' | 'review') => void;
-}
-
-export function ReviewInterface({ sessionId, onBackToUpload, onNavigate }: ReviewInterfaceProps) {
+export function ReviewInterface() {
+  const { sessionId } = useParams<{ sessionId: string }>();
+  const navigate = useNavigate();
   const [redirects, setRedirects] = useState<RedirectMapping[]>([]);
   const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
   const [expandedRow, setExpandedRow] = useState<string | null>(null);
@@ -208,7 +205,7 @@ export function ReviewInterface({ sessionId, onBackToUpload, onNavigate }: Revie
   if (isLoading) {
     return (
       <div className="min-h-screen bg-gray-50">
-        <Header currentView="review" onNavigate={onNavigate} />
+        <Header currentView="review" />
         <div className="flex items-center justify-center h-screen">
           <div className="text-center">
             <div className="text-lg font-medium text-gray-900 mb-2">Loading results...</div>
@@ -223,12 +220,12 @@ export function ReviewInterface({ sessionId, onBackToUpload, onNavigate }: Revie
   if (error) {
     return (
       <div className="min-h-screen bg-gray-50">
-        <Header currentView="review" onNavigate={onNavigate} />
+        <Header currentView="review" />
         <div className="flex items-center justify-center h-screen">
           <div className="text-center">
             <div className="text-lg font-medium text-red-600 mb-2">Error Loading Results</div>
             <div className="text-sm text-gray-600 mb-4">{error}</div>
-            <Button onClick={onBackToUpload}>
+            <Button onClick={() => navigate('/')}>
               <ArrowLeft className="h-4 w-4 mr-2" />
               Back to Dashboard
             </Button>
@@ -240,7 +237,7 @@ export function ReviewInterface({ sessionId, onBackToUpload, onNavigate }: Revie
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <Header currentView="review" onNavigate={onNavigate} />
+      <Header currentView="review" />
       
       <div className="flex">
         {/* Left Sidebar */}
@@ -250,7 +247,7 @@ export function ReviewInterface({ sessionId, onBackToUpload, onNavigate }: Revie
         <main className="flex-1 p-8">
           {/* Back Button */}
           <div className="mb-4">
-            <Button variant="outline" onClick={onBackToUpload}>
+            <Button variant="outline" onClick={() => navigate('/')}>
               <ArrowLeft className="h-4 w-4 mr-2" />
               Back to Dashboard
             </Button>

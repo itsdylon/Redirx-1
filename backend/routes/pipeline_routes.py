@@ -2,12 +2,14 @@ from flask import Blueprint, request, jsonify
 from uuid import UUID
 from backend.services.pipeline_runner import run_pipeline
 from backend.services.results_formatter import format_results_response
+from backend.services.auth_service import require_auth
 from src.redirx.database import URLMappingDB, MigrationSessionDB
 
 pipeline_blueprint = Blueprint("pipeline", __name__)
 
 
 @pipeline_blueprint.route("/process", methods=["POST"])
+@require_auth
 def process_csv():
     """
     Process old and new site CSV files through the Redirx pipeline.
@@ -15,7 +17,7 @@ def process_csv():
     Expects:
         - old_csv: CSV file with old site URLs (first column)
         - new_csv: CSV file with new site URLs (first column)
-        - user_id (optional): User identifier for tracking
+        - Authorization header with Bearer token
 
     Returns:
         JSON response with session_id or error message
@@ -55,8 +57,8 @@ def process_csv():
             "error": f"new_csv must be a CSV file, got: {new_csv.filename}"
         }), 400
 
-    # Get optional user_id parameter
-    user_id = request.form.get('user_id', 'default_user')
+    # Get user_id from authenticated user
+    user_id = str(request.user.id)
 
     try:
         # Run the pipeline
@@ -104,6 +106,7 @@ def get_results(session_id: str):
             - stats: Aggregate statistics (total, confidence bands, approval)
             - session: Session metadata
     """
+    print(f"DEBUG: get_results called with session_id={session_id}")
     try:
         # Validate session_id is a valid UUID
         try:

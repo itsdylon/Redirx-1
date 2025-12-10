@@ -29,7 +29,19 @@ def create_app():
     @app.route("/")
     def home():
         return "Redirx backend is running!"
-    
+
+    @app.route("/api/debug/routes")
+    def debug_routes():
+        """Debug endpoint to list all registered routes"""
+        routes = []
+        for rule in app.url_map.iter_rules():
+            routes.append({
+                'endpoint': rule.endpoint,
+                'methods': list(rule.methods),
+                'path': str(rule)
+            })
+        return {'routes': sorted(routes, key=lambda x: x['path'])}
+
     return app
 
 if __name__ == "__main__":

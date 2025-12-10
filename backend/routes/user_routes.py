@@ -18,6 +18,80 @@ from redirx.database import MigrationSessionDB
 user_blueprint = Blueprint("user", __name__)
 
 
+@user_blueprint.route("/dashboard", methods=["GET"])
+@require_auth
+def get_dashboard_stats():
+    """
+    Get dashboard overview with aggregate stats for authenticated user.
+
+    Headers:
+        Authorization: Bearer <access_token>
+
+    Response:
+        200: {
+            "success": true,
+            "total_redirects": 1247,
+            "total_sessions": 12,
+            "approval_progress": 87.5,
+            "average_confidence": 82.3,
+            "recent_sessions": [
+                {
+                    "id": "uuid",
+                    "project_name": "...",
+                    "created_at": "...",
+                    "total_mappings": 342,
+                    "approved_mappings": 298,
+                    "status": "completed"
+                }
+            ]
+        }
+    """
+    session_db = MigrationSessionDB()
+
+    try:
+        # Get all sessions for user
+        sessions_result = session_db.client.table('migration_sessions').select('*').eq(
+            'user_id', str(request.user.id)
+        ).order('created_at', desc=True).execute()
+
+        sessions = sessions_result.data
+
+        # Calculate aggregate stats
+        total_sessions = len(sessions)
+        total_redirects = sum(s.get('total_mappings', 0) for s in sessions)
+        total_approved = sum(s.get('approved_mappings', 0) for s in sessions)
+
+        # Calculate approval progress
+        approval_progress = (total_approved / total_redirects * 100) if total_redirects > 0 else 0
+
+        # For average confidence, we'd need to query url_mappings table
+        # For now, use a placeholder or calculate from available data
+        average_confidence = 0
+        if sessions:
+            # Try to get average from recent sessions if confidence is stored
+            confidence_values = [s.get('average_confidence', 0) for s in sessions if s.get('average_confidence')]
+            if confidence_values:
+                average_confidence = sum(confidence_values) / len(confidence_values)
+
+        # Get recent 5 sessions
+        recent_sessions = sessions[:5]
+
+        return jsonify({
+            "success": True,
+            "total_redirects": total_redirects,
+            "total_sessions": total_sessions,
+            "approval_progress": round(approval_progress, 1),
+            "average_confidence": round(average_confidence, 1),
+            "recent_sessions": recent_sessions
+        }), 200
+
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+
 @user_blueprint.route("/sessions", methods=["GET"])
 @require_auth
 def get_user_sessions():

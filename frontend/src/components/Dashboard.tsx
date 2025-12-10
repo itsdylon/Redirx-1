@@ -33,6 +33,63 @@ export function Dashboard() {
   const fetchDashboard = async () => {
     setLoading(true);
     setError('');
+
+    // Mock data for demo
+    const mockData: DashboardData = {
+      total_redirects: 1247,
+      total_sessions: 12,
+      approval_progress: 87.5,
+      average_confidence: 82.3,
+      recent_sessions: [
+        {
+          id: 'ebcbe7cc-55b2-4f65-8c49-6b0926ee48ec',
+          project_name: 'Website Redesign 2024',
+          created_at: '2024-12-01T04:44:07.279817',
+          total_mappings: 342,
+          approved_mappings: 298,
+          status: 'completed'
+        },
+        {
+          id: 'a1b2c3d4-5678-90ab-cdef-1234567890ab',
+          project_name: 'Product Migration',
+          created_at: '2024-11-28T14:22:15.123456',
+          total_mappings: 215,
+          approved_mappings: 189,
+          status: 'completed'
+        },
+        {
+          id: 'b2c3d4e5-6789-01bc-def0-234567890abc',
+          project_name: 'Blog Platform Update',
+          created_at: '2024-11-25T09:15:33.987654',
+          total_mappings: 428,
+          approved_mappings: 401,
+          status: 'completed'
+        },
+        {
+          id: 'c3d4e5f6-7890-12cd-ef01-34567890abcd',
+          project_name: 'E-commerce Replatform',
+          created_at: '2024-11-20T16:45:22.456789',
+          total_mappings: 156,
+          approved_mappings: 142,
+          status: 'completed'
+        },
+        {
+          id: 'd4e5f6g7-8901-23de-f012-4567890abcde',
+          project_name: 'Documentation Site',
+          created_at: '2024-11-15T11:30:45.654321',
+          total_mappings: 106,
+          approved_mappings: 98,
+          status: 'completed'
+        }
+      ]
+    };
+
+    setTimeout(() => {
+      setDashboardData(mockData);
+      setLoading(false);
+    }, 500); // Simulate loading delay
+
+    /* Real API call - commented out for demo
     try {
       const token = localStorage.getItem('access_token');
       const response = await fetch(`${API_BASE_URL}/api/user/dashboard`, {
@@ -50,6 +107,7 @@ export function Dashboard() {
     } finally {
       setLoading(false);
     }
+    */
   };
 
   useEffect(() => {

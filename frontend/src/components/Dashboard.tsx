@@ -75,10 +75,10 @@ export function Dashboard() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-50">
+      <div className="min-h-screen">
         <Header currentView="dashboard" />
         <main className="max-w-7xl mx-auto p-8">
-          <div className="text-center py-8 text-gray-600">Loading dashboard...</div>
+          <div className="text-center py-8 text-muted-foreground">Loading dashboard...</div>
         </main>
       </div>
     );
@@ -86,10 +86,10 @@ export function Dashboard() {
 
   if (error) {
     return (
-      <div className="min-h-screen bg-gray-50">
+      <div className="min-h-screen">
         <Header currentView="dashboard" />
         <main className="max-w-7xl mx-auto p-8">
-          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-4">
+          <div className="bg-destructive/10 border border-destructive/50 text-destructive px-4 py-3 rounded mb-4">
             {error}
           </div>
           <Button onClick={fetchDashboard}>Retry</Button>
@@ -99,75 +99,75 @@ export function Dashboard() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen">
       <Header currentView="dashboard" />
-      
+
       <main className="max-w-7xl mx-auto p-8">
         {/* Page Header */}
         <div className="mb-8">
-          <h1 className="text-gray-900 mb-2">Dashboard</h1>
-          <p className="text-gray-600">Manage and track your redirect mapping projects</p>
+          <h1 className="text-foreground mb-2">Dashboard</h1>
+          <p className="text-muted-foreground">Manage and track your redirect mapping projects</p>
         </div>
 
         {/* Metric Cards */}
         <div className="grid grid-cols-3 gap-6 mb-8">
           {/* Total Redirects */}
-          <Card className="p-6 border-gray-300">
+          <Card className="p-6">
             <div className="flex items-start justify-between mb-4">
               <div>
-                <p className="text-gray-600 text-sm mb-1">Total Redirects</p>
-                <p className="text-gray-900">{dashboardData?.total_redirects?.toLocaleString() || 0}</p>
+                <p className="text-muted-foreground text-sm mb-1">Total Redirects</p>
+                <p className="text-foreground">{dashboardData?.total_redirects?.toLocaleString() || 0}</p>
               </div>
-              <div className="border border-gray-300 p-2 rounded bg-gray-50">
-                <BarChart3 className="h-5 w-5 text-gray-700" />
+              <div className="border border-border p-2 rounded bg-muted">
+                <BarChart3 className="h-5 w-5 text-muted-foreground" />
               </div>
             </div>
             <Separator className="mb-3" />
-            <p className="text-gray-500 text-xs">Across {dashboardData?.total_sessions || 0} projects</p>
+            <p className="text-muted-foreground text-xs">Across {dashboardData?.total_sessions || 0} projects</p>
           </Card>
 
           {/* Approval Progress */}
-          <Card className="p-6 border-gray-300">
+          <Card className="p-6">
             <div className="flex items-start justify-between mb-4">
               <div>
-                <p className="text-gray-600 text-sm mb-1">Approval Progress</p>
-                <p className="text-gray-900">{dashboardData?.approval_progress || 0}%</p>
+                <p className="text-muted-foreground text-sm mb-1">Approval Progress</p>
+                <p className="text-foreground">{dashboardData?.approval_progress || 0}%</p>
               </div>
-              <div className="border border-gray-300 p-2 rounded bg-gray-50">
-                <CheckCircle className="h-5 w-5 text-gray-700" />
+              <div className="border border-border p-2 rounded bg-muted">
+                <CheckCircle className="h-5 w-5 text-muted-foreground" />
               </div>
             </div>
             <Progress value={dashboardData?.approval_progress || 0} className="h-2 mb-3" />
-            <p className="text-gray-500 text-xs">
+            <p className="text-muted-foreground text-xs">
               {Math.round((dashboardData?.total_redirects || 0) * (dashboardData?.approval_progress || 0) / 100).toLocaleString()} of {dashboardData?.total_redirects?.toLocaleString() || 0} approved
             </p>
           </Card>
 
           {/* Average Confidence */}
-          <Card className="p-6 border-gray-300">
+          <Card className="p-6">
             <div className="flex items-start justify-between mb-4">
               <div>
-                <p className="text-gray-600 text-sm mb-1">Average Confidence</p>
-                <p className="text-gray-900">{dashboardData?.average_confidence || 0}</p>
+                <p className="text-muted-foreground text-sm mb-1">Average Confidence</p>
+                <p className="text-foreground">{dashboardData?.average_confidence || 0}</p>
               </div>
-              <div className="border border-gray-300 p-2 rounded bg-gray-50">
-                <TrendingUp className="h-5 w-5 text-gray-700" />
+              <div className="border border-border p-2 rounded bg-muted">
+                <TrendingUp className="h-5 w-5 text-muted-foreground" />
               </div>
             </div>
             <Separator className="mb-3" />
-            <p className="text-gray-500 text-xs">Match quality score</p>
+            <p className="text-muted-foreground text-xs">Match quality score</p>
           </Card>
         </div>
 
         {/* Action Section */}
         <div className="mb-8">
-          <Card className="p-8 border-gray-300 bg-white text-center">
+          <Card className="p-8 text-center">
             <div className="max-w-md mx-auto">
-              <div className="border border-gray-300 rounded-full p-4 w-16 h-16 mx-auto mb-4 bg-gray-50">
-                <FileUp className="h-8 w-8 text-gray-700" />
+              <div className="border border-border rounded-full p-4 w-16 h-16 mx-auto mb-4 bg-muted">
+                <FileUp className="h-8 w-8 text-muted-foreground" />
               </div>
-              <h2 className="text-gray-900 mb-2">Create New Mapping</h2>
-              <p className="text-gray-600 mb-6">
+              <h2 className="text-foreground mb-2">Create New Mapping</h2>
+              <p className="text-muted-foreground mb-6">
                 Upload CSV files to start matching URLs and creating redirect mappings
               </p>
               <Button size="lg" onClick={() => navigate('/upload')}>
@@ -179,26 +179,26 @@ export function Dashboard() {
 
         {/* Recent Projects */}
         <div>
-          <h2 className="text-gray-900 mb-4">Recent Projects</h2>
-          <Card className="border-gray-300">
+          <h2 className="text-foreground mb-4">Recent Projects</h2>
+          <Card>
             <div className="overflow-hidden">
               <table className="w-full">
-                <thead className="bg-gray-100 border-b border-gray-300">
+                <thead className="bg-muted border-b border-border">
                   <tr>
-                    <th className="text-left p-4 text-gray-700 text-sm">Project Name</th>
-                    <th className="text-left p-4 text-gray-700 text-sm">Date</th>
-                    <th className="text-left p-4 text-gray-700 text-sm">Redirects</th>
-                    <th className="text-left p-4 text-gray-700 text-sm">Status</th>
-                    <th className="text-left p-4 text-gray-700 text-sm">Actions</th>
+                    <th className="text-left p-4 text-muted-foreground text-sm">Project Name</th>
+                    <th className="text-left p-4 text-muted-foreground text-sm">Date</th>
+                    <th className="text-left p-4 text-muted-foreground text-sm">Redirects</th>
+                    <th className="text-left p-4 text-muted-foreground text-sm">Status</th>
+                    <th className="text-left p-4 text-muted-foreground text-sm">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {dashboardData?.recent_sessions?.map((session, index) => (
                     <tr
                       key={session.id}
-                      className={index !== (dashboardData?.recent_sessions?.length || 0) - 1 ? 'border-b border-gray-200' : ''}
+                      className={index !== (dashboardData?.recent_sessions?.length || 0) - 1 ? 'border-b border-border' : ''}
                     >
-                      <td className="p-4 text-gray-900">
+                      <td className="p-4 text-foreground">
                         {editingSessionId === session.id ? (
                           <div className="flex items-center gap-2">
                             <input
@@ -209,19 +209,19 @@ export function Dashboard() {
                                 if (e.key === 'Enter') handleSaveEdit(session.id);
                                 if (e.key === 'Escape') handleCancelEdit();
                               }}
-                              className="border border-gray-300 rounded px-2 py-1 text-sm flex-1"
+                              className="border border-border bg-background text-foreground rounded px-2 py-1 text-sm flex-1"
                               autoFocus
                             />
                             <button
                               onClick={() => handleSaveEdit(session.id)}
-                              className="text-green-600 hover:text-green-700"
+                              className="text-green-600 dark:text-green-400 hover:text-green-700 dark:hover:text-green-300"
                               title="Save"
                             >
                               <Check className="h-4 w-4" />
                             </button>
                             <button
                               onClick={handleCancelEdit}
-                              className="text-red-600 hover:text-red-700"
+                              className="text-destructive hover:text-destructive/80"
                               title="Cancel"
                             >
                               <X className="h-4 w-4" />
@@ -232,7 +232,7 @@ export function Dashboard() {
                             <span>{session.project_name || 'Untitled Session'}</span>
                             <button
                               onClick={() => handleStartEdit(session.id, session.project_name)}
-                              className="text-gray-400 hover:text-gray-600"
+                              className="text-muted-foreground hover:text-foreground"
                               title="Edit project name"
                             >
                               <Pencil className="h-3 w-3" />
@@ -240,16 +240,16 @@ export function Dashboard() {
                           </div>
                         )}
                       </td>
-                      <td className="p-4 text-gray-600 flex items-center gap-2">
+                      <td className="p-4 text-muted-foreground flex items-center gap-2">
                         <Clock className="h-3 w-3" />
                         {new Date(session.created_at).toLocaleDateString()}
                       </td>
-                      <td className="p-4 text-gray-900">{session.total_mappings || 0}</td>
+                      <td className="p-4 text-foreground">{session.total_mappings || 0}</td>
                       <td className="p-4">
                         <span className={`border px-2 py-1 text-xs ${
                           session.status === 'completed'
-                            ? 'border-green-600 text-green-700'
-                            : 'border-gray-400 text-gray-600'
+                            ? 'border-green-600 dark:border-green-400 text-green-700 dark:text-green-400'
+                            : 'border-border text-muted-foreground'
                         }`}>
                           {session.status}
                         </span>
@@ -270,7 +270,7 @@ export function Dashboard() {
             </div>
 
             {(!dashboardData?.recent_sessions || dashboardData.recent_sessions.length === 0) && (
-              <div className="p-8 text-center text-gray-500">
+              <div className="p-8 text-center text-muted-foreground">
                 No recent projects found. Start by creating a new mapping!
               </div>
             )}

@@ -253,7 +253,7 @@ export function ExportModal({ open, onOpenChange, onExport, redirects }: ExportM
         <div className="space-y-6 py-4">
           {/* Format Selection */}
           <div>
-            <Label className="text-gray-700 mb-2 block">Export Format</Label>
+            <Label className="text-foreground mb-2 block">Export Format</Label>
             <Select value={format} onValueChange={setFormat}>
               <SelectTrigger>
                 <SelectValue placeholder="Select Format" />
@@ -270,7 +270,7 @@ export function ExportModal({ open, onOpenChange, onExport, redirects }: ExportM
 
           {/* URL Format Selection */}
           <div>
-            <Label className="text-gray-700 mb-3 block font-medium">URL Format</Label>
+            <Label className="text-foreground mb-3 block font-medium">URL Format</Label>
             <div className="space-y-3">
               {/* Paths Only */}
               <div className="flex items-start space-x-3">
@@ -283,11 +283,11 @@ export function ExportModal({ open, onOpenChange, onExport, redirects }: ExportM
                   className="mt-1"
                 />
                 <div className="flex-1">
-                  <label htmlFor="url-paths" className="text-sm font-medium text-gray-900 cursor-pointer">
+                  <label htmlFor="url-paths" className="text-sm font-medium text-foreground cursor-pointer">
                     Paths only (Recommended)
                   </label>
-                  <p className="text-xs text-gray-600 mt-0.5">
-                    Export: <code className="bg-gray-100 px-1 rounded">/old-path</code> → <code className="bg-gray-100 px-1 rounded">/new-path</code>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Export: <code className="bg-muted px-1 rounded">/old-path</code> → <code className="bg-muted px-1 rounded">/new-path</code>
                   </p>
                 </div>
               </div>
@@ -303,11 +303,11 @@ export function ExportModal({ open, onOpenChange, onExport, redirects }: ExportM
                   className="mt-1"
                 />
                 <div className="flex-1">
-                  <label htmlFor="url-full" className="text-sm font-medium text-gray-900 cursor-pointer">
+                  <label htmlFor="url-full" className="text-sm font-medium text-foreground cursor-pointer">
                     Full URLs from CSV
                   </label>
-                  <p className="text-xs text-gray-600 mt-0.5">
-                    Export: <code className="bg-gray-100 px-1 rounded text-xs">http://staging.com/old</code> → <code className="bg-gray-100 px-1 rounded text-xs">http://staging.com/new</code>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Export: <code className="bg-muted px-1 rounded text-xs">http://staging.com/old</code> → <code className="bg-muted px-1 rounded text-xs">http://staging.com/new</code>
                   </p>
                 </div>
               </div>
@@ -323,35 +323,35 @@ export function ExportModal({ open, onOpenChange, onExport, redirects }: ExportM
                   className="mt-1"
                 />
                 <div className="flex-1">
-                  <label htmlFor="url-custom" className="text-sm font-medium text-gray-900 cursor-pointer">
+                  <label htmlFor="url-custom" className="text-sm font-medium text-foreground cursor-pointer">
                     Custom domains
                   </label>
-                  <p className="text-xs text-gray-600 mt-0.5 mb-2">
+                  <p className="text-xs text-muted-foreground mt-0.5 mb-2">
                     Replace staging domains with production domains
                   </p>
 
                   {urlFormat === 'custom' && (
                     <div className="space-y-2 mt-2">
                       <div>
-                        <Label htmlFor="custom-old" className="text-xs text-gray-600">Old domain (optional)</Label>
+                        <Label htmlFor="custom-old" className="text-xs text-muted-foreground">Old domain (optional)</Label>
                         <input
                           id="custom-old"
                           type="text"
                           placeholder="https://example.com"
                           value={customOldDomain}
                           onChange={(e) => setCustomOldDomain(e.target.value)}
-                          className="w-full border border-gray-300 rounded px-2 py-1 text-sm mt-1"
+                          className="w-full border border-border rounded px-2 py-1 text-sm mt-1 bg-background text-foreground"
                         />
                       </div>
                       <div>
-                        <Label htmlFor="custom-new" className="text-xs text-gray-600">New domain (optional)</Label>
+                        <Label htmlFor="custom-new" className="text-xs text-muted-foreground">New domain (optional)</Label>
                         <input
                           id="custom-new"
                           type="text"
                           placeholder="https://example.com"
                           value={customNewDomain}
                           onChange={(e) => setCustomNewDomain(e.target.value)}
-                          className="w-full border border-gray-300 rounded px-2 py-1 text-sm mt-1"
+                          className="w-full border border-border rounded px-2 py-1 text-sm mt-1 bg-background text-foreground"
                         />
                       </div>
                     </div>
@@ -365,7 +365,7 @@ export function ExportModal({ open, onOpenChange, onExport, redirects }: ExportM
 
           {/* Confidence Level Selection */}
           <div>
-            <Label className="text-gray-700 mb-3 block">Confidence Levels to Include</Label>
+            <Label className="text-foreground mb-3 block">Confidence Levels to Include</Label>
             <div className="space-y-3">
               <div className="flex items-center space-x-2">
                 <Checkbox
@@ -373,7 +373,7 @@ export function ExportModal({ open, onOpenChange, onExport, redirects }: ExportM
                   checked={includeHigh}
                   onCheckedChange={(checked) => setIncludeHigh(!!checked)}
                 />
-                <Label htmlFor="high" className="text-gray-900 cursor-pointer">
+                <Label htmlFor="high" className="text-foreground cursor-pointer">
                   Include High Confidence ({totalHigh} redirects)
                 </Label>
               </div>
@@ -383,7 +383,7 @@ export function ExportModal({ open, onOpenChange, onExport, redirects }: ExportM
                   checked={includeMedium}
                   onCheckedChange={(checked) => setIncludeMedium(!!checked)}
                 />
-                <Label htmlFor="medium" className="text-gray-900 cursor-pointer">
+                <Label htmlFor="medium" className="text-foreground cursor-pointer">
                   Include Medium Confidence ({totalMedium} redirects)
                 </Label>
               </div>
@@ -393,7 +393,7 @@ export function ExportModal({ open, onOpenChange, onExport, redirects }: ExportM
                   checked={includeLow}
                   onCheckedChange={(checked) => setIncludeLow(!!checked)}
                 />
-                <Label htmlFor="low" className="text-gray-900 cursor-pointer">
+                <Label htmlFor="low" className="text-foreground cursor-pointer">
                   Include Low Confidence ({totalLow} redirects)
                 </Label>
               </div>
@@ -401,10 +401,10 @@ export function ExportModal({ open, onOpenChange, onExport, redirects }: ExportM
           </div>
 
           {/* Live Count Display */}
-          <div className="border border-gray-300 bg-gray-50 p-4">
+          <div className="border border-border bg-muted p-4">
             <div className="flex items-center justify-between">
-              <span className="text-gray-700">Redirects to export:</span>
-              <span className="text-gray-900">{selectedCount}</span>
+              <span className="text-muted-foreground">Redirects to export:</span>
+              <span className="text-foreground">{selectedCount}</span>
             </div>
           </div>
 
@@ -421,9 +421,9 @@ export function ExportModal({ open, onOpenChange, onExport, redirects }: ExportM
 
           {/* Duplicate Warnings */}
           {hasDuplicates && (
-            <Alert className="border-yellow-500 bg-yellow-50">
+            <Alert className="border-yellow-500/50 bg-yellow-500/10">
               <AlertTriangle className="h-4 w-4 text-yellow-600" />
-              <AlertDescription className="text-yellow-900">
+              <AlertDescription className="text-foreground">
                 Warning: {duplicateTargets} target URL
                 {duplicateTargets > 1 ? 's are' : ' is'} used by multiple redirects in this export.{' '}
                 <button className="underline">View Details</button>
@@ -448,16 +448,16 @@ export function ExportModal({ open, onOpenChange, onExport, redirects }: ExportM
           {/* Preview Rules Section */}
           <Collapsible open={previewExpanded} onOpenChange={setPreviewExpanded}>
             <CollapsibleTrigger className="w-full">
-              <div className="flex items-center justify-between border border-gray-300 bg-white p-3 hover:bg-gray-50">
+              <div className="flex items-center justify-between border border-border bg-card p-3 hover:bg-accent">
                 <div className="flex items-center gap-2">
                   {previewExpanded ? (
-                    <ChevronDown className="h-4 w-4 text-gray-600" />
+                    <ChevronDown className="h-4 w-4 text-muted-foreground" />
                   ) : (
-                    <ChevronRight className="h-4 w-4 text-gray-600" />
+                    <ChevronRight className="h-4 w-4 text-muted-foreground" />
                   )}
-                  <span className="text-gray-900">Preview Rules</span>
+                  <span className="text-foreground">Preview Rules</span>
                   {filteredRedirects.length > 10 && (
-                    <span className="text-xs text-gray-500">(showing first 10 of {filteredRedirects.length})</span>
+                    <span className="text-xs text-muted-foreground">(showing first 10 of {filteredRedirects.length})</span>
                   )}
                 </div>
                 {format && selectedCount > 0 && !hasCustomDomainErrors && (
@@ -466,10 +466,10 @@ export function ExportModal({ open, onOpenChange, onExport, redirects }: ExportM
               </div>
             </CollapsibleTrigger>
             <CollapsibleContent>
-              <div className="border border-gray-300 border-t-0 p-4 bg-gray-50">
+              <div className="border border-border border-t-0 p-4 bg-muted">
                 {/* URL Format Info */}
                 {format && selectedCount > 0 && (
-                  <div className="mb-3 text-xs text-gray-600">
+                  <div className="mb-3 text-xs text-muted-foreground">
                     {urlFormat === 'paths' && (
                       <span>URLs transformed to paths only (e.g., /page.html)</span>
                     )}
@@ -486,13 +486,13 @@ export function ExportModal({ open, onOpenChange, onExport, redirects }: ExportM
                   </div>
                 )}
 
-                <div className="bg-white border border-gray-300 p-4 font-mono text-xs overflow-x-auto">
-                  <pre className="text-gray-900 whitespace-pre">
+                <div className="bg-card border border-border p-4 font-mono text-xs overflow-x-auto">
+                  <pre className="text-foreground whitespace-pre">
                     {previewContent}
                   </pre>
                 </div>
                 {format && selectedCount > 0 && !hasCustomDomainErrors && (
-                  <div className="flex items-center gap-2 mt-3 text-sm text-green-700">
+                  <div className="flex items-center gap-2 mt-3 text-sm text-green-600">
                     <CheckCircle className="h-4 w-4" />
                     <span>Syntax validation passed</span>
                   </div>
@@ -503,7 +503,7 @@ export function ExportModal({ open, onOpenChange, onExport, redirects }: ExportM
         </div>
 
         {/* Action Buttons */}
-        <div className="flex justify-end gap-3 pt-4 border-t border-gray-300">
+        <div className="flex justify-end gap-3 pt-4 border-t border-border">
           <Button
             variant="outline"
             onClick={() => onOpenChange(false)}

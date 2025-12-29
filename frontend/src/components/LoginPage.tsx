@@ -30,24 +30,24 @@ export function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 p-4">
-      <Card className="w-full max-w-md p-8 border-gray-300 bg-white">
+    <div className="min-h-screen flex items-center justify-center p-4">
+      <Card className="w-full max-w-md p-8">
         <div className="mb-6">
-          <h1 className="text-2xl font-bold text-gray-900">Login to Redirx</h1>
-          <p className="text-gray-600 text-sm mt-1">
+          <h1 className="text-2xl font-bold text-foreground">Login to Redirx</h1>
+          <p className="text-muted-foreground text-sm mt-1">
             Enter your credentials to access your account
           </p>
         </div>
 
         {error && (
-          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-4">
+          <div className="bg-destructive/10 border border-destructive/50 text-destructive px-4 py-3 rounded mb-4">
             {error}
           </div>
         )}
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
+            <label className="block text-sm font-medium text-foreground mb-2">
               Email
             </label>
             <Input
@@ -62,7 +62,7 @@ export function LoginPage() {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
+            <label className="block text-sm font-medium text-foreground mb-2">
               Password
             </label>
             <Input
@@ -81,9 +81,9 @@ export function LoginPage() {
           </Button>
         </form>
 
-        <p className="mt-6 text-center text-sm text-gray-600">
+        <p className="mt-6 text-center text-sm text-muted-foreground">
           Don't have an account?{' '}
-          <Link to="/signup" className="text-blue-600 hover:underline font-medium">
+          <Link to="/signup" className="text-primary hover:underline font-medium">
             Sign up
           </Link>
         </p>

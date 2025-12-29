@@ -86,7 +86,7 @@ export function UploadPage() {
 
   return (
     <>
-      <div className="min-h-screen bg-gray-50">
+      <div className="min-h-screen">
         <Header currentView="upload" />
 
         <main className="max-w-7xl mx-auto p-8">
@@ -100,8 +100,8 @@ export function UploadPage() {
 
           {/* Page Title */}
           <div className="mb-8">
-            <h1 className="text-gray-900 mb-2">Upload CSV Files</h1>
-            <p className="text-gray-600">Upload CSV files from your old and new site to begin the redirect mapping process.</p>
+            <h1 className="text-foreground mb-2">Upload CSV Files</h1>
+            <p className="text-muted-foreground">Upload CSV files from your old and new site to begin the redirect mapping process.</p>
           </div>
 
           {/* Upload Zones */}
@@ -120,17 +120,17 @@ export function UploadPage() {
 
           {/* File Status */}
           {bothFilesUploaded && (
-            <div className="mb-8 border border-gray-300 bg-white p-6">
+            <div className="mb-8 border border-border bg-card p-6">
               <div className="grid grid-cols-2 gap-6">
                 <div>
-                  <div className="text-sm text-gray-600 mb-1">Old Site</div>
-                  <div className="text-gray-900">{oldSiteFile.name}</div>
-                  <div className="text-sm text-gray-500">{oldSiteFile.rowCount} rows</div>
+                  <div className="text-sm text-muted-foreground mb-1">Old Site</div>
+                  <div className="text-foreground">{oldSiteFile.name}</div>
+                  <div className="text-sm text-muted-foreground">{oldSiteFile.rowCount} rows</div>
                 </div>
                 <div>
-                  <div className="text-sm text-gray-600 mb-1">New Site</div>
-                  <div className="text-gray-900">{newSiteFile.name}</div>
-                  <div className="text-sm text-gray-500">{newSiteFile.rowCount} rows</div>
+                  <div className="text-sm text-muted-foreground mb-1">New Site</div>
+                  <div className="text-foreground">{newSiteFile.name}</div>
+                  <div className="text-sm text-muted-foreground">{newSiteFile.rowCount} rows</div>
                 </div>
               </div>
             </div>

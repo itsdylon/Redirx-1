@@ -29,10 +29,10 @@ export function ReviewToolbar({
   onSortChange,
 }: ReviewToolbarProps) {
   return (
-    <div className="bg-white border border-gray-300 p-4 flex items-center gap-4">
+    <div className="bg-card border border-border p-4 flex items-center gap-4">
       {/* Search Bar */}
       <div className="flex-1 relative">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
         <Input
           type="text"
           placeholder="Search old or new URLs..."

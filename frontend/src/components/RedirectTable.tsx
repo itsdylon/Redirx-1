@@ -11,8 +11,12 @@ import {
   TableHeader,
   TableRow,
 } from './ui/table';
+import {
+  Tooltip,
+  TooltipTrigger,
+  TooltipContent,
+} from './ui/tooltip';
 import { RedirectMapping } from './ReviewInterface';
-import { Separator } from './ui/separator';
 
 interface RedirectTableProps {
   redirects: RedirectMapping[];
@@ -36,11 +40,11 @@ export function RedirectTable({
   const getConfidenceBadge = (band: string) => {
     switch (band) {
       case 'high':
-        return <Badge className="bg-green-100 text-green-800 border-green-300">High</Badge>;
+        return <Badge className="bg-green-100 text-green-800 border-green-300 dark:bg-green-900/30 dark:text-green-400 dark:border-green-700">High</Badge>;
       case 'medium':
-        return <Badge className="bg-yellow-100 text-yellow-800 border-yellow-300">Medium</Badge>;
+        return <Badge className="bg-yellow-100 text-yellow-800 border-yellow-300 dark:bg-yellow-900/30 dark:text-yellow-400 dark:border-yellow-700">Medium</Badge>;
       case 'low':
-        return <Badge className="bg-red-100 text-red-800 border-red-300">Low</Badge>;
+        return <Badge className="bg-red-100 text-red-800 border-red-300 dark:bg-red-900/30 dark:text-red-400 dark:border-red-700">Low</Badge>;
       default:
         return null;
     }
@@ -50,33 +54,36 @@ export function RedirectTable({
     return warnings.map((warning, index) => {
       let color = 'text-yellow-600';
       let title = warning;
-      
+
       if (warning === 'duplicate-target') {
         color = 'text-red-600';
-        title = 'Duplicate target';
+        title = 'This URL is already assigned to another redirect';
       } else if (warning === 'invalid-target') {
         color = 'text-orange-600';
-        title = 'Invalid target';
+        title = 'Target URL does not exist in new site';
       } else if (warning === 'near-tie') {
         color = 'text-yellow-600';
-        title = 'Near-tie match';
+        title = 'Multiple URLs have similar confidence scores';
       }
 
       return (
-        <AlertTriangle
-          key={index}
-          className={`h-4 w-4 ${color}`}
-          title={title}
-        />
+        <Tooltip key={index}>
+          <TooltipTrigger asChild>
+            <AlertTriangle className={`h-4 w-4 ${color} cursor-help`} />
+          </TooltipTrigger>
+          <TooltipContent>
+            {title}
+          </TooltipContent>
+        </Tooltip>
       );
     });
   };
 
   return (
-    <div className="border border-gray-300 bg-white">
+    <div className="border border-border bg-card">
       <Table>
         <TableHeader>
-          <TableRow className="bg-gray-100">
+          <TableRow className="bg-muted">
             <TableHead className="w-12"></TableHead>
             <TableHead className="w-12">
               <Checkbox
@@ -97,12 +104,12 @@ export function RedirectTable({
                 }}
               />
             </TableHead>
-            <TableHead className="text-gray-900">Old URL</TableHead>
-            <TableHead className="text-gray-900">Suggested New URL</TableHead>
-            <TableHead className="text-gray-900 w-32">Confidence</TableHead>
-            <TableHead className="text-gray-900 w-24 text-center">Score</TableHead>
-            <TableHead className="w-20 text-gray-900 text-center">Status</TableHead>
-            <TableHead className="w-16 text-gray-900 text-center">Warnings</TableHead>
+            <TableHead className="text-foreground">Old URL</TableHead>
+            <TableHead className="text-foreground">Suggested New URL</TableHead>
+            <TableHead className="text-foreground w-32">Confidence</TableHead>
+            <TableHead className="text-foreground w-24 text-center">Score</TableHead>
+            <TableHead className="w-20 text-foreground text-center">Status</TableHead>
+            <TableHead className="w-16 text-foreground text-center">Warnings</TableHead>
             <TableHead className="w-16"></TableHead>
           </TableRow>
         </TableHeader>
@@ -111,7 +118,6 @@ export function RedirectTable({
             <React.Fragment key={redirect.id}>
               <TableRow
                 className={`
-                  ${redirect.approved ? 'bg-green-50' : ''}
                   ${redirect.confidenceBand === 'high' ? 'border-l-4 border-l-green-500' : ''}
                   ${redirect.confidenceBand === 'medium' ? 'border-l-4 border-l-yellow-500' : ''}
                   ${redirect.confidenceBand === 'low' ? 'border-l-4 border-l-red-500' : ''}
@@ -136,23 +142,23 @@ export function RedirectTable({
                     onCheckedChange={() => onToggleSelect(redirect.id)}
                   />
                 </TableCell>
-                <TableCell className="text-gray-700 font-mono text-sm">
+                <TableCell className="text-foreground font-mono text-sm">
                   {redirect.oldUrl}
                 </TableCell>
-                <TableCell className="text-gray-700 font-mono text-sm">
+                <TableCell className="text-foreground font-mono text-sm">
                   {redirect.newUrl}
                 </TableCell>
                 <TableCell>
                   {getConfidenceBadge(redirect.confidenceBand)}
                 </TableCell>
                 <TableCell className="text-center">
-                  <span className="text-gray-900">{redirect.matchScore}%</span>
+                  <span className="text-foreground">{redirect.matchScore}%</span>
                 </TableCell>
                 <TableCell className="text-center">
                   {redirect.approved ? (
                     <CheckCircle className="h-5 w-5 text-green-600 mx-auto" />
                   ) : (
-                    <span className="text-gray-400 text-sm">Pending</span>
+                    <span className="text-muted-foreground text-sm">Pending</span>
                   )}
                 </TableCell>
                 <TableCell>
@@ -173,45 +179,45 @@ export function RedirectTable({
 
               {/* Expanded Row Details */}
               {expandedRow === redirect.id && (
-                <TableRow className="bg-gray-50">
+                <TableRow className="bg-muted">
                   <TableCell colSpan={9} className="p-6">
                     <div className="max-w-3xl">
-                      <h3 className="text-gray-900 mb-4">Matching Details</h3>
+                      <h3 className="text-foreground mb-4">Matching Details</h3>
                       <div className="grid grid-cols-3 gap-6">
-                        <div className="border border-gray-300 bg-white p-4">
-                          <div className="text-gray-700 text-sm mb-2">Path Similarity</div>
+                        <div className="border border-border bg-card p-4">
+                          <div className="text-muted-foreground text-sm mb-2">Path Similarity</div>
                           <div className="flex items-end gap-2">
-                            <span className="text-gray-900 text-2xl">{redirect.pathSimilarity}%</span>
+                            <span className="text-foreground text-2xl">{redirect.pathSimilarity}%</span>
                           </div>
-                          <div className="mt-2 h-2 bg-gray-200 rounded-full overflow-hidden">
+                          <div className="mt-2 h-2 bg-muted rounded-full overflow-hidden">
                             <div
-                              className="h-full bg-blue-500"
+                              className="h-full bg-primary"
                               style={{ width: `${redirect.pathSimilarity}%` }}
                             />
                           </div>
                         </div>
 
-                        <div className="border border-gray-300 bg-white p-4">
-                          <div className="text-gray-700 text-sm mb-2">Title Similarity</div>
+                        <div className="border border-border bg-card p-4">
+                          <div className="text-muted-foreground text-sm mb-2">Title Similarity</div>
                           <div className="flex items-end gap-2">
-                            <span className="text-gray-900 text-2xl">{redirect.titleSimilarity}%</span>
+                            <span className="text-foreground text-2xl">{redirect.titleSimilarity}%</span>
                           </div>
-                          <div className="mt-2 h-2 bg-gray-200 rounded-full overflow-hidden">
+                          <div className="mt-2 h-2 bg-muted rounded-full overflow-hidden">
                             <div
-                              className="h-full bg-blue-500"
+                              className="h-full bg-primary"
                               style={{ width: `${redirect.titleSimilarity}%` }}
                             />
                           </div>
                         </div>
 
-                        <div className="border border-gray-300 bg-white p-4">
-                          <div className="text-gray-700 text-sm mb-2">Content Similarity</div>
+                        <div className="border border-border bg-card p-4">
+                          <div className="text-muted-foreground text-sm mb-2">Content Similarity</div>
                           <div className="flex items-end gap-2">
-                            <span className="text-gray-900 text-2xl">{redirect.contentSimilarity}%</span>
+                            <span className="text-foreground text-2xl">{redirect.contentSimilarity}%</span>
                           </div>
-                          <div className="mt-2 h-2 bg-gray-200 rounded-full overflow-hidden">
+                          <div className="mt-2 h-2 bg-muted rounded-full overflow-hidden">
                             <div
-                              className="h-full bg-blue-500"
+                              className="h-full bg-primary"
                               style={{ width: `${redirect.contentSimilarity}%` }}
                             />
                           </div>
@@ -219,9 +225,9 @@ export function RedirectTable({
                       </div>
 
                       {redirect.warnings.length > 0 && (
-                        <div className="mt-4 p-4 border border-yellow-300 bg-yellow-50">
-                          <h4 className="text-gray-900 text-sm mb-2">⚠️ Warnings</h4>
-                          <ul className="text-sm text-gray-700 space-y-1">
+                        <div className="mt-4 p-4 border border-yellow-500/50 bg-yellow-500/10">
+                          <h4 className="text-foreground text-sm mb-2">Warnings</h4>
+                          <ul className="text-sm text-muted-foreground space-y-1">
                             {redirect.warnings.map((warning, index) => (
                               <li key={index} className="list-disc list-inside">
                                 {warning === 'duplicate-target' && 'This URL is already assigned to another redirect'}

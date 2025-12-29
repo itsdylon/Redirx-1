@@ -10,6 +10,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from './ui/dropdown-menu';
+import { ThemeToggle } from './ThemeToggle';
 
 interface HeaderProps {
   currentView?: 'dashboard' | 'upload' | 'review' | 'loading' | 'account';
@@ -49,16 +50,14 @@ export function Header({ currentView }: HeaderProps) {
     return email ? email[0].toUpperCase() : 'U';
   };
 
-
-
   return (
-    <header className="border-b border-gray-300 bg-white">
+    <header className="border-b border-border bg-card">
       <div className="max-w-7xl mx-auto px-8 py-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-8">
             <button
               onClick={() => handleNavClick('/')}
-              className="text-gray-900 hover:text-gray-700"
+              className="text-foreground hover:text-foreground/80"
             >
               <h1>RedirX</h1>
             </button>
@@ -67,8 +66,8 @@ export function Header({ currentView }: HeaderProps) {
                 onClick={() => handleNavClick('/')}
                 className={`px-3 py-2 ${
                   activeView === 'dashboard'
-                    ? 'text-gray-900 border-b-2 border-gray-900'
-                    : 'text-gray-500 hover:text-gray-700'
+                    ? 'text-foreground border-b-2 border-foreground'
+                    : 'text-muted-foreground hover:text-foreground'
                 }`}
               >
                 Dashboard
@@ -77,8 +76,8 @@ export function Header({ currentView }: HeaderProps) {
                 onClick={() => handleNavClick('/upload')}
                 className={`px-3 py-2 ${
                   activeView === 'upload'
-                    ? 'text-gray-900 border-b-2 border-gray-900'
-                    : 'text-gray-500 hover:text-gray-700'
+                    ? 'text-foreground border-b-2 border-foreground'
+                    : 'text-muted-foreground hover:text-foreground'
                 }`}
               >
                 Upload
@@ -87,8 +86,8 @@ export function Header({ currentView }: HeaderProps) {
                 onClick={() => handleNavClick('/')}
                 className={`px-3 py-2 ${
                   activeView === 'review'
-                    ? 'text-gray-900 border-b-2 border-gray-900'
-                    : 'text-gray-500 hover:text-gray-700'
+                    ? 'text-foreground border-b-2 border-foreground'
+                    : 'text-muted-foreground hover:text-foreground'
                 }`}
                 disabled={activeView !== 'review'}
                 title={activeView !== 'review' ? 'Upload files first to access Review' : undefined}
@@ -98,15 +97,16 @@ export function Header({ currentView }: HeaderProps) {
             </nav>
           </div>
           <div className="flex items-center gap-4">
+            <ThemeToggle />
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <button className="flex items-center gap-2 hover:bg-gray-100 rounded-lg px-3 py-2">
+                <button className="flex items-center gap-2 hover:bg-accent rounded-lg px-3 py-2">
                   <Avatar className="!size-8">
-                    <AvatarFallback className="!bg-gray-200 !text-gray-700 text-sm font-medium">
+                    <AvatarFallback className="bg-muted text-muted-foreground text-sm font-medium">
                       {getInitials(user?.full_name, user?.email)}
                     </AvatarFallback>
                   </Avatar>
-                  <span className="text-sm text-gray-700 hidden md:block">
+                  <span className="text-sm text-muted-foreground hidden md:block">
                     {user?.full_name || user?.email}
                   </span>
                 </button>
@@ -115,7 +115,7 @@ export function Header({ currentView }: HeaderProps) {
                 <DropdownMenuLabel>
                   <div className="flex flex-col">
                     <span className="font-medium">{user?.full_name || 'User'}</span>
-                    <span className="text-xs text-gray-500 font-normal">{user?.email}</span>
+                    <span className="text-xs text-muted-foreground font-normal">{user?.email}</span>
                   </div>
                 </DropdownMenuLabel>
                 <DropdownMenuSeparator />
@@ -124,7 +124,7 @@ export function Header({ currentView }: HeaderProps) {
                   Account Settings
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={handleLogout} className="text-red-600">
+                <DropdownMenuItem onClick={handleLogout} className="text-destructive">
                   <LogOut className="mr-2 h-4 w-4" />
                   Logout
                 </DropdownMenuItem>

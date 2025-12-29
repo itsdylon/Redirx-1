@@ -187,3 +187,11 @@
 html {
   font-size: var(--font-size);
 }
+/* Dark mode table rows */
+.dark [data-slot="table-row"] {
+  background-color: #000000;
+}
+
+.dark [data-slot="table-row"]:hover {
+  background-color: #000000cc;
+}

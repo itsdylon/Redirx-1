@@ -136,7 +136,7 @@ export function AccountPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen">
       <Header currentView="account" />
 
       <main className="max-w-4xl mx-auto p-8">
@@ -150,29 +150,29 @@ export function AccountPage() {
 
         {/* Page Title */}
         <div className="mb-8">
-          <h1 className="text-2xl font-semibold text-gray-900 mb-2">Account Settings</h1>
-          <p className="text-gray-600">Manage your profile and view usage</p>
+          <h1 className="text-2xl font-semibold text-foreground mb-2">Account Settings</h1>
+          <p className="text-muted-foreground">Manage your profile and view usage</p>
         </div>
 
         {error && (
-          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-6">
+          <div className="bg-destructive/10 border border-destructive/50 text-destructive px-4 py-3 rounded mb-6">
             {error}
           </div>
         )}
 
         {successMessage && (
-          <div className="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded mb-6">
+          <div className="bg-green-500/10 border border-green-500/50 text-green-600 dark:text-green-400 px-4 py-3 rounded mb-6">
             {successMessage}
           </div>
         )}
 
         {loading ? (
-          <div className="text-center py-8 text-gray-600">Loading...</div>
+          <div className="text-center py-8 text-muted-foreground">Loading...</div>
         ) : (
           <div className="space-y-6">
             {/* Profile Card */}
-            <Card className="border-gray-300">
-              <CardHeader className="border-b border-gray-200">
+            <Card>
+              <CardHeader className="border-b border-border">
                 <CardTitle className="flex items-center gap-2">
                   <User className="h-5 w-5" />
                   Profile Information
@@ -182,7 +182,7 @@ export function AccountPage() {
                 {editMode ? (
                   <div className="space-y-4">
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                      <label className="block text-sm font-medium text-foreground mb-2">
                         Full Name
                       </label>
                       <Input
@@ -192,7 +192,7 @@ export function AccountPage() {
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                      <label className="block text-sm font-medium text-foreground mb-2">
                         Company
                       </label>
                       <Input
@@ -214,32 +214,32 @@ export function AccountPage() {
                   <div className="space-y-4">
                     <div className="grid grid-cols-2 gap-4">
                       <div>
-                        <div className="flex items-center gap-2 text-sm text-gray-600 mb-1">
+                        <div className="flex items-center gap-2 text-sm text-muted-foreground mb-1">
                           <Mail className="h-4 w-4" />
                           Email
                         </div>
-                        <div className="text-gray-900">{profile?.email || user?.email}</div>
+                        <div className="text-foreground">{profile?.email || user?.email}</div>
                       </div>
                       <div>
-                        <div className="flex items-center gap-2 text-sm text-gray-600 mb-1">
+                        <div className="flex items-center gap-2 text-sm text-muted-foreground mb-1">
                           <User className="h-4 w-4" />
                           Full Name
                         </div>
-                        <div className="text-gray-900">{profile?.full_name || '-'}</div>
+                        <div className="text-foreground">{profile?.full_name || '-'}</div>
                       </div>
                       <div>
-                        <div className="flex items-center gap-2 text-sm text-gray-600 mb-1">
+                        <div className="flex items-center gap-2 text-sm text-muted-foreground mb-1">
                           <Building className="h-4 w-4" />
                           Company
                         </div>
-                        <div className="text-gray-900">{profile?.company || '-'}</div>
+                        <div className="text-foreground">{profile?.company || '-'}</div>
                       </div>
                       <div>
-                        <div className="flex items-center gap-2 text-sm text-gray-600 mb-1">
+                        <div className="flex items-center gap-2 text-sm text-muted-foreground mb-1">
                           <CreditCard className="h-4 w-4" />
                           Subscription
                         </div>
-                        <div className="text-gray-900 capitalize">{profile?.subscription_plan || 'Free'}</div>
+                        <div className="text-foreground capitalize">{profile?.subscription_plan || 'Free'}</div>
                       </div>
                     </div>
                     <Separator />
@@ -252,8 +252,8 @@ export function AccountPage() {
             </Card>
 
             {/* Usage Stats Card */}
-            <Card className="border-gray-300">
-              <CardHeader className="border-b border-gray-200">
+            <Card>
+              <CardHeader className="border-b border-border">
                 <CardTitle className="flex items-center gap-2">
                   <BarChart3 className="h-5 w-5" />
                   Usage This Month
@@ -262,16 +262,16 @@ export function AccountPage() {
               <CardContent className="pt-6">
                 <div className="flex items-center justify-between">
                   <div>
-                    <div className="text-2xl font-semibold text-gray-900">
+                    <div className="text-2xl font-semibold text-foreground">
                       {profile?.usage_current_month || 0}
                     </div>
-                    <div className="text-sm text-gray-600">
+                    <div className="text-sm text-muted-foreground">
                       of {profile?.usage_limit_redirects || 1000} redirects used
                     </div>
                   </div>
                   <div className="text-right">
-                    <div className="text-sm text-gray-600">Remaining</div>
-                    <div className="text-lg font-medium text-gray-900">
+                    <div className="text-sm text-muted-foreground">Remaining</div>
+                    <div className="text-lg font-medium text-foreground">
                       {(profile?.usage_limit_redirects || 1000) - (profile?.usage_current_month || 0)}
                     </div>
                   </div>
@@ -280,8 +280,8 @@ export function AccountPage() {
             </Card>
 
             {/* Recent Sessions Card */}
-            <Card className="border-gray-300">
-              <CardHeader className="border-b border-gray-200">
+            <Card>
+              <CardHeader className="border-b border-border">
                 <CardTitle className="flex items-center gap-2">
                   <Clock className="h-5 w-5" />
                   Recent Migration Sessions
@@ -289,25 +289,25 @@ export function AccountPage() {
               </CardHeader>
               <CardContent className="pt-0">
                 {sessions.length === 0 ? (
-                  <div className="py-8 text-center text-gray-500">
+                  <div className="py-8 text-center text-muted-foreground">
                     No migration sessions yet
                   </div>
                 ) : (
-                  <div className="divide-y divide-gray-200">
+                  <div className="divide-y divide-border">
                     {sessions.slice(0, 5).map((session) => (
                       <div key={session.id} className="py-4 flex items-center justify-between">
                         <div>
-                          <div className="text-gray-900">
+                          <div className="text-foreground">
                             {session.project_name || 'Untitled Session'}
                           </div>
-                          <div className="text-sm text-gray-500">
+                          <div className="text-sm text-muted-foreground">
                             {new Date(session.created_at).toLocaleDateString()}
                           </div>
                         </div>
                         <span className={`px-2 py-1 text-xs border ${
                           session.status === 'completed'
-                            ? 'border-green-600 text-green-700'
-                            : 'border-gray-400 text-gray-600'
+                            ? 'border-green-600 text-green-600 dark:border-green-400 dark:text-green-400'
+                            : 'border-border text-muted-foreground'
                         }`}>
                           {session.status}
                         </span>

@@ -126,7 +126,7 @@ export function ReviewInterface() {
       setSelectedRows(new Set());
     }
   };
-  
+
 
   const handleExport = (format: string, confidenceLevels: string[]) => {
     // Generate filename
@@ -135,7 +135,7 @@ export function ReviewInterface() {
       nginx: '_nginx.conf',
       wordpress: '_wordpress.csv',
     };
-    
+
     const formatNames: Record<string, string> = {
       apache: 'redirects_apache',
       nginx: 'redirects_nginx',
@@ -159,18 +159,18 @@ export function ReviewInterface() {
 
   const filteredRedirects = redirects.filter((r) => {
     const q = searchQuery.trim().toLowerCase();
-  
+
     const matchesSearch =
       q.length === 0 ||
       r.oldUrl.toLowerCase().includes(q) ||
       r.newUrl.toLowerCase().includes(q);
-  
+
     const matchesConfidence =
       confidenceFilter === 'all' || r.confidenceBand === confidenceFilter;
-  
+
     return matchesSearch && matchesConfidence;
   });
-  
+
   // Sort according to toolbar selection
   const sortedRedirects = [...filteredRedirects].sort((a, b) => {
     switch (sortOption) {
@@ -185,7 +185,7 @@ export function ReviewInterface() {
         return b.matchScore - a.matchScore;
     }
   });
-  
+
   // Pagination
   const totalPages = Math.max(1, Math.ceil(sortedRedirects.length / PAGE_SIZE));
   const currentPageSafe = Math.min(currentPage, totalPages);
@@ -204,12 +204,12 @@ export function ReviewInterface() {
   // Show loading state
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-gray-50">
+      <div className="min-h-screen">
         <Header currentView="review" />
         <div className="flex items-center justify-center h-screen">
           <div className="text-center">
-            <div className="text-lg font-medium text-gray-900 mb-2">Loading results...</div>
-            <div className="text-sm text-gray-600">Fetching your redirect mappings</div>
+            <div className="text-lg font-medium text-foreground mb-2">Loading results...</div>
+            <div className="text-sm text-muted-foreground">Fetching your redirect mappings</div>
           </div>
         </div>
       </div>
@@ -219,12 +219,12 @@ export function ReviewInterface() {
   // Show error state
   if (error) {
     return (
-      <div className="min-h-screen bg-gray-50">
+      <div className="min-h-screen">
         <Header currentView="review" />
         <div className="flex items-center justify-center h-screen">
           <div className="text-center">
-            <div className="text-lg font-medium text-red-600 mb-2">Error Loading Results</div>
-            <div className="text-sm text-gray-600 mb-4">{error}</div>
+            <div className="text-lg font-medium text-destructive mb-2">Error Loading Results</div>
+            <div className="text-sm text-muted-foreground mb-4">{error}</div>
             <Button onClick={() => navigate('/')}>
               <ArrowLeft className="h-4 w-4 mr-2" />
               Back to Dashboard
@@ -236,7 +236,7 @@ export function ReviewInterface() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen">
       <Header currentView="review" />
 
       <div className="flex">
@@ -279,7 +279,7 @@ export function ReviewInterface() {
           </div>
 
           {/* Bottom Controls */}
-          <div className="mt-6 flex items-center justify-between border-t border-gray-300 pt-6 bg-white px-6 py-4">
+          <div className="mt-6 flex items-center justify-between border-t border-border pt-6 bg-card px-6 py-4">
             <div className="flex items-center gap-4">
               <Select onValueChange={handleBulkAction}>
                 <SelectTrigger className="w-[200px]">
@@ -293,7 +293,7 @@ export function ReviewInterface() {
                 </SelectContent>
               </Select>
               {selectedRows.size > 0 && (
-                <span className="text-sm text-gray-600">
+                <span className="text-sm text-muted-foreground">
                   {selectedRows.size} row{selectedRows.size !== 1 ? 's' : ''} selected
                 </span>
               )}

@@ -3,6 +3,8 @@ import asyncio
 import traceback
 from uuid import uuid4
 from typing import Optional, Tuple, List
+from urllib.parse import urlparse
+from datetime import datetime
 from werkzeug.datastructures import FileStorage
 from src.redirx.lib import Pipeline
 from src.redirx.database import MigrationSessionDB
@@ -46,6 +48,72 @@ def read_csv(file_storage: FileStorage) -> List[str]:
         raise ValueError(f"Failed to read CSV file: {e}")
 
 
+def generate_project_name(new_csv_file: FileStorage) -> str:
+    """
+    Generate a project name based on the new site's base URL.
+
+    Strategy:
+    1. Read first 10 rows of new CSV file
+    2. Find first valid URL in the URL column
+    3. Extract base domain using urlparse(url).netloc
+    4. Strip "www." prefix if present
+    5. Format as "{domain} project"
+    6. Fallback to "Redirect Project {timestamp}" if no valid URL
+
+    Args:
+        new_csv_file: CSV file containing new site URLs
+
+    Returns:
+        Generated project name string
+
+    Examples:
+        "https://www.newsite.com/page" → "newsite.com project"
+        "https://blog.company.io/article" → "blog.company.io project"
+        No valid URLs → "Redirect Project 2024-12-28 15:30:45"
+    """
+    try:
+        # Save current position
+        new_csv_file.seek(0)
+        content = new_csv_file.read().decode("utf-8").splitlines()
+
+        # Reset file pointer for later use
+        new_csv_file.seek(0)
+
+        if not content:
+            return f"Redirect Project {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+
+        reader = csv.reader(content)
+
+        # Try to extract domain from first 10 valid URLs
+        for i, row in enumerate(reader):
+            if i >= 10:
+                break
+
+            if row and row[0].strip():
+                url = row[0].strip()
+
+                try:
+                    parsed = urlparse(url)
+                    domain = parsed.netloc
+
+                    if domain:
+                        # Strip "www." prefix if present
+                        if domain.startswith('www.'):
+                            domain = domain[4:]
+
+                        return f"{domain} project"
+                except Exception:
+                    # Skip invalid URLs
+                    continue
+
+        # Fallback if no valid URL found
+        return f"Redirect Project {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+
+    except Exception as e:
+        # Fallback on any error
+        return f"Redirect Project {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+
+
 def run_pipeline(
     old_csv_file: FileStorage,
     new_csv_file: FileStorage,
@@ -66,13 +134,16 @@ def run_pipeline(
         ValueError: If CSV files are invalid or empty
         RuntimeError: If pipeline execution fails
     """
+    # Generate project name from new site URLs
+    project_name = generate_project_name(new_csv_file)
+
     # Validate and read CSV files
     old_urls = read_csv(old_csv_file)
     new_urls = read_csv(new_csv_file)
 
-    # Create migration session
+    # Create migration session with generated project name
     session_db = MigrationSessionDB()
-    session_id = session_db.create_session(user_id=user_id)
+    session_id = session_db.create_session(user_id=user_id, project_name=project_name)
 
     try:
         # Create pipeline with session_id

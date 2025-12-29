@@ -136,6 +136,74 @@ def get_user_sessions():
         }), 500
 
 
+@user_blueprint.route("/sessions/<session_id>", methods=["PUT"])
+@require_auth
+def update_session(session_id):
+    """
+    Update a migration session (currently supports project_name updates).
+
+    Headers:
+        Authorization: Bearer <access_token>
+
+    Body:
+        {
+            "project_name": "New Project Name"
+        }
+
+    Response:
+        200: {
+            "success": true,
+            "session": { updated session object }
+        }
+        403: User doesn't own this session
+        404: Session not found
+    """
+    session_db = MigrationSessionDB()
+
+    try:
+        # Verify session belongs to authenticated user
+        existing = session_db.client.table('migration_sessions').select('*').eq(
+            'id', session_id
+        ).execute()
+
+        if not existing.data:
+            return jsonify({
+                "success": False,
+                "error": "Session not found"
+            }), 404
+
+        if existing.data[0]['user_id'] != str(request.user.id):
+            return jsonify({
+                "success": False,
+                "error": "Unauthorized: Session belongs to another user"
+            }), 403
+
+        # Get update data from request
+        data = request.get_json()
+
+        if not data or 'project_name' not in data:
+            return jsonify({
+                "success": False,
+                "error": "Missing project_name in request body"
+            }), 400
+
+        # Update session
+        result = session_db.client.table('migration_sessions').update({
+            'project_name': data['project_name']
+        }).eq('id', session_id).execute()
+
+        return jsonify({
+            "success": True,
+            "session": result.data[0]
+        }), 200
+
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+
 @user_blueprint.route("/profile", methods=["GET"])
 @require_auth
 def get_profile():

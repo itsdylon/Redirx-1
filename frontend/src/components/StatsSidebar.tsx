@@ -16,7 +16,7 @@ interface StatsSidebarProps {
 
 export function StatsSidebar({ stats }: StatsSidebarProps) {
   return (
-    <aside className="w-80 bg-white border-r border-gray-300 p-6">
+    <aside className="w-80 bg-white border-r border-gray-300 p-6 flex-shrink-0">
       <h2 className="text-gray-900 mb-4">Summary Statistics</h2>
       
       <Card className="p-4 mb-4 border-gray-300">

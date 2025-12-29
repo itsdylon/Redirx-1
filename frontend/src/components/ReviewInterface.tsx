@@ -238,7 +238,7 @@ export function ReviewInterface() {
   return (
     <div className="min-h-screen bg-gray-50">
       <Header currentView="review" />
-      
+
       <div className="flex">
         {/* Left Sidebar */}
         <StatsSidebar stats={stats} />

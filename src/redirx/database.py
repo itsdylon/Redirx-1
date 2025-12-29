@@ -49,20 +49,26 @@ class MigrationSessionDB:
     def __init__(self, client: Optional[Client] = None):
         self.client = client or SupabaseClient.get_client()
 
-    def create_session(self, user_id: str = 'default') -> UUID:
+    def create_session(self, user_id: str = 'default', project_name: Optional[str] = None) -> UUID:
         """
         Create a new migration session.
 
         Args:
             user_id: User identifier for the session.
+            project_name: Optional project/session name.
 
         Returns:
             UUID: The created session ID.
         """
-        result = self.client.table('migration_sessions').insert({
+        session_data = {
             'user_id': user_id,
             'status': 'pending'
-        }).execute()
+        }
+
+        if project_name:
+            session_data['project_name'] = project_name
+
+        result = self.client.table('migration_sessions').insert(session_data).execute()
 
         return UUID(result.data[0]['id'])
 

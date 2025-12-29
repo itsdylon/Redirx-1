@@ -36,6 +36,11 @@ export function ExportModal({ open, onOpenChange, onExport, redirects }: ExportM
   const [includeLow, setIncludeLow] = useState(false);
   const [previewExpanded, setPreviewExpanded] = useState(false);
 
+  // URL format options
+  const [urlFormat, setUrlFormat] = useState<'paths' | 'full' | 'custom'>('paths');
+  const [customOldDomain, setCustomOldDomain] = useState('');
+  const [customNewDomain, setCustomNewDomain] = useState('');
+
   // Live counts from actual data
   const totalHigh = redirects.filter((r) => r.confidenceBand === 'high').length;
   const totalMedium = redirects.filter((r) => r.confidenceBand === 'medium').length;
@@ -77,39 +82,124 @@ export function ExportModal({ open, onOpenChange, onExport, redirects }: ExportM
 
   const hasDuplicates = duplicateTargets > 0;
 
+  // Validate custom domains
+  const customDomainErrors: string[] = [];
+  if (urlFormat === 'custom') {
+    if (customOldDomain) {
+      try {
+        new URL(customOldDomain);
+      } catch {
+        customDomainErrors.push('Old domain must be a valid URL (e.g., https://example.com)');
+      }
+    }
+    if (customNewDomain) {
+      try {
+        new URL(customNewDomain);
+      } catch {
+        customDomainErrors.push('New domain must be a valid URL (e.g., https://example.com)');
+      }
+    }
+  }
+
+  const hasCustomDomainErrors = customDomainErrors.length > 0;
+
+  // URL transformation helper
+  const transformUrl = (url: string, type: 'old' | 'new'): string => {
+    if (urlFormat === 'full') {
+      return url; // Current behavior - keep full URLs
+    }
+
+    if (urlFormat === 'paths') {
+      // Extract path only
+      try {
+        const parsedUrl = new URL(url);
+        return parsedUrl.pathname;
+      } catch {
+        return url; // Fallback if URL is invalid
+      }
+    }
+
+    if (urlFormat === 'custom') {
+      // Replace domain with custom domain
+      try {
+        const parsedUrl = new URL(url);
+        const customDomain = type === 'old' ? customOldDomain : customNewDomain;
+
+        if (customDomain) {
+          const customParsed = new URL(customDomain);
+          parsedUrl.protocol = customParsed.protocol;
+          parsedUrl.host = customParsed.host;
+          return parsedUrl.href;
+        }
+
+        return url;
+      } catch {
+        return url; // Fallback if parsing fails
+      }
+    }
+
+    return url;
+  };
+
   // Single source of truth for export + preview content
-  const buildExportContent = (fmt: string, rules: RedirectMapping[]): string => {
+  const buildExportContent = (fmt: string, rules: RedirectMapping[], limitPreview = false): string => {
     if (!fmt) return 'Select a format to preview rules';
     if (rules.length === 0) return 'No redirects match the selected confidence levels.';
-    console.log(fmt);
+
+    // Limit to first 10 redirects for preview
+    const displayRules = limitPreview ? rules.slice(0, 10) : rules;
+    const hasMore = limitPreview && rules.length > 10;
+
+    let content = '';
+
     switch (fmt) {
       case 'apache':
         // .htaccess style: Redirect 301 /old /new
-        // Assumes 301; update if you later track status per rule.
-        return rules
-          .map((r) => `Redirect 301 ${r.oldUrl} ${r.newUrl}`)
+        content = displayRules
+          .map((r) => {
+            const oldPath = transformUrl(r.oldUrl, 'old');
+            const newPath = transformUrl(r.newUrl, 'new');
+            return `Redirect 301 ${oldPath} ${newPath}`;
+          })
           .join('\n');
+        break;
 
       case 'nginx':
         // Nginx map: map $uri $new_uri { /old /new; ... }
-        return [
+        content = [
           'map $uri $new_uri {',
-          ...rules.map((r) => `    ${r.oldUrl} ${r.newUrl};`),
+          ...displayRules.map((r) => {
+            const oldPath = transformUrl(r.oldUrl, 'old');
+            const newPath = transformUrl(r.newUrl, 'new');
+            return `    ${oldPath} ${newPath};`;
+          }),
           '}',
         ].join('\n');
+        break;
 
       case 'wordpress':
         // WordPress Redirection CSV: /old,/new,301
-        return rules
-          .map((r) => `${r.oldUrl},${r.newUrl},301`)
+        content = displayRules
+          .map((r) => {
+            const oldPath = transformUrl(r.oldUrl, 'old');
+            const newPath = transformUrl(r.newUrl, 'new');
+            return `${oldPath},${newPath},301`;
+          })
           .join('\n');
+        break;
 
       default:
         return 'Select a format to preview rules';
     }
+
+    if (hasMore) {
+      content += `\n\n... and ${rules.length - 10} more redirects`;
+    }
+
+    return content;
   };
 
-  const previewContent = buildExportContent(format, filteredRedirects);
+  const previewContent = buildExportContent(format, filteredRedirects, true);
 
   const handleDownload = () => {
     if (!format || selectedCount === 0) return;
@@ -174,6 +264,101 @@ export function ExportModal({ open, onOpenChange, onExport, redirects }: ExportM
                 <SelectItem value="wordpress">WordPress Redirection CSV</SelectItem>
               </SelectContent>
             </Select>
+          </div>
+
+          <Separator />
+
+          {/* URL Format Selection */}
+          <div>
+            <Label className="text-gray-700 mb-3 block font-medium">URL Format</Label>
+            <div className="space-y-3">
+              {/* Paths Only */}
+              <div className="flex items-start space-x-3">
+                <input
+                  type="radio"
+                  id="url-paths"
+                  name="urlFormat"
+                  checked={urlFormat === 'paths'}
+                  onChange={() => setUrlFormat('paths')}
+                  className="mt-1"
+                />
+                <div className="flex-1">
+                  <label htmlFor="url-paths" className="text-sm font-medium text-gray-900 cursor-pointer">
+                    Paths only (Recommended)
+                  </label>
+                  <p className="text-xs text-gray-600 mt-0.5">
+                    Export: <code className="bg-gray-100 px-1 rounded">/old-path</code> → <code className="bg-gray-100 px-1 rounded">/new-path</code>
+                  </p>
+                </div>
+              </div>
+
+              {/* Full URLs */}
+              <div className="flex items-start space-x-3">
+                <input
+                  type="radio"
+                  id="url-full"
+                  name="urlFormat"
+                  checked={urlFormat === 'full'}
+                  onChange={() => setUrlFormat('full')}
+                  className="mt-1"
+                />
+                <div className="flex-1">
+                  <label htmlFor="url-full" className="text-sm font-medium text-gray-900 cursor-pointer">
+                    Full URLs from CSV
+                  </label>
+                  <p className="text-xs text-gray-600 mt-0.5">
+                    Export: <code className="bg-gray-100 px-1 rounded text-xs">http://staging.com/old</code> → <code className="bg-gray-100 px-1 rounded text-xs">http://staging.com/new</code>
+                  </p>
+                </div>
+              </div>
+
+              {/* Custom Domains */}
+              <div className="flex items-start space-x-3">
+                <input
+                  type="radio"
+                  id="url-custom"
+                  name="urlFormat"
+                  checked={urlFormat === 'custom'}
+                  onChange={() => setUrlFormat('custom')}
+                  className="mt-1"
+                />
+                <div className="flex-1">
+                  <label htmlFor="url-custom" className="text-sm font-medium text-gray-900 cursor-pointer">
+                    Custom domains
+                  </label>
+                  <p className="text-xs text-gray-600 mt-0.5 mb-2">
+                    Replace staging domains with production domains
+                  </p>
+
+                  {urlFormat === 'custom' && (
+                    <div className="space-y-2 mt-2">
+                      <div>
+                        <Label htmlFor="custom-old" className="text-xs text-gray-600">Old domain (optional)</Label>
+                        <input
+                          id="custom-old"
+                          type="text"
+                          placeholder="https://example.com"
+                          value={customOldDomain}
+                          onChange={(e) => setCustomOldDomain(e.target.value)}
+                          className="w-full border border-gray-300 rounded px-2 py-1 text-sm mt-1"
+                        />
+                      </div>
+                      <div>
+                        <Label htmlFor="custom-new" className="text-xs text-gray-600">New domain (optional)</Label>
+                        <input
+                          id="custom-new"
+                          type="text"
+                          placeholder="https://example.com"
+                          value={customNewDomain}
+                          onChange={(e) => setCustomNewDomain(e.target.value)}
+                          className="w-full border border-gray-300 rounded px-2 py-1 text-sm mt-1"
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
           </div>
 
           <Separator />
@@ -246,6 +431,20 @@ export function ExportModal({ open, onOpenChange, onExport, redirects }: ExportM
             </Alert>
           )}
 
+          {/* Custom Domain Validation Errors */}
+          {hasCustomDomainErrors && (
+            <Alert variant="destructive">
+              <AlertTriangle className="h-4 w-4" />
+              <AlertDescription>
+                <div className="space-y-1">
+                  {customDomainErrors.map((error, idx) => (
+                    <div key={idx}>{error}</div>
+                  ))}
+                </div>
+              </AlertDescription>
+            </Alert>
+          )}
+
           {/* Preview Rules Section */}
           <Collapsible open={previewExpanded} onOpenChange={setPreviewExpanded}>
             <CollapsibleTrigger className="w-full">
@@ -257,20 +456,42 @@ export function ExportModal({ open, onOpenChange, onExport, redirects }: ExportM
                     <ChevronRight className="h-4 w-4 text-gray-600" />
                   )}
                   <span className="text-gray-900">Preview Rules</span>
+                  {filteredRedirects.length > 10 && (
+                    <span className="text-xs text-gray-500">(showing first 10 of {filteredRedirects.length})</span>
+                  )}
                 </div>
-                {format && selectedCount > 0 && (
+                {format && selectedCount > 0 && !hasCustomDomainErrors && (
                   <CheckCircle className="h-4 w-4 text-green-600" />
                 )}
               </div>
             </CollapsibleTrigger>
             <CollapsibleContent>
               <div className="border border-gray-300 border-t-0 p-4 bg-gray-50">
+                {/* URL Format Info */}
+                {format && selectedCount > 0 && (
+                  <div className="mb-3 text-xs text-gray-600">
+                    {urlFormat === 'paths' && (
+                      <span>URLs transformed to paths only (e.g., /page.html)</span>
+                    )}
+                    {urlFormat === 'full' && (
+                      <span>Full URLs preserved from CSV</span>
+                    )}
+                    {urlFormat === 'custom' && (
+                      <span>
+                        Custom domains applied
+                        {customOldDomain && ` - Old: ${customOldDomain}`}
+                        {customNewDomain && ` - New: ${customNewDomain}`}
+                      </span>
+                    )}
+                  </div>
+                )}
+
                 <div className="bg-white border border-gray-300 p-4 font-mono text-xs overflow-x-auto">
                   <pre className="text-gray-900 whitespace-pre">
                     {previewContent}
                   </pre>
                 </div>
-                {format && selectedCount > 0 && (
+                {format && selectedCount > 0 && !hasCustomDomainErrors && (
                   <div className="flex items-center gap-2 mt-3 text-sm text-green-700">
                     <CheckCircle className="h-4 w-4" />
                     <span>Syntax validation passed</span>
@@ -291,7 +512,7 @@ export function ExportModal({ open, onOpenChange, onExport, redirects }: ExportM
           </Button>
           <Button
             onClick={handleDownload}
-            disabled={!format || selectedCount === 0}
+            disabled={!format || selectedCount === 0 || hasCustomDomainErrors}
           >
             Download File
           </Button>

@@ -5,114 +5,73 @@ import { Card } from './ui/card';
 import { Button } from './ui/button';
 import { Progress } from './ui/progress';
 import { Separator } from './ui/separator';
-import { FileUp, TrendingUp, CheckCircle, BarChart3, Clock } from 'lucide-react';
-
-const API_BASE_URL = 'http://127.0.0.1:5001';
-
-interface DashboardData {
-  total_redirects: number;
-  total_sessions: number;
-  approval_progress: number;
-  average_confidence: number;
-  recent_sessions: Array<{
-    id: string;
-    project_name: string;
-    created_at: string;
-    total_mappings: number;
-    approved_mappings: number;
-    status: string;
-  }>;
-}
+import { FileUp, TrendingUp, CheckCircle, BarChart3, Clock, Pencil, Check, X } from 'lucide-react';
+import { fetchDashboardData, DashboardData } from '../api/dashboard';
+import { updateSessionName } from '../api/sessions';
 
 export function Dashboard() {
   const navigate = useNavigate();
   const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
+  const [editingName, setEditingName] = useState('');
 
   const fetchDashboard = async () => {
     setLoading(true);
     setError('');
 
-    // Mock data for demo
-    const mockData: DashboardData = {
-      total_redirects: 1247,
-      total_sessions: 12,
-      approval_progress: 87.5,
-      average_confidence: 82.3,
-      recent_sessions: [
-        {
-          id: 'ebcbe7cc-55b2-4f65-8c49-6b0926ee48ec',
-          project_name: 'Website Redesign 2024',
-          created_at: '2024-12-01T04:44:07.279817',
-          total_mappings: 342,
-          approved_mappings: 298,
-          status: 'completed'
-        },
-        {
-          id: 'a1b2c3d4-5678-90ab-cdef-1234567890ab',
-          project_name: 'Product Migration',
-          created_at: '2024-11-28T14:22:15.123456',
-          total_mappings: 215,
-          approved_mappings: 189,
-          status: 'completed'
-        },
-        {
-          id: 'b2c3d4e5-6789-01bc-def0-234567890abc',
-          project_name: 'Blog Platform Update',
-          created_at: '2024-11-25T09:15:33.987654',
-          total_mappings: 428,
-          approved_mappings: 401,
-          status: 'completed'
-        },
-        {
-          id: 'c3d4e5f6-7890-12cd-ef01-34567890abcd',
-          project_name: 'E-commerce Replatform',
-          created_at: '2024-11-20T16:45:22.456789',
-          total_mappings: 156,
-          approved_mappings: 142,
-          status: 'completed'
-        },
-        {
-          id: 'd4e5f6g7-8901-23de-f012-4567890abcde',
-          project_name: 'Documentation Site',
-          created_at: '2024-11-15T11:30:45.654321',
-          total_mappings: 106,
-          approved_mappings: 98,
-          status: 'completed'
-        }
-      ]
-    };
-
-    setTimeout(() => {
-      setDashboardData(mockData);
-      setLoading(false);
-    }, 500); // Simulate loading delay
-
-    /* Real API call - commented out for demo
     try {
-      const token = localStorage.getItem('access_token');
-      const response = await fetch(`${API_BASE_URL}/api/user/dashboard`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        setDashboardData(data);
-      } else {
-        setError('Failed to load dashboard data');
-      }
+      const data = await fetchDashboardData();
+      setDashboardData(data);
     } catch (err) {
-      setError('Failed to load dashboard data');
+      const errorMessage = err instanceof Error ? err.message : 'Failed to load dashboard data';
+      setError(errorMessage);
+
+      // If unauthorized, redirect to login
+      if (errorMessage.includes('Unauthorized')) {
+        localStorage.removeItem('access_token');
+        localStorage.removeItem('refresh_token');
+        navigate('/login');
+      }
     } finally {
       setLoading(false);
     }
-    */
   };
 
   useEffect(() => {
     fetchDashboard();
   }, []);
+
+  const handleStartEdit = (sessionId: string, currentName: string) => {
+    setEditingSessionId(sessionId);
+    setEditingName(currentName || 'Untitled Session');
+  };
+
+  const handleCancelEdit = () => {
+    setEditingSessionId(null);
+    setEditingName('');
+  };
+
+  const handleSaveEdit = async (sessionId: string) => {
+    try {
+      await updateSessionName(sessionId, editingName);
+
+      // Update local state optimistically
+      if (dashboardData) {
+        const updatedSessions = dashboardData.recent_sessions.map(session =>
+          session.id === sessionId ? { ...session, project_name: editingName } : session
+        );
+        setDashboardData({ ...dashboardData, recent_sessions: updatedSessions });
+      }
+
+      setEditingSessionId(null);
+      setEditingName('');
+    } catch (err) {
+      console.error('Failed to update session name:', err);
+      alert('Failed to update project name. Please try again.');
+    }
+  };
 
   if (loading) {
     return (
@@ -130,9 +89,10 @@ export function Dashboard() {
       <div className="min-h-screen bg-gray-50">
         <Header currentView="dashboard" />
         <main className="max-w-7xl mx-auto p-8">
-          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
+          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-4">
             {error}
           </div>
+          <Button onClick={fetchDashboard}>Retry</Button>
         </main>
       </div>
     );
@@ -238,7 +198,48 @@ export function Dashboard() {
                       key={session.id}
                       className={index !== (dashboardData?.recent_sessions?.length || 0) - 1 ? 'border-b border-gray-200' : ''}
                     >
-                      <td className="p-4 text-gray-900">{session.project_name || 'Untitled Session'}</td>
+                      <td className="p-4 text-gray-900">
+                        {editingSessionId === session.id ? (
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="text"
+                              value={editingName}
+                              onChange={(e) => setEditingName(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') handleSaveEdit(session.id);
+                                if (e.key === 'Escape') handleCancelEdit();
+                              }}
+                              className="border border-gray-300 rounded px-2 py-1 text-sm flex-1"
+                              autoFocus
+                            />
+                            <button
+                              onClick={() => handleSaveEdit(session.id)}
+                              className="text-green-600 hover:text-green-700"
+                              title="Save"
+                            >
+                              <Check className="h-4 w-4" />
+                            </button>
+                            <button
+                              onClick={handleCancelEdit}
+                              className="text-red-600 hover:text-red-700"
+                              title="Cancel"
+                            >
+                              <X className="h-4 w-4" />
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-2">
+                            <span>{session.project_name || 'Untitled Session'}</span>
+                            <button
+                              onClick={() => handleStartEdit(session.id, session.project_name)}
+                              className="text-gray-400 hover:text-gray-600"
+                              title="Edit project name"
+                            >
+                              <Pencil className="h-3 w-3" />
+                            </button>
+                          </div>
+                        )}
+                      </td>
                       <td className="p-4 text-gray-600 flex items-center gap-2">
                         <Clock className="h-3 w-3" />
                         {new Date(session.created_at).toLocaleDateString()}

@@ -1,21 +1,45 @@
-import { useState, useEffect } from 'react';
-import { Progress } from './ui/progress';
+import { useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Loader2 } from 'lucide-react';
+import { Button } from './ui/button';
+import { getSessionStatus } from '../api/sessions';
 
-export function LoadingScreen() {
-  const [progress, setProgress] = useState(0);
+interface LoadingScreenProps {
+  sessionId?: string | null;
+}
 
+const POLL_INTERVAL = 3000; // 3 seconds
+
+export function LoadingScreen({ sessionId }: LoadingScreenProps) {
+  const navigate = useNavigate();
+
+  // Poll for job completion
   useEffect(() => {
-    // Simulate progress
-    const progressInterval = setInterval(() => {
-      setProgress((prev) => {
-        if (prev >= 95) return prev;
-        return prev + Math.random() * 3;
-      });
-    }, 800);
+    if (!sessionId) return;
 
-    return () => clearInterval(progressInterval);
-  }, []);
+    const pollInterval = setInterval(async () => {
+      try {
+        const status = await getSessionStatus(sessionId);
+
+        if (status.status === 'completed') {
+          clearInterval(pollInterval);
+          navigate(`/review/${sessionId}`);
+        } else if (status.status === 'failed') {
+          clearInterval(pollInterval);
+          // Could show an error state here
+          console.error('Job failed');
+        }
+      } catch (error) {
+        console.error('Error polling status:', error);
+      }
+    }, POLL_INTERVAL);
+
+    return () => clearInterval(pollInterval);
+  }, [sessionId, navigate]);
+
+  const handleContinueInBackground = () => {
+    navigate('/');
+  };
 
   return (
     <div className="min-h-screen flex items-center justify-center p-8">
@@ -30,16 +54,26 @@ export function LoadingScreen() {
 
           {/* Heading */}
           <h1 className="text-foreground mb-2">Processing Redirects</h1>
-          <p className="text-muted-foreground mb-8">Analyzing and matching URLs...</p>
+          <p className="text-muted-foreground mb-6">
+            Analyzing and matching your URLs. This may take a few minutes.
+          </p>
 
-          {/* Progress Section */}
-          <div className="mb-6 bg-card border border-border p-6">
-            <div className="flex justify-between items-center mb-2">
-              <span className="text-muted-foreground">Progress</span>
-              <span className="text-foreground">{Math.floor(progress)}%</span>
-            </div>
-            <Progress value={progress} className="h-2" />
+          {/* Info box */}
+          <div className="mb-6 bg-card border border-border p-4 text-left">
+            <p className="text-sm text-muted-foreground">
+              You can wait here or continue working. Your job will process in the background
+              and you can view the results from your dashboard.
+            </p>
           </div>
+
+          {/* Continue in Background Button */}
+          <Button
+            variant="outline"
+            onClick={handleContinueInBackground}
+            className="w-full"
+          >
+            Continue in background
+          </Button>
         </div>
       </div>
     </div>

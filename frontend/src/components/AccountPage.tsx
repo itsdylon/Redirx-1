@@ -7,8 +7,8 @@ import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Separator } from './ui/separator';
 import { ArrowLeft, User, Building, Mail, CreditCard, BarChart3, Clock } from 'lucide-react';
-
-const API_BASE_URL = 'http://127.0.0.1:5001';
+import { API_BASE_URL, getAuthHeaders } from '../api/config';
+import { formatDate } from '../utils/date';
 
 interface UserProfile {
   id: string;
@@ -43,13 +43,6 @@ export function AccountPage() {
   const [fullName, setFullName] = useState('');
   const [company, setCompany] = useState('');
 
-  const getAuthHeaders = () => {
-    const token = localStorage.getItem('access_token');
-    return {
-      'Authorization': `Bearer ${token}`,
-      'Content-Type': 'application/json'
-    };
-  };
 
   const fetchProfileAndSessions = async () => {
     setLoading(true);
@@ -301,7 +294,7 @@ export function AccountPage() {
                             {session.project_name || 'Untitled Session'}
                           </div>
                           <div className="text-sm text-muted-foreground">
-                            {new Date(session.created_at).toLocaleDateString()}
+                            {formatDate(session.created_at)}
                           </div>
                         </div>
                         <span className={`px-2 py-1 text-xs border ${

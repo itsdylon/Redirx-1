@@ -20,7 +20,14 @@ from backend.routes.user_routes import user_blueprint
 
 def create_app():
     app = Flask(__name__)
-    CORS(app)  # allow frontend to call this backend
+
+    # Configure CORS - restrict origins in production
+    # Set CORS_ORIGINS env var to comma-separated list of allowed origins
+    # e.g., "https://redirx.onrender.com,https://www.redirx.com"
+    cors_origins = os.getenv('CORS_ORIGINS', '*')
+    if cors_origins != '*':
+        cors_origins = [origin.strip() for origin in cors_origins.split(',')]
+    CORS(app, origins=cors_origins)
 
     app.register_blueprint(pipeline_blueprint, url_prefix="/api")
     app.register_blueprint(auth_blueprint, url_prefix="/api/auth")
@@ -30,17 +37,19 @@ def create_app():
     def home():
         return "Redirx backend is running!"
 
-    @app.route("/api/debug/routes")
-    def debug_routes():
-        """Debug endpoint to list all registered routes"""
-        routes = []
-        for rule in app.url_map.iter_rules():
-            routes.append({
-                'endpoint': rule.endpoint,
-                'methods': list(rule.methods),
-                'path': str(rule)
-            })
-        return {'routes': sorted(routes, key=lambda x: x['path'])}
+    # Debug routes - only available in development
+    if os.getenv('FLASK_ENV') == 'development' or os.getenv('FLASK_DEBUG') == '1':
+        @app.route("/api/debug/routes")
+        def debug_routes():
+            """Debug endpoint to list all registered routes"""
+            routes = []
+            for rule in app.url_map.iter_rules():
+                routes.append({
+                    'endpoint': rule.endpoint,
+                    'methods': list(rule.methods),
+                    'path': str(rule)
+                })
+            return {'routes': sorted(routes, key=lambda x: x['path'])}
 
     return app
 

@@ -204,6 +204,65 @@ def update_session(session_id):
         }), 500
 
 
+@user_blueprint.route("/sessions/<session_id>/status", methods=["GET"])
+@require_auth
+def get_session_status(session_id):
+    """
+    Get the current status of a specific session.
+    Used for polling during background job processing.
+
+    Headers:
+        Authorization: Bearer <access_token>
+
+    Response:
+        200: {
+            "success": true,
+            "session_id": "uuid",
+            "status": "pending" | "processing" | "completed" | "failed",
+            "project_name": "...",
+            "total_mappings": 0
+        }
+        403: User doesn't own this session
+        404: Session not found
+    """
+    session_db = MigrationSessionDB()
+
+    try:
+        # Fetch session
+        result = session_db.client.table('migration_sessions').select(
+            'id, status, project_name, total_mappings, user_id'
+        ).eq('id', session_id).execute()
+
+        if not result.data:
+            return jsonify({
+                "success": False,
+                "error": "Session not found"
+            }), 404
+
+        session = result.data[0]
+
+        # Verify session belongs to authenticated user
+        if session['user_id'] != str(request.user.id):
+            return jsonify({
+                "success": False,
+                "error": "Unauthorized"
+            }), 403
+
+        return jsonify({
+            "success": True,
+            "session_id": session['id'],
+            "status": session['status'],
+            "project_name": session.get('project_name', 'Untitled'),
+            "total_mappings": session.get('total_mappings', 0)
+        }), 200
+
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+
 @user_blueprint.route("/profile", methods=["GET"])
 @require_auth
 def get_profile():

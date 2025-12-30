@@ -1,4 +1,4 @@
-import { uploadCSVs } from "../api/pipeline";
+import { uploadCSVs, QuotaExceededError } from "../api/pipeline";
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Header } from './Header';
@@ -6,7 +6,7 @@ import { FileUploadZone } from './FileUploadZone';
 import { LoadingScreen } from './LoadingScreen';
 import { Button } from './ui/button';
 import { Toaster } from './ui/sonner';
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, AlertTriangle } from 'lucide-react';
 
 interface FileData {
   name: string;
@@ -14,11 +14,20 @@ interface FileData {
   file: File;
 }
 
+interface QuotaError {
+  message: string;
+  current_usage: number;
+  limit: number;
+}
+
 export function UploadPage() {
   const navigate = useNavigate();
   const [isLoading, setIsLoading] = useState(false);
+  const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [oldSiteFile, setOldSiteFile] = useState<FileData | null>(null);
   const [newSiteFile, setNewSiteFile] = useState<FileData | null>(null);
+  const [quotaError, setQuotaError] = useState<QuotaError | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   // Raw file objects needed for API
   const [oldCsvFile, setOldCsvFile] = useState<File | null>(null);
@@ -50,10 +59,13 @@ export function UploadPage() {
 
   const handleBeginMatching = async () => {
     if (!oldCsvFile || !newCsvFile) {
-      alert("Upload both CSV files first.");
+      setError("Upload both CSV files first.");
       return;
     }
 
+    // Clear previous errors
+    setError(null);
+    setQuotaError(null);
     setIsLoading(true);
 
     try {
@@ -61,14 +73,28 @@ export function UploadPage() {
 
       console.log("Pipeline Response:", result);
 
-      // Navigate to review page with session ID
+      // Store session ID - LoadingScreen will poll and navigate when complete
       if (result.session_id) {
-        navigate(`/review/${result.session_id}`);
+        setCurrentSessionId(result.session_id);
       }
-    } catch (error) {
-      console.error(error);
-      alert("Error running pipeline.");
+    } catch (err) {
+      console.error(err);
       setIsLoading(false);
+      setCurrentSessionId(null);
+
+      // Check if it's a quota exceeded error
+      if (err && typeof err === 'object' && 'type' in err && (err as QuotaExceededError).type === 'quota_exceeded') {
+        const quotaErr = err as QuotaExceededError;
+        setQuotaError({
+          message: quotaErr.message,
+          current_usage: quotaErr.current_usage,
+          limit: quotaErr.limit
+        });
+      } else if (err instanceof Error) {
+        setError(err.message);
+      } else {
+        setError("An unexpected error occurred.");
+      }
     }
   };
 
@@ -78,7 +104,7 @@ export function UploadPage() {
   if (isLoading) {
     return (
       <>
-        <LoadingScreen />
+        <LoadingScreen sessionId={currentSessionId} />
         <Toaster position="top-right" />
       </>
     );
@@ -103,6 +129,34 @@ export function UploadPage() {
             <h1 className="text-foreground mb-2">Upload CSV Files</h1>
             <p className="text-muted-foreground">Upload CSV files from your old and new site to begin the redirect mapping process.</p>
           </div>
+
+          {/* Quota Exceeded Error */}
+          {quotaError && (
+            <div className="mb-6 border border-yellow-500 bg-yellow-500/10 p-4 flex items-start gap-3">
+              <AlertTriangle className="h-5 w-5 text-yellow-500 flex-shrink-0 mt-0.5" />
+              <div>
+                <div className="font-medium text-yellow-600 dark:text-yellow-400">Usage Limit Reached</div>
+                <p className="text-sm text-muted-foreground mt-1">
+                  You've used {quotaError.current_usage} of {quotaError.limit} redirects this month.
+                </p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="mt-3"
+                  onClick={() => navigate('/account')}
+                >
+                  View Account & Upgrade
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {/* General Error */}
+          {error && (
+            <div className="mb-6 border border-destructive bg-destructive/10 p-4 text-destructive">
+              {error}
+            </div>
+          )}
 
           {/* Upload Zones */}
           <div className="grid grid-cols-2 gap-6 mb-8">

@@ -3,7 +3,7 @@ from uuid import UUID
 from backend.services.pipeline_runner import run_pipeline
 from backend.services.results_formatter import format_results_response
 from backend.services.auth_service import require_auth
-from src.redirx.database import URLMappingDB, MigrationSessionDB
+from src.redirx.database import URLMappingDB, MigrationSessionDB, UserQuotaDB
 
 pipeline_blueprint = Blueprint("pipeline", __name__)
 
@@ -59,6 +59,19 @@ def process_csv():
 
     # Get user_id from authenticated user
     user_id = str(request.user.id)
+
+    # Check user quota before processing
+    quota_db = UserQuotaDB()
+    has_quota, current_usage, limit = quota_db.check_quota(user_id)
+
+    if not has_quota:
+        return jsonify({
+            "success": False,
+            "error": "Usage limit exceeded",
+            "message": f"You have used {current_usage} of {limit} redirects this month. Please upgrade your plan for more.",
+            "current_usage": current_usage,
+            "limit": limit
+        }), 429
 
     try:
         # Run the pipeline

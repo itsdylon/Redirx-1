@@ -49,13 +49,21 @@ class MigrationSessionDB:
     def __init__(self, client: Optional[Client] = None):
         self.client = client or SupabaseClient.get_client()
 
-    def create_session(self, user_id: str = 'default', project_name: Optional[str] = None) -> UUID:
+    def create_session(
+        self,
+        user_id: str = 'default',
+        project_name: Optional[str] = None,
+        old_urls: Optional[List[str]] = None,
+        new_urls: Optional[List[str]] = None
+    ) -> UUID:
         """
         Create a new migration session.
 
         Args:
             user_id: User identifier for the session.
             project_name: Optional project/session name.
+            old_urls: Optional list of old site URLs (for background processing).
+            new_urls: Optional list of new site URLs (for background processing).
 
         Returns:
             UUID: The created session ID.
@@ -67,6 +75,12 @@ class MigrationSessionDB:
 
         if project_name:
             session_data['project_name'] = project_name
+
+        if old_urls is not None:
+            session_data['old_urls'] = old_urls
+
+        if new_urls is not None:
+            session_data['new_urls'] = new_urls
 
         result = self.client.table('migration_sessions').insert(session_data).execute()
 
@@ -208,6 +222,78 @@ class WebPageEmbeddingDB:
                 record['embedding'] = json.loads(record['embedding'])
 
         return result.data
+
+
+class UserQuotaDB:
+    """
+    Database operations for user usage quotas.
+    """
+
+    def __init__(self, client: Optional[Client] = None):
+        self.client = client or SupabaseClient.get_client()
+
+    def check_quota(self, user_id: str) -> tuple[bool, int, int]:
+        """
+        Check if user has remaining quota for processing.
+
+        Args:
+            user_id: The user's ID.
+
+        Returns:
+            Tuple of (has_quota, current_usage, limit).
+        """
+        result = self.client.table('user_profiles').select(
+            'usage_current_month, usage_limit_redirects'
+        ).eq('id', user_id).execute()
+
+        if not result.data:
+            # No profile found - allow with default limits
+            return True, 0, 1000
+
+        profile = result.data[0]
+        current = profile.get('usage_current_month') or 0
+        limit = profile.get('usage_limit_redirects') or 1000
+
+        return current < limit, current, limit
+
+    def increment_usage(self, user_id: str, count: int) -> None:
+        """
+        Increment the user's monthly usage count.
+
+        Args:
+            user_id: The user's ID.
+            count: Number of redirects to add to usage.
+        """
+        try:
+            # Use database function for atomic increment (prevents race conditions)
+            self.client.rpc('increment_user_usage', {
+                'target_user_id': user_id,
+                'amount': count
+            }).execute()
+        except Exception:
+            # Fallback to direct update if function doesn't exist
+            result = self.client.table('user_profiles').select(
+                'usage_current_month'
+            ).eq('id', user_id).execute()
+
+            if result.data:
+                current = result.data[0].get('usage_current_month') or 0
+                self.client.table('user_profiles').update({
+                    'usage_current_month': current + count
+                }).eq('id', user_id).execute()
+
+    def get_remaining_quota(self, user_id: str) -> int:
+        """
+        Get the remaining quota for a user.
+
+        Args:
+            user_id: The user's ID.
+
+        Returns:
+            Number of remaining redirects allowed.
+        """
+        has_quota, current, limit = self.check_quota(user_id)
+        return max(0, limit - current)
 
 
 class URLMappingDB:

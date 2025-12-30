@@ -1,13 +1,16 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Header } from './Header';
 import { Card } from './ui/card';
 import { Button } from './ui/button';
 import { Progress } from './ui/progress';
 import { Separator } from './ui/separator';
-import { FileUp, TrendingUp, CheckCircle, BarChart3, Clock, Pencil, Check, X } from 'lucide-react';
+import { FileUp, TrendingUp, CheckCircle, BarChart3, Clock, Pencil, Check, X, Loader2 } from 'lucide-react';
 import { fetchDashboardData, DashboardData } from '../api/dashboard';
 import { updateSessionName } from '../api/sessions';
+import { formatDate } from '../utils/date';
+
+const POLL_INTERVAL = 5000; // 5 seconds
 
 export function Dashboard() {
   const navigate = useNavigate();
@@ -16,6 +19,8 @@ export function Dashboard() {
   const [error, setError] = useState('');
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState('');
+  const [recentlyCompleted, setRecentlyCompleted] = useState<Set<string>>(new Set());
+  const previousProcessingRef = useRef<string[]>([]);
 
   const fetchDashboard = async () => {
     setLoading(true);
@@ -42,6 +47,56 @@ export function Dashboard() {
   useEffect(() => {
     fetchDashboard();
   }, []);
+
+  // Poll for status updates when there are processing sessions
+  useEffect(() => {
+    const hasProcessingSessions = dashboardData?.recent_sessions?.some(
+      s => s.status === 'pending' || s.status === 'processing'
+    );
+
+    if (!hasProcessingSessions) {
+      // Update the ref when no processing sessions
+      previousProcessingRef.current = [];
+      return;
+    }
+
+    // Track currently processing sessions
+    const currentProcessing = dashboardData?.recent_sessions
+      ?.filter(s => s.status === 'pending' || s.status === 'processing')
+      .map(s => s.id) || [];
+
+    const pollInterval = setInterval(async () => {
+      try {
+        const data = await fetchDashboardData();
+
+        // Check for newly completed sessions
+        const newlyCompleted = previousProcessingRef.current.filter(id => {
+          const session = data.recent_sessions.find(s => s.id === id);
+          return session && session.status === 'completed';
+        });
+
+        if (newlyCompleted.length > 0) {
+          setRecentlyCompleted(new Set(newlyCompleted));
+          // Clear highlight after 3 seconds
+          setTimeout(() => setRecentlyCompleted(new Set()), 3000);
+        }
+
+        // Update the ref with current processing sessions
+        previousProcessingRef.current = data.recent_sessions
+          ?.filter(s => s.status === 'pending' || s.status === 'processing')
+          .map(s => s.id) || [];
+
+        setDashboardData(data);
+      } catch (err) {
+        console.error('Error polling dashboard:', err);
+      }
+    }, POLL_INTERVAL);
+
+    // Initialize the ref
+    previousProcessingRef.current = currentProcessing;
+
+    return () => clearInterval(pollInterval);
+  }, [dashboardData?.recent_sessions]);
 
   const handleStartEdit = (sessionId: string, currentName: string) => {
     setEditingSessionId(sessionId);
@@ -242,16 +297,27 @@ export function Dashboard() {
                       </td>
                       <td className="p-4 text-muted-foreground flex items-center gap-2">
                         <Clock className="h-3 w-3" />
-                        {new Date(session.created_at).toLocaleDateString()}
+                        {formatDate(session.created_at)}
                       </td>
                       <td className="p-4 text-foreground">{session.total_mappings || 0}</td>
                       <td className="p-4">
-                        <span className={`border px-2 py-1 text-xs ${
+                        <span className={`inline-flex items-center gap-1 border px-2 py-1 text-xs transition-all duration-500 ${
                           session.status === 'completed'
-                            ? 'border-green-600 dark:border-green-400 text-green-700 dark:text-green-400'
-                            : 'border-border text-muted-foreground'
+                            ? recentlyCompleted.has(session.id)
+                              ? 'border-green-500 bg-green-500/20 text-green-600 dark:text-green-400 animate-pulse'
+                              : 'border-green-600 dark:border-green-400 text-green-700 dark:text-green-400'
+                            : session.status === 'processing'
+                              ? 'border-blue-500 text-blue-600 dark:text-blue-400'
+                              : session.status === 'pending'
+                                ? 'border-yellow-500 text-yellow-600 dark:text-yellow-400'
+                                : session.status === 'failed'
+                                  ? 'border-red-500 text-red-600 dark:text-red-400'
+                                  : 'border-border text-muted-foreground'
                         }`}>
-                          {session.status}
+                          {(session.status === 'processing' || session.status === 'pending') && (
+                            <Loader2 className="h-3 w-3 animate-spin" />
+                          )}
+                          {session.status === 'pending' ? 'Queued' : session.status}
                         </span>
                       </td>
                       <td className="p-4">

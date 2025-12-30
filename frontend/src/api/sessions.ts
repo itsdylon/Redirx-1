@@ -1,8 +1,30 @@
-const API_BASE_URL = 'http://127.0.0.1:5001';
+import { API_BASE_URL, getAuthHeaders } from './config';
 
-function getAuthHeaders(): HeadersInit {
-  const token = localStorage.getItem('access_token');
-  return token ? { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json' };
+export interface SessionStatus {
+  success: boolean;
+  session_id: string;
+  status: 'pending' | 'processing' | 'completed' | 'failed';
+  project_name: string;
+  total_mappings: number;
+}
+
+export async function getSessionStatus(sessionId: string): Promise<SessionStatus> {
+  const response = await fetch(`${API_BASE_URL}/api/user/sessions/${sessionId}/status`, {
+    method: 'GET',
+    headers: getAuthHeaders(),
+  });
+
+  if (!response.ok) {
+    if (response.status === 401) {
+      throw new Error('Unauthorized. Please log in again.');
+    }
+    if (response.status === 404) {
+      throw new Error('Session not found.');
+    }
+    throw new Error(`Failed to fetch session status: ${response.status}`);
+  }
+
+  return await response.json();
 }
 
 export async function updateSessionName(sessionId: string, projectName: string): Promise<any> {

@@ -1,8 +1,10 @@
-const API_BASE_URL = 'http://127.0.0.1:5001';
+import { API_BASE_URL, getAuthHeadersMultipart, getAuthHeaders } from './config';
 
-function getAuthHeaders(): HeadersInit {
-  const token = localStorage.getItem('access_token');
-  return token ? { 'Authorization': `Bearer ${token}` } : {};
+export interface QuotaExceededError {
+  type: 'quota_exceeded';
+  message: string;
+  current_usage: number;
+  limit: number;
 }
 
 export async function uploadCSVs(oldFile: File, newFile: File) {
@@ -12,12 +14,25 @@ export async function uploadCSVs(oldFile: File, newFile: File) {
 
   const response = await fetch(`${API_BASE_URL}/api/process`, {
     method: "POST",
-    headers: getAuthHeaders(),
+    headers: getAuthHeadersMultipart(),
     body: formData,
   });
 
   if (!response.ok) {
-    throw new Error(`Failed to upload CSVs: ${response.status}`);
+    const data = await response.json().catch(() => ({}));
+
+    // Handle quota exceeded (429)
+    if (response.status === 429) {
+      const error: QuotaExceededError = {
+        type: 'quota_exceeded',
+        message: data.message || 'Usage limit exceeded',
+        current_usage: data.current_usage || 0,
+        limit: data.limit || 1000
+      };
+      throw error;
+    }
+
+    throw new Error(data.error || `Failed to upload CSVs: ${response.status}`);
   }
 
   return await response.json();

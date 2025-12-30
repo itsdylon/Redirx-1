@@ -1,12 +1,8 @@
 import csv
-import asyncio
-import traceback
-from uuid import uuid4
-from typing import Optional, Tuple, List
+from typing import Optional, List
 from urllib.parse import urlparse
 from datetime import datetime
 from werkzeug.datastructures import FileStorage
-from src.redirx.lib import Pipeline
 from src.redirx.database import MigrationSessionDB
 
 
@@ -120,7 +116,11 @@ def run_pipeline(
     user_id: str = "default_user"
 ) -> Optional[str]:
     """
-    Run the Redirx pipeline on CSV files containing old and new site URLs.
+    Queue a Redirx pipeline job for background processing.
+
+    This function creates a session with the URLs stored in the database
+    and returns immediately. The actual pipeline execution is handled
+    by the background worker (backend/worker.py).
 
     Args:
         old_csv_file: CSV file containing old site URLs
@@ -128,11 +128,10 @@ def run_pipeline(
         user_id: User ID for tracking the migration session
 
     Returns:
-        Session ID (UUID as string) or None if pipeline fails
+        Session ID (UUID as string) for tracking the job
 
     Raises:
         ValueError: If CSV files are invalid or empty
-        RuntimeError: If pipeline execution fails
     """
     # Generate project name from new site URLs
     project_name = generate_project_name(new_csv_file)
@@ -141,36 +140,17 @@ def run_pipeline(
     old_urls = read_csv(old_csv_file)
     new_urls = read_csv(new_csv_file)
 
-    # Create migration session with generated project name
+    # Create migration session with URLs stored for background processing
     session_db = MigrationSessionDB()
-    session_id = session_db.create_session(user_id=user_id, project_name=project_name)
+    session_id = session_db.create_session(
+        user_id=user_id,
+        project_name=project_name,
+        old_urls=old_urls,
+        new_urls=new_urls
+    )
 
-    try:
-        # Create pipeline with session_id
-        pipeline = Pipeline(
-            input=(old_urls, new_urls),
-            session_id=session_id
-        )
+    print(f"[API] Created job {session_id} with {len(old_urls)} old URLs and {len(new_urls)} new URLs")
+    print(f"[API] Job queued for background processing (status: pending)")
 
-        # Run pipeline asynchronously
-        async def _run_async():
-            final_state = None
-            async for step in pipeline.iterate():
-                final_state = step
-            return final_state
-
-        old_pages, new_pages, mappings = asyncio.run(_run_async())
-
-        # Return session_id directly from pipeline
-        return str(pipeline.session_id)
-
-    except Exception as e:
-        # Log error with full traceback
-        print(f"\n{'='*60}")
-        print(f"PIPELINE EXECUTION FAILED")
-        print(f"{'='*60}")
-        print(f"Error: {e}")
-        print(f"\nFull traceback:")
-        traceback.print_exc()
-        print(f"{'='*60}\n")
-        raise RuntimeError(f"Pipeline execution failed: {e}")
+    # Return session_id immediately - worker will process the job
+    return str(session_id)

@@ -1,9 +1,4 @@
-const API_BASE_URL = 'http://127.0.0.1:5001';
-
-function getAuthHeaders(): HeadersInit {
-  const token = localStorage.getItem('access_token');
-  return token ? { 'Authorization': `Bearer ${token}` } : {};
-}
+import { API_BASE_URL, getAuthHeaders } from './config';
 
 export interface DashboardData {
   success: boolean;

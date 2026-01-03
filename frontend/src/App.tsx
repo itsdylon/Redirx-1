@@ -2,6 +2,7 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import { useAuth } from './contexts/AuthContext';
 import { LoginPage } from './components/LoginPage';
 import { SignupPage } from './components/SignupPage';
+import { AuthCallback } from './components/AuthCallback';
 import { Dashboard } from './components/Dashboard';
 import { UploadPage } from './components/UploadPage';
 import { ReviewInterface } from './components/ReviewInterface';
@@ -30,6 +31,10 @@ export default function App() {
       <Route
         path="/signup"
         element={user ? <Navigate to="/" replace /> : <SignupPage />}
+      />
+      <Route
+        path="/auth/callback"
+        element={<AuthCallback />}
       />
 
       {/* Protected routes */}

@@ -39,7 +39,7 @@ class AuthService:
             full_name: User's full name
 
         Returns:
-            Dict with user data and JWT tokens
+            Dict with user data and JWT tokens, or email_confirmation_required flag
 
         Raises:
             Exception: If registration fails (duplicate email, weak password, etc.)
@@ -54,14 +54,22 @@ class AuthService:
             }
         })
 
-        if not response.user or not response.session:
-            raise Exception("Registration failed - no user or session returned")
+        if not response.user:
+            raise Exception("Registration failed - no user returned")
+
+        # If user exists but no session, email confirmation is required
+        if not response.session:
+            return {
+                "user": response.user,
+                "email_confirmation_required": True
+            }
 
         return {
             "user": response.user,
             "session": response.session,
             "access_token": response.session.access_token,
-            "refresh_token": response.session.refresh_token
+            "refresh_token": response.session.refresh_token,
+            "email_confirmation_required": False
         }
 
     def login(self, email: str, password: str) -> Dict:

@@ -12,6 +12,8 @@ export function SignupPage() {
   const [fullName, setFullName] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [emailSent, setEmailSent] = useState(false);
+  const [sentToEmail, setSentToEmail] = useState('');
 
   const { register } = useAuth();
   const navigate = useNavigate();
@@ -34,14 +36,64 @@ export function SignupPage() {
     setLoading(true);
 
     try {
-      await register(email, password, fullName);
-      navigate('/');
+      const result = await register(email, password, fullName);
+
+      if (result.emailConfirmationRequired) {
+        // Show email confirmation message
+        setEmailSent(true);
+        setSentToEmail(result.email || email);
+      } else {
+        // Immediate login - navigate to dashboard
+        navigate('/');
+      }
     } catch (err: any) {
       setError(err.message);
     } finally {
       setLoading(false);
     }
   };
+
+  // Show success message after email is sent
+  if (emailSent) {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-4">
+        <Card className="w-full max-w-md p-8 text-center">
+          <div className="mb-6">
+            <div className="w-16 h-16 bg-primary/10 rounded-full flex items-center justify-center mx-auto mb-4">
+              <svg
+                className="w-8 h-8 text-primary"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
+                />
+              </svg>
+            </div>
+            <h1 className="text-2xl font-bold text-foreground">Check your email</h1>
+            <p className="text-muted-foreground mt-2">
+              We've sent a confirmation link to
+            </p>
+            <p className="text-foreground font-medium mt-1">{sentToEmail}</p>
+          </div>
+
+          <p className="text-muted-foreground text-sm mb-6">
+            Click the link in the email to confirm your account and get started.
+          </p>
+
+          <Link to="/login">
+            <Button variant="outline" className="w-full">
+              Back to Login
+            </Button>
+          </Link>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen flex items-center justify-center p-4">

@@ -8,11 +8,16 @@ interface User {
   subscription_plan?: string;
 }
 
+interface RegisterResult {
+  emailConfirmationRequired: boolean;
+  email?: string;
+}
+
 interface AuthContextType {
   user: User | null;
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
-  register: (email: string, password: string, fullName: string) => Promise<void>;
+  register: (email: string, password: string, fullName: string) => Promise<RegisterResult>;
   logout: () => Promise<void>;
   refreshSession: () => Promise<void>;
 }
@@ -81,7 +86,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
   };
 
-  const register = async (email: string, password: string, fullName: string) => {
+  const register = async (email: string, password: string, fullName: string): Promise<RegisterResult> => {
     const response = await fetch(`${API_BASE_URL}/api/auth/register`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -95,7 +100,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const data = await response.json();
 
-    // Store tokens
+    // Check if email confirmation is required
+    if (data.email_confirmation_required) {
+      return {
+        emailConfirmationRequired: true,
+        email: data.email
+      };
+    }
+
+    // Store tokens and set user (immediate login)
     localStorage.setItem('access_token', data.access_token);
     localStorage.setItem('refresh_token', data.refresh_token);
 
@@ -103,6 +116,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       id: data.user_id,
       email: data.email
     });
+
+    return {
+      emailConfirmationRequired: false
+    };
   };
 
   const logout = async () => {

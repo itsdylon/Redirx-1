@@ -60,12 +60,22 @@ def register():
         auth_service = AuthService()
         result = auth_service.register(email, password, full_name)
 
+        # Check if email confirmation is required
+        if result.get('email_confirmation_required'):
+            return jsonify({
+                "success": True,
+                "email_confirmation_required": True,
+                "message": "Please check your email to confirm your account",
+                "email": result['user'].email
+            }), 200
+
         return jsonify({
             "success": True,
             "user_id": result['user'].id,
             "email": result['user'].email,
             "access_token": result['access_token'],
-            "refresh_token": result['refresh_token']
+            "refresh_token": result['refresh_token'],
+            "email_confirmation_required": False
         }), 201
 
     except Exception as e:

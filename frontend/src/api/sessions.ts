@@ -6,6 +6,9 @@ export interface SessionStatus {
   status: 'pending' | 'processing' | 'completed' | 'failed';
   project_name: string;
   total_mappings: number;
+  current_stage?: number | null;
+  stage_name?: string | null;
+  total_stages?: number | null;
 }
 
 export async function getSessionStatus(sessionId: string): Promise<SessionStatus> {

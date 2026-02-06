@@ -55,9 +55,18 @@ def process_job(session: dict) -> bool:
         # Run pipeline
         pipeline = Pipeline(input=(old_urls, new_urls), session_id=session_id)
 
+        total = pipeline.total_stages
+        names = pipeline.stage_names
+
         async def _run():
+            # Report first stage is starting
+            session_db.update_session_progress(session_id, 1, names[0], total)
+
             final_state = None
             async for step in pipeline.iterate():
+                completed = pipeline.current_stage_index
+                if completed < total:
+                    session_db.update_session_progress(session_id, completed + 1, names[completed], total)
                 final_state = step
             return final_state
 

@@ -12,6 +12,8 @@ from .config import Config
 from .database import WebPageEmbeddingDB, MigrationSessionDB, URLMappingDB
 
 class Stage:
+    name: str = "Processing"
+
     def __init__(self):
         pass
 
@@ -26,6 +28,7 @@ class UrlPruneStage(Stage):
     Filters out non-HTML URLs (assets like CSS, JS, images, etc.).
     Only allows HTML pages and URLs without file extensions.
     """
+    name = "Filtering URLs"
 
     # File extensions that should be filtered out
     BLOCKED_EXTENSIONS = {
@@ -113,6 +116,7 @@ class BlogPruneStage(Stage):
     This stage runs BEFORE scraping to avoid wasting HTTP requests on pages
     we don't want to redirect (individual blog posts should not be redirected for SEO).
     """
+    name = "Filtering blog posts"
 
     def __init__(self):
         super().__init__()
@@ -199,6 +203,7 @@ class ExactUrlMatchStage(Stage):
 
     Example: http://old.com/products/index.html → http://new.com/products/index.html
     """
+    name = "Matching exact URLs"
 
     def __init__(self, session_id: Optional[UUID] = None):
         super().__init__()
@@ -327,6 +332,7 @@ class WebScraperStage(Stage):
     """
     Scrapes all URLs for their HTML content with comprehensive logging.
     """
+    name = "Scraping webpages"
 
     def __init__(self):
         super().__init__()
@@ -397,6 +403,7 @@ class HtmlPruneStage(Stage):
     Matches pages with identical HTML content.
     Skips pages with empty or very short HTML to avoid false matches from scraping failures.
     """
+    name = "Matching HTML content"
 
     # Minimum HTML length to consider for matching (bytes)
     MIN_HTML_LENGTH = 100
@@ -456,6 +463,8 @@ class HtmlPruneStage(Stage):
 # =========================
 
 class EmbedStage(Stage):
+    name = "Generating embeddings"
+
     def __init__(self, session_id: Optional[UUID] = None):
         super().__init__()
         self.session_id = session_id
@@ -561,6 +570,7 @@ class PairingStage(Stage):
     Pairs old and new webpages using vector similarity search.
     Generates redirect mappings with confidence scores and review flags.
     """
+    name = "Pairing URLs"
 
     def __init__(self, session_id: Optional[UUID] = None):
         """

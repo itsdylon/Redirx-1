@@ -98,6 +98,22 @@ class MigrationSessionDB:
             'status': status
         }).eq('id', str(session_id)).execute()
 
+    def update_session_progress(self, session_id: UUID, current_stage: int, stage_name: str, total_stages: int) -> None:
+        """
+        Update the progress fields of a migration session.
+
+        Args:
+            session_id: The session ID to update.
+            current_stage: Current stage number (1-based).
+            stage_name: Friendly name of the current stage.
+            total_stages: Total number of stages in the pipeline.
+        """
+        self.client.table('migration_sessions').update({
+            'current_stage': current_stage,
+            'stage_name': stage_name,
+            'total_stages': total_stages,
+        }).eq('id', str(session_id)).execute()
+
     def get_session(self, session_id: UUID) -> Dict[str, Any]:
         """
         Get session details.

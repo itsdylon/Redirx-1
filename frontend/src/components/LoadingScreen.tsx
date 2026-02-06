@@ -1,8 +1,9 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Loader2 } from 'lucide-react';
 import { Button } from './ui/button';
-import { getSessionStatus } from '../api/sessions';
+import { Progress } from './ui/progress';
+import { getSessionStatus, SessionStatus } from '../api/sessions';
 
 interface LoadingScreenProps {
   sessionId?: string | null;
@@ -12,6 +13,11 @@ const POLL_INTERVAL = 3000; // 3 seconds
 
 export function LoadingScreen({ sessionId }: LoadingScreenProps) {
   const navigate = useNavigate();
+  const [progress, setProgress] = useState<{
+    currentStage: number | null;
+    stageName: string | null;
+    totalStages: number | null;
+  }>({ currentStage: null, stageName: null, totalStages: null });
 
   // Poll for job completion
   useEffect(() => {
@@ -19,7 +25,14 @@ export function LoadingScreen({ sessionId }: LoadingScreenProps) {
 
     const pollInterval = setInterval(async () => {
       try {
-        const status = await getSessionStatus(sessionId);
+        const status: SessionStatus = await getSessionStatus(sessionId);
+
+        // Update progress state
+        setProgress({
+          currentStage: status.current_stage ?? null,
+          stageName: status.stage_name ?? null,
+          totalStages: status.total_stages ?? null,
+        });
 
         if (status.status === 'completed') {
           clearInterval(pollInterval);
@@ -41,22 +54,34 @@ export function LoadingScreen({ sessionId }: LoadingScreenProps) {
     navigate('/');
   };
 
+  const hasProgress = progress.currentStage != null && progress.totalStages != null;
+  const progressPercent = hasProgress
+    ? (progress.currentStage! / progress.totalStages!) * 100
+    : 0;
+
   return (
     <div className="min-h-screen flex items-center justify-center p-8">
       <div className="w-full max-w-xl">
         <div className="text-center">
-          {/* Spinner Icon */}
-          <div className="mb-8 flex justify-center">
-            <div className="border border-border rounded-full p-8 bg-card">
-              <Loader2 className="h-16 w-16 text-foreground animate-spin" />
-            </div>
+          {/* Progress heading */}
+          <h1 className="text-foreground mb-2">
+            {hasProgress
+              ? `Step ${progress.currentStage} of ${progress.totalStages}`
+              : 'Preparing...'}
+          </h1>
+
+          {/* Stage name with spinner */}
+          <div className="flex items-center justify-center gap-2 mb-6">
+            <Loader2 className="h-4 w-4 text-muted-foreground animate-spin" />
+            <p className="text-muted-foreground">
+              {progress.stageName ? `${progress.stageName}...` : 'Analyzing and matching your URLs.'}
+            </p>
           </div>
 
-          {/* Heading */}
-          <h1 className="text-foreground mb-2">Processing Redirects</h1>
-          <p className="text-muted-foreground mb-6">
-            Analyzing and matching your URLs. This may take a few minutes.
-          </p>
+          {/* Progress bar */}
+          <div className="mb-8">
+            <Progress value={progressPercent} className="h-3" />
+          </div>
 
           {/* Info box */}
           <div className="mb-6 bg-card border border-border p-4 text-left">

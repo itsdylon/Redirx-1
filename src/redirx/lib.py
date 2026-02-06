@@ -59,6 +59,21 @@ class Pipeline:
             stages.PairingStage(session_id=session_id),
         ]
     
+    @property
+    def stage_names(self) -> list[str]:
+        """Return the friendly name of each stage."""
+        return [s.name for s in self.__stages]
+
+    @property
+    def total_stages(self) -> int:
+        """Return the total number of stages."""
+        return len(self.__stages)
+
+    @property
+    def current_stage_index(self) -> int:
+        """Return the number of stages completed so far."""
+        return self.__index
+
     """
     Used to contol pipeline advancement. Currently just yields the internal state,
     but in the future should yield debug information about the iteration.

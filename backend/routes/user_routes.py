@@ -230,7 +230,7 @@ def get_session_status(session_id):
     try:
         # Fetch session
         result = session_db.client.table('migration_sessions').select(
-            'id, status, project_name, total_mappings, user_id'
+            'id, status, project_name, total_mappings, user_id, current_stage, stage_name, total_stages'
         ).eq('id', session_id).execute()
 
         if not result.data:
@@ -253,7 +253,10 @@ def get_session_status(session_id):
             "session_id": session['id'],
             "status": session['status'],
             "project_name": session.get('project_name', 'Untitled'),
-            "total_mappings": session.get('total_mappings', 0)
+            "total_mappings": session.get('total_mappings', 0),
+            "current_stage": session.get('current_stage'),
+            "stage_name": session.get('stage_name'),
+            "total_stages": session.get('total_stages')
         }), 200
 
     except Exception as e:

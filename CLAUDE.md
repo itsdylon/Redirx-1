@@ -11,11 +11,13 @@ Redirx is a student project at Georgia Institute of Technology for automated 301
 The codebase uses a **pipeline-based architecture** where data flows through a series of async stages:
 
 ### Pipeline Flow
-1. **UrlPruneStage** - Filters out invalid/unwanted URLs
-2. **WebScraperStage** - Scrapes HTML content from URLs using aiohttp
-3. **HtmlPruneStage** - Pairs pages with duplicate HTML content
-4. **EmbedStage** - (TODO) Generates vector embeddings from content
-5. **PairingStage** - (TODO) Matches old→new URLs via similarity
+1. **UrlPruneStage** - Filters out asset URLs (CSS, JS, images, etc.)
+2. **BlogPruneStage** - Filters individual blog posts, keeps landing pages
+3. **ExactUrlMatchStage** - Matches identical URL paths before scraping
+4. **WebScraperStage** - Scrapes HTML content from URLs using aiohttp
+5. **HtmlPruneStage** - Pairs pages with duplicate HTML content
+6. **EmbedStage** - Generates vector embeddings via OpenAI
+7. **PairingStage** - Matches old→new URLs via vector similarity
 
 The `Pipeline` class ([lib.py](src/redirx/lib.py)) orchestrates execution:
 - Accepts input (tuple of old URLs and new URLs lists)
@@ -28,7 +30,7 @@ The `Pipeline` class ([lib.py](src/redirx/lib.py)) orchestrates execution:
 **Pipeline** ([lib.py](src/redirx/lib.py)):
 - `__init__(input, stages)` - Initialize with input data and optional stage list
 - `iterate()` - Async generator that executes stages and yields intermediate state
-- `default_pipeline()` - Returns the standard 5-stage pipeline
+- `default_pipeline()` - Returns the standard 7-stage pipeline
 
 **Stage** ([stages.py](src/redirx/stages.py)):
 - Abstract base class for all pipeline stages
@@ -80,44 +82,70 @@ The `Pipeline` class ([lib.py](src/redirx/lib.py)) orchestrates execution:
 ### First-Time Setup
 ```bash
 # 1. Create virtual environment (Python 3.12 or 3.13 required)
-python3.13 -m venv venv
-source venv/bin/activate
+python -m venv venv
+# Linux/macOS: source venv/bin/activate
+# Windows: venv\Scripts\activate
 
-# 2. Copy environment template
-cp .env.example .env
+# 2. Copy environment templates
+cp .env.example .env          # Backend env vars (Supabase service_role key, OpenAI key)
+cp frontend/.env.example frontend/.env  # Frontend env vars (Supabase anon key)
 
-# 3. Edit .env with your Supabase credentials
-# Get from: https://app.supabase.com/project/_/settings/api
-# Use the "anon public" JWT key (starts with eyJ...)
+# 3. Edit .env files with your credentials (see comments in each file)
 
 # 4. Install dependencies
-pip install -r .devcontainer/requirements.txt
-
-# 5. Verify database connection
-python tests/test_database_connection.py
+pip install -r requirements.txt
+cd frontend && npm install && cd ..
 ```
 
-**Important Notes:**
-- Must use Python 3.12 or 3.13 (3.14 has compatibility issues with current Supabase libraries)
-- Always activate venv before running commands: `source venv/bin/activate`
-- Virtual environment bypasses macOS externally-managed-environment restrictions
+### Running Everything (Recommended)
+```bash
+# Single command starts all services:
+python dev.py
+```
+This starts:
+- **Frontend** at http://localhost:3000 (Vite, proxies /api to Flask)
+- **Backend** at http://localhost:5001 (Flask API)
+- **Worker** (polls DB for pending jobs)
+- **Mock sites** at http://localhost:8000 (old) and http://localhost:8001 (new)
+
+Options:
+```bash
+python dev.py --no-mocks   # Skip mock test sites
+python dev.py --backend    # Backend + worker only
+```
+
+### Running Services Individually
+```bash
+# Frontend
+cd frontend && npm run dev
+
+# Backend API (from project root)
+python -m backend.app
+
+# Worker (from project root)
+python -m backend.worker
+
+# Mock test sites
+python tests/mock_sites/start_servers.py
+```
+
+### Environment Variables
+- **Root `.env`** — Backend config: Supabase (service_role key), OpenAI, CORS, Flask settings
+- **`frontend/.env`** — Frontend config: Supabase (anon key). `VITE_API_BASE_URL` is only needed in production (Vite proxy handles local dev).
+- **Production (Render)** — Set env vars in the Render dashboard, not in files.
 
 ### Running Tests
 ```bash
-# Test database connection and setup
-python tests/test_database_connection.py
-
-# Run all tests
-python tests/driver.py
-
-# Run specific test module
-python -m unittest tests.stage_tests.html_prune_test
+python tests/test_database_connection.py     # Verify DB connection
+python tests/driver.py                       # Run all tests
+python -m unittest tests.stage_tests.html_prune_test  # Specific test
 ```
 
-### Development Environment
-- **Recommended:** Python 3.13 with virtual environment (venv)
-- **Alternative:** Use devcontainer with Python 3.13 in VSCode with Remote Containers extension
-- **Note:** Python 3.14 is not yet compatible with all dependencies
+### Deployment (Render)
+- **Frontend**: Static site, build command `cd frontend && npm install && npm run build`, publish dir `frontend/build`
+- **Backend API**: Web service, start command `gunicorn backend.app:create_app()`
+- **Worker**: Background worker, start command `python -m backend.worker`
+- Set `VITE_API_BASE_URL` to the backend URL in the frontend's Render env vars
 
 ## File Structure
 

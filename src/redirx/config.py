@@ -2,8 +2,9 @@ import os
 from dotenv import load_dotenv
 from typing import Optional
 
-# Load environment variables from .env file
-load_dotenv()
+# Load .env from the project root (parent of src/)
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+load_dotenv(os.path.join(_PROJECT_ROOT, '.env'))
 
 
 class Config:

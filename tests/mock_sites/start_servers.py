@@ -65,13 +65,13 @@ def serve_directory(directory: Path, port: int, server_name: str):
     with socketserver.TCPServer(("", port), handler_class) as httpd:
         httpd.server_name = server_name
 
-        print(f"✓ {server_name} running at http://localhost:{port}")
+        print(f"[OK] {server_name} running at http://localhost:{port}")
         print(f"  Serving: {directory}")
 
         try:
             httpd.serve_forever()
         except KeyboardInterrupt:
-            print(f"\n✗ {server_name} stopped")
+            print(f"\n[STOP] {server_name} stopped")
 
 
 def main():

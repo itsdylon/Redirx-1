@@ -1,7 +1,9 @@
 """
 Data transformation utilities for converting database records to frontend format.
 """
-from typing import List, Dict, Any
+from difflib import SequenceMatcher
+from typing import List, Dict, Any, Optional
+from urllib.parse import urlparse
 from uuid import UUID
 
 
@@ -54,30 +56,61 @@ def derive_warnings(mapping: Dict[str, Any]) -> List[str]:
     return warnings
 
 
-def mock_similarity_scores() -> Dict[str, int]:
+def calculate_path_similarity(old_url: str, new_url: str) -> int:
     """
-    Temporary: return placeholder values for similarity scores.
+    Calculate similarity between URL paths using SequenceMatcher.
 
-    TODO: Calculate and store these in the pipeline stages.
+    Args:
+        old_url: Old site URL.
+        new_url: New site URL.
 
     Returns:
-        Dictionary with pathSimilarity, titleSimilarity, contentSimilarity
+        Similarity score 0-100.
     """
-    # For now, return reasonable defaults
-    # In the future, calculate these from URL path analysis, title comparison, etc.
-    return {
-        'pathSimilarity': 75,
-        'titleSimilarity': 80,
-        'contentSimilarity': 85
-    }
+    try:
+        old_path = urlparse(old_url).path.strip('/')
+        new_path = urlparse(new_url).path.strip('/')
+
+        if old_path == new_path:
+            return 100
+
+        ratio = SequenceMatcher(None, old_path, new_path).ratio()
+        return int(ratio * 100)
+    except Exception:
+        return 0
 
 
-def transform_mapping_for_frontend(db_record: Dict[str, Any]) -> Dict[str, Any]:
+def calculate_title_similarity(old_title: str, new_title: str) -> int:
+    """
+    Calculate similarity between page titles using SequenceMatcher.
+
+    Args:
+        old_title: Title from old page.
+        new_title: Title from new page.
+
+    Returns:
+        Similarity score 0-100.
+    """
+    if not old_title or not new_title:
+        return 0
+
+    if old_title == new_title:
+        return 100
+
+    ratio = SequenceMatcher(None, old_title.lower(), new_title.lower()).ratio()
+    return int(ratio * 100)
+
+
+def transform_mapping_for_frontend(
+    db_record: Dict[str, Any],
+    title_map: Optional[Dict[str, str]] = None
+) -> Dict[str, Any]:
     """
     Convert a single database mapping record to frontend format.
 
     Args:
         db_record: Database record from url_mappings table
+        title_map: Optional URL-to-title lookup from webpage_embeddings
 
     Returns:
         Dictionary matching frontend RedirectMapping interface
@@ -92,21 +125,31 @@ def transform_mapping_for_frontend(db_record: Dict[str, Any]) -> Dict[str, Any]:
     # Get warnings
     warnings = derive_warnings(db_record)
 
-    # Get mock similarity scores (TODO: use real values)
-    similarity = mock_similarity_scores()
+    # Calculate real similarity scores
+    old_url = db_record['old_url']
+    new_url = db_record['new_url']
+
+    path_sim = calculate_path_similarity(old_url, new_url)
+    content_sim = confidence_int  # confidence_score IS the content similarity
+
+    title_sim = 0
+    if title_map:
+        old_title = title_map.get(old_url, '')
+        new_title = title_map.get(new_url, '')
+        title_sim = calculate_title_similarity(old_title, new_title)
 
     return {
         'id': str(db_record['id']),
-        'oldUrl': db_record['old_url'],
-        'newUrl': db_record['new_url'],
+        'oldUrl': old_url,
+        'newUrl': new_url,
         'confidence': confidence_int,
         'confidenceBand': confidence_band,
-        'matchScore': confidence_int,  # Same as confidence for now
+        'matchScore': confidence_int,
         'approved': not db_record.get('needs_review', False),
         'warnings': warnings,
-        'pathSimilarity': similarity['pathSimilarity'],
-        'titleSimilarity': similarity['titleSimilarity'],
-        'contentSimilarity': similarity['contentSimilarity']
+        'pathSimilarity': path_sim,
+        'titleSimilarity': title_sim,
+        'contentSimilarity': content_sim
     }
 
 
@@ -147,6 +190,27 @@ def calculate_stats(mappings: List[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
+def _build_title_map(session_id: str) -> Dict[str, str]:
+    """
+    Build a URL-to-title lookup from webpage_embeddings for a session.
+
+    Args:
+        session_id: Migration session ID string.
+
+    Returns:
+        Dictionary mapping URL to page title.
+    """
+    try:
+        from src.redirx.database import WebPageEmbeddingDB
+        embedding_db = WebPageEmbeddingDB()
+        embeddings = embedding_db.get_embeddings_by_session(
+            UUID(session_id)
+        )
+        return {e['url']: e.get('title', '') for e in embeddings}
+    except Exception:
+        return {}
+
+
 def format_results_response(
     db_mappings: List[Dict[str, Any]],
     session_metadata: Dict[str, Any] = None
@@ -161,8 +225,19 @@ def format_results_response(
     Returns:
         Complete response with mappings, stats, and metadata
     """
+    # Build title map from embeddings if we have a session
+    title_map = {}
+    if session_metadata and session_metadata.get('id'):
+        title_map = _build_title_map(str(session_metadata['id']))
+    elif db_mappings:
+        session_id = db_mappings[0].get('session_id')
+        if session_id:
+            title_map = _build_title_map(str(session_id))
+
     # Transform all mappings
-    frontend_mappings = [transform_mapping_for_frontend(m) for m in db_mappings]
+    frontend_mappings = [
+        transform_mapping_for_frontend(m, title_map) for m in db_mappings
+    ]
 
     # Calculate stats
     stats = calculate_stats(frontend_mappings)

@@ -7,10 +7,13 @@ export interface QuotaExceededError {
   limit: number;
 }
 
-export async function uploadCSVs(oldFile: File, newFile: File) {
+export async function uploadCSVs(oldFile: File, newFile: File, force: boolean = false) {
   const formData = new FormData();
   formData.append("old_csv", oldFile);
   formData.append("new_csv", newFile);
+  if (force) {
+    formData.append("force", "true");
+  }
 
   const response = await fetch(`${API_BASE_URL}/api/process`, {
     method: "POST",

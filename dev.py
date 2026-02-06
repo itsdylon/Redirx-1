@@ -88,6 +88,42 @@ def find_npm():
     return "npm"
 
 
+def kill_existing_processes():
+    """Kill any existing dev.py, backend, worker, or http.server processes."""
+    import subprocess
+
+    print(f"{COLORS['system']}Checking for existing processes...{COLORS['reset']}")
+
+    patterns = [
+        "python.*dev.py",
+        "python.*backend.app",
+        "python.*backend.worker",
+        "python.*http.server.*800",
+        "node.*vite"
+    ]
+
+    killed_any = False
+    for pattern in patterns:
+        try:
+            # Use pkill -9 to force kill matching processes
+            result = subprocess.run(
+                ["pkill", "-9", "-f", pattern],
+                capture_output=True,
+                timeout=5
+            )
+            if result.returncode == 0:
+                killed_any = True
+        except (subprocess.SubprocessError, FileNotFoundError):
+            pass
+
+    if killed_any:
+        print(f"{COLORS['system']}Killed existing processes. Waiting for ports to free...{COLORS['reset']}")
+        time.sleep(2)
+    else:
+        print(f"{COLORS['system']}No existing processes found.{COLORS['reset']}")
+    print()
+
+
 def main():
     args = sys.argv[1:]
     skip_mocks = "--no-mocks" in args
@@ -101,6 +137,9 @@ def main():
     print("  Redirx Dev Server")
     print(f"{'=' * 60}{COLORS['reset']}")
     print()
+
+    # Kill any existing processes first
+    kill_existing_processes()
 
     # Pre-flight check
     if not check_dependencies():

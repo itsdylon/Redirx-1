@@ -204,6 +204,70 @@ def update_session(session_id):
         }), 500
 
 
+@user_blueprint.route("/sessions/<session_id>", methods=["DELETE"])
+@require_auth
+def delete_session(session_id):
+    """
+    Delete a migration session and all associated data (url_mappings, webpage_embeddings).
+
+    Headers:
+        Authorization: Bearer <access_token>
+
+    Response:
+        200: {
+            "success": true,
+            "message": "Session deleted successfully"
+        }
+        403: User doesn't own this session
+        404: Session not found
+    """
+    session_db = MigrationSessionDB()
+
+    try:
+        # Verify session belongs to authenticated user
+        existing = session_db.client.table('migration_sessions').select('*').eq(
+            'id', session_id
+        ).execute()
+
+        if not existing.data:
+            return jsonify({
+                "success": False,
+                "error": "Session not found"
+            }), 404
+
+        if existing.data[0]['user_id'] != str(request.user.id):
+            return jsonify({
+                "success": False,
+                "error": "Unauthorized: Session belongs to another user"
+            }), 403
+
+        # Delete associated url_mappings
+        session_db.client.table('url_mappings').delete().eq(
+            'session_id', session_id
+        ).execute()
+
+        # Delete associated webpage_embeddings
+        session_db.client.table('webpage_embeddings').delete().eq(
+            'session_id', session_id
+        ).execute()
+
+        # Delete the session itself
+        session_db.client.table('migration_sessions').delete().eq(
+            'id', session_id
+        ).execute()
+
+        return jsonify({
+            "success": True,
+            "message": "Session deleted successfully"
+        }), 200
+
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+
 @user_blueprint.route("/sessions/<session_id>/status", methods=["GET"])
 @require_auth
 def get_session_status(session_id):

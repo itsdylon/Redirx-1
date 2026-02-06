@@ -4,6 +4,7 @@ import { LoginPage } from './components/LoginPage';
 import { SignupPage } from './components/SignupPage';
 import { AuthCallback } from './components/AuthCallback';
 import { Dashboard } from './components/Dashboard';
+import { AllProjects } from './components/AllProjects';
 import { UploadPage } from './components/UploadPage';
 import { ReviewInterface } from './components/ReviewInterface';
 import { AccountPage } from './components/AccountPage';
@@ -41,6 +42,14 @@ export default function App() {
       <Route
         path="/"
         element={user ? <Dashboard /> : <Navigate to="/login" replace />}
+      />
+      <Route
+        path="/dashboard"
+        element={user ? <Dashboard /> : <Navigate to="/login" replace />}
+      />
+      <Route
+        path="/projects"
+        element={user ? <AllProjects /> : <Navigate to="/login" replace />}
       />
       <Route
         path="/upload"

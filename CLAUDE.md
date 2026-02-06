@@ -60,6 +60,7 @@ The `Pipeline` class ([lib.py](src/redirx/lib.py)) orchestrates execution:
 - Uses PostgreSQL with pgvector extension for vector similarity search
 - Stores webpage embeddings (1536-dimensional vectors)
 - Handles migration sessions and URL mappings
+- **Push-based notifications** via PostgreSQL LISTEN/NOTIFY for instant job processing
 
 **Configuration** ([config.py](src/redirx/config.py)):
 - Loads settings from `.env` file (use `.env.example` as template)
@@ -68,14 +69,50 @@ The `Pipeline` class ([lib.py](src/redirx/lib.py)) orchestrates execution:
 
 **Database Client** ([database.py](src/redirx/database.py)):
 - `SupabaseClient.get_client()` - Singleton Supabase client
-- `MigrationSessionDB` - CRUD for migration sessions
+- `MigrationSessionDB` - CRUD for migration sessions, idempotency support, lease management
 - `WebPageEmbeddingDB` - Insert/search embeddings with vector similarity
 - `URLMappingDB` - Manage URL redirects with confidence scores
+
+**Database Migrations** ([database/migrations/](database/migrations/)):
+- `004_add_listen_notify_trigger.sql` - LISTEN/NOTIFY infrastructure
+- `005_add_lease_columns.sql` - Lease-based locking with `claim_next_job()` and `reclaim_expired_leases()` RPC functions
+- `006_add_idempotency_keys.sql` - Prevent duplicate job creation
+- Run manually in Supabase SQL Editor (see `database/migrations/README.md`)
 
 **Embedding Strategy:**
 - Using OpenAI `text-embedding-3-small` (1536 dims)
 - Cost: ~$0.002 per 200 webpages (negligible for demos)
 - Future: Can add local embeddings (sentence-transformers) if needed
+
+## Background Worker Architecture
+
+**Worker System** ([backend/worker.py](backend/worker.py)):
+- **Push-based** using PostgreSQL LISTEN/NOTIFY (instant job pickup, no polling delay)
+- **Lease-based locking** prevents duplicate processing and enables multiple workers
+- **Automatic retries** with exponential backoff (up to 5 attempts configurable)
+- **Self-healing** via expired lease reclamation
+- **Fallback polling** every 60 seconds in case notifications are missed
+
+**Worker Flow**:
+1. Worker subscribes to `job_queue_events` PostgreSQL channel
+2. When job inserted/updated to `pending`, database sends notification
+3. Worker calls `claim_next_job()` RPC to atomically claim job (FOR UPDATE SKIP LOCKED)
+4. Job status updated to `processing`, lease set (default: 10 minutes)
+5. Pipeline runs with progress updates to database
+6. On completion: release lease, update status to `completed`
+7. On failure: increment attempt count, release lease, retry (or mark `permanently_failed`)
+
+**Configuration** (Environment Variables):
+- `DATABASE_URL` - PostgreSQL direct connection (required for LISTEN/NOTIFY)
+- `WORKER_LEASE_DURATION` - Lease duration in seconds (default: 600)
+- `WORKER_MAX_CONCURRENT` - Max concurrent jobs (default: 1)
+- `WORKER_FALLBACK_INTERVAL` - Fallback poll interval (default: 60)
+- `WORKER_MAX_ATTEMPTS` - Max retry attempts (default: 5)
+
+**Idempotency** ([backend/services/pipeline_runner.py](backend/services/pipeline_runner.py)):
+- API generates deterministic `idempotency_key` from `SHA256(user_id + sorted_urls)`
+- Duplicate requests return existing session instead of creating new job
+- Prevents double-processing of identical CSV uploads
 
 ## Development Commands
 
@@ -87,12 +124,16 @@ python -m venv venv
 # Windows: venv\Scripts\activate
 
 # 2. Copy environment templates
-cp .env.example .env          # Backend env vars (Supabase service_role key, OpenAI key)
+cp .env.example .env          # Backend env vars (Supabase service_role key, OpenAI key, DATABASE_URL)
 cp frontend/.env.example frontend/.env  # Frontend env vars (Supabase anon key)
 
 # 3. Edit .env files with your credentials (see comments in each file)
+# IMPORTANT: Set DATABASE_URL for worker (get from Supabase Dashboard → Connect → Direct connection)
 
-# 4. Install dependencies
+# 4. Run database migrations (in Supabase SQL Editor)
+# See database/migrations/README.md for instructions
+
+# 5. Install dependencies
 pip install -r requirements.txt
 cd frontend && npm install && cd ..
 ```
@@ -105,7 +146,7 @@ python dev.py
 This starts:
 - **Frontend** at http://localhost:3000 (Vite, proxies /api to Flask)
 - **Backend** at http://localhost:5001 (Flask API)
-- **Worker** (polls DB for pending jobs)
+- **Worker** (push-based with LISTEN/NOTIFY, instant job processing)
 - **Mock sites** at http://localhost:8000 (old) and http://localhost:8001 (new)
 
 Options:

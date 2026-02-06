@@ -52,3 +52,41 @@ export async function updateSessionName(sessionId: string, projectName: string):
 
   return await response.json();
 }
+
+export async function deleteSession(sessionId: string): Promise<any> {
+  const response = await fetch(`${API_BASE_URL}/api/user/sessions/${sessionId}`, {
+    method: 'DELETE',
+    headers: getAuthHeaders(),
+  });
+
+  if (!response.ok) {
+    if (response.status === 401) {
+      throw new Error('Unauthorized. Please log in again.');
+    }
+    if (response.status === 403) {
+      throw new Error('You do not have permission to delete this session.');
+    }
+    if (response.status === 404) {
+      throw new Error('Session not found.');
+    }
+    throw new Error(`Failed to delete session: ${response.status}`);
+  }
+
+  return await response.json();
+}
+
+export async function fetchAllSessions(): Promise<any> {
+  const response = await fetch(`${API_BASE_URL}/api/user/sessions`, {
+    method: 'GET',
+    headers: getAuthHeaders(),
+  });
+
+  if (!response.ok) {
+    if (response.status === 401) {
+      throw new Error('Unauthorized. Please log in again.');
+    }
+    throw new Error(`Failed to fetch sessions: ${response.status}`);
+  }
+
+  return await response.json();
+}

@@ -54,7 +54,8 @@ class MigrationSessionDB:
         user_id: str = 'default',
         project_name: Optional[str] = None,
         old_urls: Optional[List[str]] = None,
-        new_urls: Optional[List[str]] = None
+        new_urls: Optional[List[str]] = None,
+        idempotency_key: Optional[str] = None
     ) -> UUID:
         """
         Create a new migration session.
@@ -64,6 +65,7 @@ class MigrationSessionDB:
             project_name: Optional project/session name.
             old_urls: Optional list of old site URLs (for background processing).
             new_urls: Optional list of new site URLs (for background processing).
+            idempotency_key: Optional idempotency key to prevent duplicate job creation.
 
         Returns:
             UUID: The created session ID.
@@ -81,6 +83,9 @@ class MigrationSessionDB:
 
         if new_urls is not None:
             session_data['new_urls'] = new_urls
+
+        if idempotency_key:
+            session_data['idempotency_key'] = idempotency_key
 
         result = self.client.table('migration_sessions').insert(session_data).execute()
 
@@ -132,6 +137,46 @@ class MigrationSessionDB:
             raise ValueError(f"Session {session_id} not found")
 
         return result.data[0]
+
+    def find_session_by_idempotency_key(self, user_id: str, idempotency_key: str) -> Optional[Dict[str, Any]]:
+        """
+        Find an existing session by idempotency key.
+
+        Args:
+            user_id: User identifier.
+            idempotency_key: Idempotency key to search for.
+
+        Returns:
+            Dict containing session data if found, None otherwise.
+        """
+        result = self.client.table('migration_sessions').select('*').eq(
+            'user_id', user_id
+        ).eq(
+            'idempotency_key', idempotency_key
+        ).execute()
+
+        if result.data:
+            return result.data[0]
+        return None
+
+    def update_session_status_with_error(self, session_id: UUID, status: str, error_message: Optional[str] = None) -> None:
+        """
+        Update the status of a migration session with optional error message.
+
+        Args:
+            session_id: The session ID to update.
+            status: New status ('pending', 'processing', 'completed', 'permanently_failed').
+            error_message: Optional error message (truncated to 5000 chars).
+        """
+        updates = {'status': status}
+
+        if error_message is not None:
+            # Truncate error message to 5000 characters
+            updates['last_error'] = error_message[:5000] if len(error_message) > 5000 else error_message
+
+        self.client.table('migration_sessions').update(updates).eq(
+            'id', str(session_id)
+        ).execute()
 
 
 class WebPageEmbeddingDB:

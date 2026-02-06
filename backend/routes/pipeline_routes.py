@@ -60,6 +60,9 @@ def process_csv():
     # Get user_id from authenticated user
     user_id = str(request.user.id)
 
+    # Get optional 'force' parameter from form data
+    force = request.form.get('force', 'false').lower() == 'true'
+
     # Check user quota before processing
     quota_db = UserQuotaDB()
     has_quota, current_usage, limit = quota_db.check_quota(user_id)
@@ -75,12 +78,13 @@ def process_csv():
 
     try:
         # Run the pipeline
-        session_id = run_pipeline(old_csv, new_csv, user_id=user_id)
+        session_id, is_duplicate = run_pipeline(old_csv, new_csv, user_id=user_id, force=force)
 
         return jsonify({
             "success": True,
             "message": "Pipeline completed successfully",
-            "session_id": str(session_id)
+            "session_id": str(session_id),
+            "is_duplicate": is_duplicate
         }), 200
 
     except ValueError as e:

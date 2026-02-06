@@ -5,9 +5,9 @@ import { Card } from './ui/card';
 import { Button } from './ui/button';
 import { Progress } from './ui/progress';
 import { Separator } from './ui/separator';
-import { FileUp, TrendingUp, CheckCircle, BarChart3, Clock, Pencil, Check, X, Loader2 } from 'lucide-react';
+import { FileUp, TrendingUp, CheckCircle, BarChart3, Clock, Pencil, Check, X, Loader2, Trash2 } from 'lucide-react';
 import { fetchDashboardData, DashboardData } from '../api/dashboard';
-import { updateSessionName } from '../api/sessions';
+import { updateSessionName, deleteSession } from '../api/sessions';
 import { formatDate } from '../utils/date';
 
 const POLL_INTERVAL = 5000; // 5 seconds
@@ -20,6 +20,7 @@ export function Dashboard() {
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState('');
   const [recentlyCompleted, setRecentlyCompleted] = useState<Set<string>>(new Set());
+  const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null);
   const previousProcessingRef = useRef<string[]>([]);
 
   const fetchDashboard = async () => {
@@ -128,6 +129,36 @@ export function Dashboard() {
     }
   };
 
+  const handleDeleteClick = (sessionId: string) => {
+    setDeletingSessionId(sessionId);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!deletingSessionId) return;
+
+    try {
+      await deleteSession(deletingSessionId);
+
+      // Update local state by removing the deleted session
+      if (dashboardData) {
+        const updatedSessions = dashboardData.recent_sessions.filter(
+          session => session.id !== deletingSessionId
+        );
+        setDashboardData({ ...dashboardData, recent_sessions: updatedSessions });
+      }
+
+      setDeletingSessionId(null);
+    } catch (err) {
+      console.error('Failed to delete session:', err);
+      alert('Failed to delete project. Please try again.');
+      setDeletingSessionId(null);
+    }
+  };
+
+  const handleCancelDelete = () => {
+    setDeletingSessionId(null);
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen">
@@ -234,7 +265,15 @@ export function Dashboard() {
 
         {/* Recent Projects */}
         <div>
-          <h2 className="text-foreground mb-4">Recent Projects</h2>
+          <div className="flex justify-between items-center mb-4">
+            <h2 className="text-foreground">Recent Projects</h2>
+            <Button
+              variant="outline"
+              onClick={() => navigate('/projects')}
+            >
+              View All Projects
+            </Button>
+          </div>
           <Card>
             <div className="overflow-hidden">
               <table className="w-full">
@@ -321,13 +360,24 @@ export function Dashboard() {
                         </span>
                       </td>
                       <td className="p-4">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => navigate(`/review/${session.id}`)}
-                        >
-                          View Details
-                        </Button>
+                        <div className="flex items-center gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => navigate(`/review/${session.id}`)}
+                          >
+                            View Details
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleDeleteClick(session.id)}
+                            className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                            title="Delete project"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -343,6 +393,30 @@ export function Dashboard() {
           </Card>
         </div>
       </main>
+
+      {/* Delete Confirmation Dialog */}
+      {deletingSessionId && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <Card className="p-6 max-w-md w-full mx-4">
+            <h3 className="text-foreground text-lg font-semibold mb-2">Delete Project</h3>
+            <p className="text-muted-foreground mb-6">
+              Are you sure you want to delete this project? This will permanently remove all
+              redirect mappings and cannot be undone.
+            </p>
+            <div className="flex justify-end gap-3">
+              <Button variant="outline" onClick={handleCancelDelete}>
+                Cancel
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={handleConfirmDelete}
+              >
+                Delete Project
+              </Button>
+            </div>
+          </Card>
+        </div>
+      )}
     </div>
   );
 }

@@ -486,20 +486,20 @@ class EmbedStage(Stage):
         skipped_old = len(old_pages) - len(valid_old_pages)
         skipped_new = len(new_pages) - len(valid_new_pages)
 
-        print(f"\nEmbedStage: Filtering pages with HTML < {MIN_HTML_LENGTH} bytes...")
+        print(f"\nEmbedStage: Filtering pages with HTML < {MIN_HTML_LENGTH} bytes...", flush=True)
         if skipped_old > 0:
-            print(f"⚠️  EmbedStage: Skipping {skipped_old} old pages (failed to scrape):")
+            print(f"⚠️  EmbedStage: Skipping {skipped_old} old pages (failed to scrape):", flush=True)
             for page in old_pages:
                 if len(page.html) < MIN_HTML_LENGTH:
-                    print(f"   - {page.url}")
+                    print(f"   - {page.url}", flush=True)
 
         if skipped_new > 0:
-            print(f"⚠️  EmbedStage: Skipping {skipped_new} new pages (failed to scrape):")
+            print(f"⚠️  EmbedStage: Skipping {skipped_new} new pages (failed to scrape):", flush=True)
             for page in new_pages:
                 if len(page.html) < MIN_HTML_LENGTH:
-                    print(f"   - {page.url}")
+                    print(f"   - {page.url}", flush=True)
 
-        print(f"EmbedStage: Generating embeddings for {len(valid_old_pages)} old + {len(valid_new_pages)} new pages...")
+        print(f"EmbedStage: Generating embeddings for {len(valid_old_pages)} old + {len(valid_new_pages)} new pages...", flush=True)
 
         # Validate OpenAI config
         Config.validate_embeddings()
@@ -511,28 +511,65 @@ class EmbedStage(Stage):
         # Create OpenAI client
         self.openai_client = AsyncOpenAI(api_key=Config.OPENAI_API_KEY)
 
+        total_success = 0
+        total_failure = 0
+
         try:
             if valid_old_pages:
-                await self._process_pages(valid_old_pages, "old")
+                success, failure = await self._process_pages(valid_old_pages, "old")
+                total_success += success
+                total_failure += failure
             if valid_new_pages:
-                await self._process_pages(valid_new_pages, "new")
+                success, failure = await self._process_pages(valid_new_pages, "new")
+                total_success += success
+                total_failure += failure
         finally:
             if self.openai_client:
                 await self.openai_client.close()
 
-        print(f"EmbedStage: Successfully generated {len(valid_old_pages) + len(valid_new_pages)} embeddings")
+        expected_count = len(valid_old_pages) + len(valid_new_pages)
+        print(f"EmbedStage: Successfully generated {total_success}/{expected_count} embeddings", flush=True)
+
+        if total_failure > 0:
+            error_msg = f"Failed to generate {total_failure} embeddings"
+            print(f"❌ EmbedStage: {error_msg}", flush=True)
+            raise Exception(error_msg)
 
         return input
 
     async def _process_pages(self, pages: list[WebPage], site_type: str):
         batch_size = 10
+        success_count = 0
+        failure_count = 0
+
         for i in range(0, len(pages), batch_size):
             batch = pages[i:i+batch_size]
-            await asyncio.gather(
-                *[self._generate_and_store_embedding(page, site_type) for page in batch]
+            results = await asyncio.gather(
+                *[self._generate_and_store_embedding(page, site_type) for page in batch],
+                return_exceptions=True
             )
 
-    async def _generate_and_store_embedding(self, page: WebPage, site_type: str):
+            # Count successes and failures
+            for result in results:
+                if isinstance(result, Exception):
+                    failure_count += 1
+                elif result:
+                    success_count += 1
+                else:
+                    failure_count += 1
+
+        if failure_count > 0:
+            print(f"⚠️  EmbedStage: {failure_count} pages failed to embed")
+
+        return success_count, failure_count
+
+    async def _generate_and_store_embedding(self, page: WebPage, site_type: str) -> bool:
+        """
+        Generate and store embedding for a page.
+
+        Returns:
+            True if successful, False if failed
+        """
         try:
             text = page.extract_text()
             title = page.extract_title()
@@ -546,8 +583,10 @@ class EmbedStage(Stage):
                 extracted_text=text,
                 title=title
             )
+            return True
         except Exception as e:
-            print(f"Error embedding {page.url}: {e}")
+            print(f"⚠️  Error embedding {page.url}: {e}")
+            return False
 
     async def _generate_embedding_with_retry(self, text: str, max_retries=3):
         for attempt in range(max_retries):
@@ -646,25 +685,34 @@ class PairingStage(Stage):
             for page in root_pages_old:
                 print(f"   Orphaned: {page.url} (root path)")
 
-        print(f"Finding semantic matches for {len(unmatched_old_pages)} unmatched old pages...")
+        print(f"Finding semantic matches for {len(unmatched_old_pages)} unmatched old pages...", flush=True)
+
+        # Fetch all old embeddings once (PERFORMANCE FIX: was fetching inside loop!)
+        old_embeddings = self.embedding_db.get_embeddings_by_session(
+            session_id=self.session_id,
+            site_type='old'
+        )
+
+        # Build a lookup dict for fast access
+        old_embeddings_by_url = {e['url']: e for e in old_embeddings}
 
         # Process each unmatched old page
-        for old_page in unmatched_old_pages:
-            # Get embedding for this old page
-            old_embeddings = self.embedding_db.get_embeddings_by_session(
-                session_id=self.session_id,
-                site_type='old'
-            )
+        total_unmatched = len(unmatched_old_pages)
+        matched_count = 0
+        orphaned_count = 0
 
+        for idx, old_page in enumerate(unmatched_old_pages, 1):
             # Find the embedding for this specific old page
-            old_embedding_record = next(
-                (e for e in old_embeddings if e['url'] == old_page.url),
-                None
-            )
+            old_embedding_record = old_embeddings_by_url.get(old_page.url)
 
             if not old_embedding_record:
-                print(f"Warning: No embedding found for {old_page.url}")
+                print(f"⚠️  [{idx}/{total_unmatched}] No embedding found for {old_page.url}")
+                orphaned_count += 1
                 continue
+
+            # Progress indicator every 10 pages
+            if idx % 10 == 0:
+                print(f"   Progress: {idx}/{total_unmatched} pages processed ({matched_count} matched, {orphaned_count} orphaned)")
 
             old_embedding = np.array(old_embedding_record['embedding'], dtype=np.float32)
 
@@ -685,7 +733,9 @@ class PairingStage(Stage):
             ]
 
             if not similar_pages:
-                print(f"No unmatched similar pages found for {old_page.url} (orphaned)")
+                orphaned_count += 1
+                if idx <= 5 or idx % 20 == 0:  # Only print first 5 and every 20th to reduce spam
+                    print(f"   [{idx}/{total_unmatched}] {old_page.url} -> No match found (orphaned)")
                 continue
 
             # Find best match among candidates
@@ -721,9 +771,10 @@ class PairingStage(Stage):
                     all_mappings.add(mapping)
                     matched_old_pages.add(old_page)
                     matched_new_pages.add(new_page)
+                    matched_count += 1
 
                     review_flag = " [NEEDS REVIEW]" if mapping.needs_review else ""
-                    print(f"Matched: {old_page.url} -> {new_page.url} "
+                    print(f"✓ [{idx}/{total_unmatched}] {old_page.url} -> {new_page.url} "
                           f"(score: {mapping.confidence_score:.3f}, type: {mapping.match_type}){review_flag}")
 
         # Identify orphaned pages (old pages with no match, excluding root paths)

@@ -11,6 +11,7 @@ PyJWT==2.10.1
 
 # Database
 supabase>=2.24.0
+psycopg[binary]>=3.1.0  # PostgreSQL adapter for LISTEN/NOTIFY
 
 # Async HTTP
 aiohttp==3.13.2

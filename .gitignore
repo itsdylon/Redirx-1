@@ -27,3 +27,4 @@ frontend/dist/
 .vscode/
 .idea/
 *.sublime-*
+.claude

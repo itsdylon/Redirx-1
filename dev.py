@@ -36,7 +36,8 @@ COLORS = {
     "frontend": "\033[36m",   # cyan
     "backend":  "\033[33m",   # yellow
     "worker":   "\033[35m",   # magenta
-    "mocks":    "\033[32m",   # green
+    "old-site": "\033[32m",   # green
+    "new-site": "\033[32m",   # green
     "system":   "\033[90m",   # gray
     "error":    "\033[31m",   # red
     "reset":    "\033[0m",
@@ -134,12 +135,20 @@ def main():
         return proc
 
     try:
-        # 1. Mock sites (unless skipped)
+        # 1. Mock sites (unless skipped) — served from external dirs
         if not skip_mocks and not backend_only:
-            mock_script = os.path.join(PROJECT_ROOT, "tests", "mock_sites", "start_servers.py")
-            if os.path.exists(mock_script):
-                start("mocks", [PYTHON, mock_script])
+            old_site_dir = os.path.join(os.path.dirname(PROJECT_ROOT), "mock-old-site")
+            new_site_dir = os.path.join(os.path.dirname(PROJECT_ROOT), "mock-new-site")
+
+            if os.path.isdir(old_site_dir) and os.path.isdir(new_site_dir):
+                start("old-site", [PYTHON, "-m", "http.server", "8000", "--directory", old_site_dir])
+                start("new-site", [PYTHON, "-m", "http.server", "8001", "--directory", new_site_dir])
                 time.sleep(0.5)
+            else:
+                print(f"{COLORS['error']}[  error]{COLORS['reset']} Mock site dirs not found:")
+                print(f"           Expected: {old_site_dir}")
+                print(f"           Expected: {new_site_dir}")
+                print(f"           Use --no-mocks to skip, or create the directories.")
 
         # 2. Backend API
         start("backend", [PYTHON, "-m", "backend.app"])

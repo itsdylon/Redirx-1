@@ -1,8 +1,9 @@
 import React from 'react';
-import { ChevronDown, ChevronRight, Edit2, AlertTriangle, CheckCircle } from 'lucide-react';
+import { ChevronDown, ChevronRight, Edit2, AlertTriangle, CheckCircle, Search, FileQuestion } from 'lucide-react';
 import { Checkbox } from './ui/checkbox';
 import { Badge } from './ui/badge';
 import { Button } from './ui/button';
+import { Skeleton } from './ui/skeleton';
 import {
   Table,
   TableBody,
@@ -26,6 +27,10 @@ interface RedirectTableProps {
   onToggleExpand: (id: string) => void;
   onEdit: (redirect: RedirectMapping) => void;
   onApprove: (id: string) => void;
+  hasActiveFilters?: boolean;
+  onClearFilters?: () => void;
+  totalRedirectsCount?: number;
+  isLoading?: boolean;
 }
 
 export function RedirectTable({
@@ -35,7 +40,11 @@ export function RedirectTable({
   onToggleSelect,
   onToggleExpand,
   onEdit,
-  onApprove
+  onApprove,
+  hasActiveFilters = false,
+  onClearFilters,
+  totalRedirectsCount = 0,
+  isLoading = false
 }: RedirectTableProps) {
   const getConfidenceBadge = (band: string) => {
     switch (band) {
@@ -79,6 +88,75 @@ export function RedirectTable({
     });
   };
 
+  const renderSkeletonRow = (index: number) => (
+    <TableRow key={`skeleton-${index}`}>
+      {/* Expand button */}
+      <TableCell>
+        <Skeleton className="h-8 w-8 rounded" />
+      </TableCell>
+      {/* Checkbox */}
+      <TableCell>
+        <Skeleton className="h-4 w-4 rounded" />
+      </TableCell>
+      {/* Old URL */}
+      <TableCell>
+        <Skeleton className="h-4 w-full max-w-md" />
+      </TableCell>
+      {/* New URL */}
+      <TableCell>
+        <Skeleton className="h-4 w-full max-w-md" />
+      </TableCell>
+      {/* Confidence Badge */}
+      <TableCell>
+        <Skeleton className="h-6 w-20 rounded-full" />
+      </TableCell>
+      {/* Score */}
+      <TableCell className="text-center">
+        <Skeleton className="h-4 w-12 mx-auto" />
+      </TableCell>
+      {/* Status */}
+      <TableCell className="text-center">
+        <Skeleton className="h-5 w-16 mx-auto" />
+      </TableCell>
+      {/* Warnings */}
+      <TableCell className="text-center">
+        <Skeleton className="h-4 w-4 mx-auto" />
+      </TableCell>
+      {/* Actions */}
+      <TableCell>
+        <Skeleton className="h-8 w-8 rounded" />
+      </TableCell>
+    </TableRow>
+  );
+
+  const getEmptyStateContent = () => {
+    if (totalRedirectsCount === 0) {
+      // No redirects at all
+      return {
+        icon: <FileQuestion className="h-12 w-12 text-muted-foreground mb-4" />,
+        title: "No redirect mappings found",
+        description: "Upload CSV files to get started.",
+        showClearButton: false
+      };
+    } else if (hasActiveFilters) {
+      // Active filters with no results
+      return {
+        icon: <Search className="h-12 w-12 text-muted-foreground mb-4" />,
+        title: "No redirects match your filters",
+        description: "Try adjusting your search or confidence level.",
+        showClearButton: true
+      };
+    } else {
+      // All filtered (shouldn't normally happen, but fallback)
+      return {
+        icon: <Search className="h-12 w-12 text-muted-foreground mb-4" />,
+        title: "All redirects are hidden by current filters",
+        description: "",
+        showClearButton: true
+      };
+    }
+  };
+
   return (
     <div className="border border-border bg-card">
       <Table>
@@ -114,7 +192,40 @@ export function RedirectTable({
           </TableRow>
         </TableHeader>
         <TableBody>
-          {redirects.map((redirect) => (
+          {isLoading ? (
+            // Show skeleton rows while loading
+            Array.from({ length: 10 }).map((_, index) => renderSkeletonRow(index))
+          ) : redirects.length === 0 ? (
+            <TableRow>
+              <TableCell colSpan={9} className="h-96">
+                <div className="flex flex-col items-center justify-center text-center">
+                  {(() => {
+                    const emptyState = getEmptyStateContent();
+                    return (
+                      <>
+                        {emptyState.icon}
+                        <h3 className="text-lg font-semibold text-foreground mb-2">
+                          {emptyState.title}
+                        </h3>
+                        <p className="text-sm text-muted-foreground mb-4">
+                          {emptyState.description}
+                        </p>
+                        {emptyState.showClearButton && onClearFilters && (
+                          <Button
+                            variant="outline"
+                            onClick={onClearFilters}
+                          >
+                            Clear Filters
+                          </Button>
+                        )}
+                      </>
+                    );
+                  })()}
+                </div>
+              </TableCell>
+            </TableRow>
+          ) : (
+            redirects.map((redirect) => (
             <React.Fragment key={redirect.id}>
               <TableRow
                 className={`
@@ -268,7 +379,7 @@ export function RedirectTable({
                 </TableRow>
               )}
             </React.Fragment>
-          ))}
+          )))}
         </TableBody>
       </Table>
     </div>

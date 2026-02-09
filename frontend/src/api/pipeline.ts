@@ -1,4 +1,5 @@
 import { API_BASE_URL, getAuthHeadersMultipart, getAuthHeaders } from './config';
+import { handleApiError, UserFriendlyError } from '../utils/errorHandler';
 
 export interface QuotaExceededError {
   type: 'quota_exceeded';
@@ -15,44 +16,74 @@ export async function uploadCSVs(oldFile: File, newFile: File, force: boolean = 
     formData.append("force", "true");
   }
 
-  const response = await fetch(`${API_BASE_URL}/api/process`, {
-    method: "POST",
-    headers: getAuthHeadersMultipart(),
-    body: formData,
-  });
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/process`, {
+      method: "POST",
+      headers: getAuthHeadersMultipart(),
+      body: formData,
+    });
 
-  if (!response.ok) {
-    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
 
-    // Handle quota exceeded (429)
-    if (response.status === 429) {
-      const error: QuotaExceededError = {
-        type: 'quota_exceeded',
-        message: data.message || 'Usage limit exceeded',
-        current_usage: data.current_usage || 0,
-        limit: data.limit || 1000
-      };
+      // Handle quota exceeded (429) - preserve existing special handling
+      if (response.status === 429) {
+        const error: QuotaExceededError = {
+          type: 'quota_exceeded',
+          message: data.message || 'Usage limit exceeded',
+          current_usage: data.current_usage || 0,
+          limit: data.limit || 1000
+        };
+        throw error;
+      }
+
+      // Use centralized error handler for other errors
+      const userError = await handleApiError(null, response);
+      throw new Error(userError.message);
+    }
+
+    return await response.json();
+  } catch (error: any) {
+    // If it's a QuotaExceededError, re-throw it as-is
+    if (error.type === 'quota_exceeded') {
       throw error;
     }
 
-    throw new Error(data.error || `Failed to upload CSVs: ${response.status}`);
-  }
+    // Handle network errors and other fetch failures
+    if (error instanceof TypeError || error.name === 'AbortError') {
+      const userError = await handleApiError(error);
+      throw new Error(userError.message);
+    }
 
-  return await response.json();
+    // Re-throw other errors (like Error objects from our own code)
+    throw error;
+  }
 }
 
 export async function getResults(sessionId: string) {
-  const response = await fetch(
-    `${API_BASE_URL}/api/results/${sessionId}`,
-    {
-      method: "GET",
-      headers: getAuthHeaders()
+  try {
+    const response = await fetch(
+      `${API_BASE_URL}/api/results/${sessionId}`,
+      {
+        method: "GET",
+        headers: getAuthHeaders()
+      }
+    );
+
+    if (!response.ok) {
+      const userError = await handleApiError(null, response);
+      throw new Error(userError.message);
     }
-  );
 
-  if (!response.ok) {
-    throw new Error(`Failed to fetch results: ${response.status}`);
+    return await response.json();
+  } catch (error: any) {
+    // Handle network errors and other fetch failures
+    if (error instanceof TypeError || error.name === 'AbortError') {
+      const userError = await handleApiError(error);
+      throw new Error(userError.message);
+    }
+
+    // Re-throw other errors
+    throw error;
   }
-
-  return await response.json();
 }

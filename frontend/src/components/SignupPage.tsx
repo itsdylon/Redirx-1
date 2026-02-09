@@ -1,9 +1,12 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Card } from './ui/card';
+import { Progress } from './ui/progress';
+import { CheckCircle2, Circle } from 'lucide-react';
+import { calculatePasswordStrength, validateEmail } from '../utils/validation';
 
 export function SignupPage() {
   const [email, setEmail] = useState('');
@@ -14,13 +17,68 @@ export function SignupPage() {
   const [loading, setLoading] = useState(false);
   const [emailSent, setEmailSent] = useState(false);
   const [sentToEmail, setSentToEmail] = useState('');
+  const [emailError, setEmailError] = useState('');
+  const [emailTouched, setEmailTouched] = useState(false);
 
   const { register } = useAuth();
   const navigate = useNavigate();
 
+  // Calculate password strength in real-time
+  const passwordStrength = useMemo(
+    () => calculatePasswordStrength(password),
+    [password]
+  );
+
+  // Get color based on strength
+  const getStrengthColor = (strength: string) => {
+    switch (strength) {
+      case 'weak':
+        return 'bg-red-500';
+      case 'fair':
+        return 'bg-yellow-500';
+      case 'good':
+        return 'bg-green-500';
+      case 'strong':
+        return 'bg-green-600';
+      default:
+        return 'bg-gray-300';
+    }
+  };
+
+  // Get progress value (0-100)
+  const getProgressValue = (score: number) => {
+    return (score / 5) * 100;
+  };
+
+  const handleEmailBlur = () => {
+    setEmailTouched(true);
+    const validation = validateEmail(email);
+    if (!validation.valid) {
+      setEmailError(validation.error || 'Invalid email');
+    } else {
+      setEmailError('');
+    }
+  };
+
+  const handleEmailChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setEmail(e.target.value);
+    // Clear error when user starts typing again
+    if (emailTouched) {
+      setEmailError('');
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+
+    // Validate email before submission
+    const emailValidation = validateEmail(email);
+    if (!emailValidation.valid) {
+      setEmailError(emailValidation.error || 'Invalid email');
+      setEmailTouched(true);
+      return;
+    }
 
     // Validation
     if (password !== confirmPassword) {
@@ -28,8 +86,9 @@ export function SignupPage() {
       return;
     }
 
-    if (password.length < 8) {
-      setError('Password must be at least 8 characters');
+    // Require at least 'fair' password strength
+    if (passwordStrength.strength === 'weak') {
+      setError('Password is too weak. Please meet more security requirements.');
       return;
     }
 
@@ -134,12 +193,16 @@ export function SignupPage() {
             <Input
               type="email"
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              onChange={handleEmailChange}
+              onBlur={handleEmailBlur}
               placeholder="you@example.com"
               required
               autoComplete="email"
-              className="w-full"
+              className={`w-full ${emailError ? 'border-destructive' : ''}`}
             />
+            {emailError && (
+              <p className="text-destructive text-sm mt-1">{emailError}</p>
+            )}
           </div>
 
           <div>
@@ -155,6 +218,112 @@ export function SignupPage() {
               autoComplete="new-password"
               className="w-full"
             />
+
+            {/* Password Strength Meter */}
+            {password && (
+              <div className="mt-3 space-y-2">
+                {/* Strength Bar */}
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-muted-foreground">
+                      Password strength:
+                    </span>
+                    <span className={`text-xs font-medium capitalize ${
+                      passwordStrength.strength === 'weak' ? 'text-red-500' :
+                      passwordStrength.strength === 'fair' ? 'text-yellow-500' :
+                      passwordStrength.strength === 'good' ? 'text-green-500' :
+                      'text-green-600'
+                    }`}>
+                      {passwordStrength.strength}
+                    </span>
+                  </div>
+                  <div className="relative">
+                    <Progress
+                      value={getProgressValue(passwordStrength.score)}
+                      className="h-2"
+                    />
+                    <div
+                      className={`absolute top-0 left-0 h-2 rounded-full transition-all ${getStrengthColor(passwordStrength.strength)}`}
+                      style={{ width: `${getProgressValue(passwordStrength.score)}%` }}
+                    />
+                  </div>
+                </div>
+
+                {/* Requirements Checklist */}
+                <div className="space-y-1.5 pt-1">
+                  <div className="flex items-center gap-2">
+                    {passwordStrength.criteria.minLength ? (
+                      <CheckCircle2 className="w-4 h-4 text-green-500" />
+                    ) : (
+                      <Circle className="w-4 h-4 text-muted-foreground/50" />
+                    )}
+                    <span className={`text-xs ${
+                      passwordStrength.criteria.minLength
+                        ? 'text-foreground'
+                        : 'text-muted-foreground'
+                    }`}>
+                      At least 8 characters
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {passwordStrength.criteria.hasUppercase ? (
+                      <CheckCircle2 className="w-4 h-4 text-green-500" />
+                    ) : (
+                      <Circle className="w-4 h-4 text-muted-foreground/50" />
+                    )}
+                    <span className={`text-xs ${
+                      passwordStrength.criteria.hasUppercase
+                        ? 'text-foreground'
+                        : 'text-muted-foreground'
+                    }`}>
+                      Uppercase letter
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {passwordStrength.criteria.hasLowercase ? (
+                      <CheckCircle2 className="w-4 h-4 text-green-500" />
+                    ) : (
+                      <Circle className="w-4 h-4 text-muted-foreground/50" />
+                    )}
+                    <span className={`text-xs ${
+                      passwordStrength.criteria.hasLowercase
+                        ? 'text-foreground'
+                        : 'text-muted-foreground'
+                    }`}>
+                      Lowercase letter
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {passwordStrength.criteria.hasNumber ? (
+                      <CheckCircle2 className="w-4 h-4 text-green-500" />
+                    ) : (
+                      <Circle className="w-4 h-4 text-muted-foreground/50" />
+                    )}
+                    <span className={`text-xs ${
+                      passwordStrength.criteria.hasNumber
+                        ? 'text-foreground'
+                        : 'text-muted-foreground'
+                    }`}>
+                      Number
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {passwordStrength.criteria.hasSpecial ? (
+                      <CheckCircle2 className="w-4 h-4 text-green-500" />
+                    ) : (
+                      <Circle className="w-4 h-4 text-muted-foreground/50" />
+                    )}
+                    <span className={`text-xs ${
+                      passwordStrength.criteria.hasSpecial
+                        ? 'text-foreground'
+                        : 'text-muted-foreground'
+                    }`}>
+                      Special character
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
 
           <div>
@@ -172,7 +341,11 @@ export function SignupPage() {
             />
           </div>
 
-          <Button type="submit" className="w-full" disabled={loading}>
+          <Button
+            type="submit"
+            className="w-full"
+            disabled={loading || (password.length > 0 && passwordStrength.strength === 'weak') || !!emailError || !email}
+          >
             {loading ? 'Creating account...' : 'Sign Up'}
           </Button>
         </form>

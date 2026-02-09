@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Header } from './Header';
 import { Card } from './ui/card';
@@ -6,6 +6,7 @@ import { Button } from './ui/button';
 import { Clock, Pencil, Check, X, Loader2, Trash2, Search } from 'lucide-react';
 import { fetchAllSessions, updateSessionName, deleteSession } from '../api/sessions';
 import { formatDate } from '../utils/date';
+import { toast } from 'sonner';
 
 interface Session {
   id: string;
@@ -26,6 +27,8 @@ export function AllProjects() {
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState('');
   const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null);
+  const [deletedSessionCache, setDeletedSessionCache] = useState<Session | null>(null);
+  const undoTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const fetchSessions = async () => {
     setLoading(true);
@@ -89,9 +92,10 @@ export function AllProjects() {
 
       setEditingSessionId(null);
       setEditingName('');
+      toast.success('Project name updated');
     } catch (err) {
       console.error('Failed to update session name:', err);
-      alert('Failed to update project name. Please try again.');
+      toast.error('Failed to update project name. Please try again.');
     }
   };
 
@@ -102,6 +106,16 @@ export function AllProjects() {
   const handleConfirmDelete = async () => {
     if (!deletingSessionId) return;
 
+    // Cache the session data before deletion
+    const sessionToDelete = sessions.find(
+      session => session.id === deletingSessionId
+    );
+
+    if (!sessionToDelete) {
+      setDeletingSessionId(null);
+      return;
+    }
+
     try {
       await deleteSession(deletingSessionId);
 
@@ -111,12 +125,57 @@ export function AllProjects() {
       );
       setSessions(updatedSessions);
 
+      // Cache the deleted session for undo
+      setDeletedSessionCache(sessionToDelete);
+
+      // Clear any existing undo timeout
+      if (undoTimeoutRef.current) {
+        clearTimeout(undoTimeoutRef.current);
+      }
+
+      // Set timeout to clear cache after 8 seconds
+      undoTimeoutRef.current = setTimeout(() => {
+        setDeletedSessionCache(null);
+      }, 8000);
+
       setDeletingSessionId(null);
+
+      // Show toast with undo action
+      toast.success('Project deleted', {
+        duration: 8000,
+        action: {
+          label: 'Undo',
+          onClick: () => handleUndoDelete(sessionToDelete),
+        },
+      });
     } catch (err) {
       console.error('Failed to delete session:', err);
-      alert('Failed to delete project. Please try again.');
+      toast.error('Failed to delete project. Please try again.');
       setDeletingSessionId(null);
     }
+  };
+
+  const handleUndoDelete = (session: Session) => {
+    // Clear the undo timeout
+    if (undoTimeoutRef.current) {
+      clearTimeout(undoTimeoutRef.current);
+      undoTimeoutRef.current = null;
+    }
+
+    // Restore the session to local state
+    const updatedSessions = [...sessions, session].sort(
+      (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+    );
+    setSessions(updatedSessions);
+
+    // Clear the cache
+    setDeletedSessionCache(null);
+
+    // Show success toast
+    toast.success('Project restored');
+
+    // Refresh sessions data to ensure consistency
+    fetchSessions();
   };
 
   const handleCancelDelete = () => {

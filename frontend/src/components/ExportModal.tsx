@@ -19,7 +19,8 @@ import {
 import { Alert, AlertDescription } from './ui/alert';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from './ui/collapsible';
 import { Separator } from './ui/separator';
-import { AlertTriangle, CheckCircle, ChevronDown, ChevronRight } from 'lucide-react';
+import { AlertTriangle, CheckCircle, ChevronDown, ChevronRight, Loader2 } from 'lucide-react';
+import { toast } from 'sonner';
 import type { RedirectMapping } from './ReviewInterface';
 
 interface ExportModalProps {
@@ -35,6 +36,7 @@ export function ExportModal({ open, onOpenChange, onExport, redirects }: ExportM
   const [includeMedium, setIncludeMedium] = useState(true);
   const [includeLow, setIncludeLow] = useState(false);
   const [previewExpanded, setPreviewExpanded] = useState(false);
+  const [isDownloading, setIsDownloading] = useState(false);
 
   // URL format options
   const [urlFormat, setUrlFormat] = useState<'paths' | 'full' | 'custom'>('paths');
@@ -201,42 +203,85 @@ export function ExportModal({ open, onOpenChange, onExport, redirects }: ExportM
 
   const previewContent = buildExportContent(format, filteredRedirects, true);
 
-  const handleDownload = () => {
+  const handleDownload = async () => {
     if (!format || selectedCount === 0) return;
 
-    const confidenceLevels: string[] = [];
-    if (includeHigh) confidenceLevels.push('high');
-    if (includeMedium) confidenceLevels.push('medium');
-    if (includeLow) confidenceLevels.push('low');
+    setIsDownloading(true);
 
-    // Use the same content as the preview
-    const content = buildExportContent(format, filteredRedirects);
+    try {
+      const confidenceLevels: string[] = [];
+      if (includeHigh) confidenceLevels.push('high');
+      if (includeMedium) confidenceLevels.push('medium');
+      if (includeLow) confidenceLevels.push('low');
 
-    const fileName =
-      format === 'apache'
-        ? 'redirects.htaccess'
-        : format === 'nginx'
-        ? 'redirects_nginx.conf'
-        : format === 'wordpress'
-        ? 'redirects_wordpress.csv'
-        : 'redirects.txt';
+      // Use the same content as the preview
+      const content = buildExportContent(format, filteredRedirects);
 
-    // Create a blob and trigger a download
-    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
-    const url = window.URL.createObjectURL(blob);
+      const fileName =
+        format === 'apache'
+          ? 'redirects.htaccess'
+          : format === 'nginx'
+          ? 'redirects_nginx.conf'
+          : format === 'wordpress'
+          ? 'redirects_wordpress.csv'
+          : 'redirects.txt';
 
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = fileName;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+      // Create a blob and trigger a download
+      const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+      const url = window.URL.createObjectURL(blob);
 
-    window.URL.revokeObjectURL(url);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
 
-    // Still call onExport so your parent can show toasts, analytics, etc.
-    onExport(format, confidenceLevels);
-    onOpenChange(false);
+      window.URL.revokeObjectURL(url);
+
+      // Show success toast
+      toast.success(`${fileName} downloaded successfully`, {
+        duration: 3000,
+      });
+
+      // Still call onExport so your parent can show toasts, analytics, etc.
+      onExport(format, confidenceLevels);
+      onOpenChange(false);
+    } catch (error) {
+      // Handle specific error types
+      if (error instanceof DOMException) {
+        if (error.name === 'SecurityError') {
+          toast.error('Download blocked by browser security settings', {
+            description: 'Please check your browser permissions and try again.',
+            duration: 5000,
+          });
+        } else if (error.name === 'QuotaExceededError') {
+          toast.error('Not enough disk space', {
+            description: 'Please free up disk space and try again.',
+            duration: 5000,
+          });
+        } else {
+          toast.error('Download failed', {
+            description: `Browser error: ${error.message}. Please try again.`,
+            duration: 5000,
+          });
+        }
+      } else if (error instanceof Error) {
+        toast.error('Download failed', {
+          description: error.message || 'An unexpected error occurred. Please try again.',
+          duration: 5000,
+        });
+      } else {
+        toast.error('Download failed', {
+          description: 'An unexpected error occurred. Please try again.',
+          duration: 5000,
+        });
+      }
+
+      console.error('Export download error:', error);
+    } finally {
+      setIsDownloading(false);
+    }
   };
 
   return (
@@ -512,9 +557,16 @@ export function ExportModal({ open, onOpenChange, onExport, redirects }: ExportM
           </Button>
           <Button
             onClick={handleDownload}
-            disabled={!format || selectedCount === 0 || hasCustomDomainErrors}
+            disabled={!format || selectedCount === 0 || hasCustomDomainErrors || isDownloading}
           >
-            Download File
+            {isDownloading ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Preparing download...
+              </>
+            ) : (
+              'Download File'
+            )}
           </Button>
         </div>
       </DialogContent>

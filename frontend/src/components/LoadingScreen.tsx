@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Loader2 } from 'lucide-react';
+import { Loader2, AlertTriangle, RefreshCw } from 'lucide-react';
 import { Button } from './ui/button';
 import { Progress } from './ui/progress';
+import { Alert, AlertTitle, AlertDescription } from './ui/alert';
 import { getSessionStatus, SessionStatus } from '../api/sessions';
 
 interface LoadingScreenProps {
@@ -10,6 +11,8 @@ interface LoadingScreenProps {
 }
 
 const POLL_INTERVAL = 3000; // 3 seconds
+const WARNING_THRESHOLD = 3; // Show warning after 3 failures
+const ERROR_THRESHOLD = 5; // Show error after 5 failures
 
 export function LoadingScreen({ sessionId }: LoadingScreenProps) {
   const navigate = useNavigate();
@@ -18,14 +21,36 @@ export function LoadingScreen({ sessionId }: LoadingScreenProps) {
     stageName: string | null;
     totalStages: number | null;
   }>({ currentStage: null, stageName: null, totalStages: null });
+  const [error, setError] = useState<string | null>(null);
+  const [failureCount, setFailureCount] = useState(0);
+  const [nextRetryIn, setNextRetryIn] = useState(0);
+  const [pollingError, setPollingError] = useState(false);
 
-  // Poll for job completion
+  // Calculate exponential backoff delay
+  const getBackoffDelay = (failures: number): number => {
+    return Math.min(POLL_INTERVAL * Math.pow(2, failures), 30000);
+  };
+
+  // Poll for job completion with failure handling
   useEffect(() => {
     if (!sessionId) return;
 
-    const pollInterval = setInterval(async () => {
+    let timeoutId: NodeJS.Timeout;
+    let countdownIntervalId: NodeJS.Timeout | null = null;
+
+    const poll = async () => {
+      // Stop polling if we've hit the error threshold
+      if (failureCount >= ERROR_THRESHOLD) {
+        setPollingError(true);
+        return;
+      }
+
       try {
         const status: SessionStatus = await getSessionStatus(sessionId);
+
+        // Successful poll - reset failure count
+        setFailureCount(0);
+        setNextRetryIn(0);
 
         // Update progress state
         setProgress({
@@ -35,23 +60,59 @@ export function LoadingScreen({ sessionId }: LoadingScreenProps) {
         });
 
         if (status.status === 'completed') {
-          clearInterval(pollInterval);
           navigate(`/review/${sessionId}`);
+          return;
         } else if (status.status === 'failed') {
-          clearInterval(pollInterval);
-          // Could show an error state here
+          setError('The processing job failed. This could be due to invalid URLs, network issues, or an internal error. Please try uploading your files again.');
           console.error('Job failed');
+          return;
         }
+
+        // Schedule next poll with normal interval
+        timeoutId = setTimeout(poll, POLL_INTERVAL);
       } catch (error) {
         console.error('Error polling status:', error);
-      }
-    }, POLL_INTERVAL);
 
-    return () => clearInterval(pollInterval);
-  }, [sessionId, navigate]);
+        // Increment failure count
+        const newFailureCount = failureCount + 1;
+        setFailureCount(newFailureCount);
+
+        // Calculate backoff delay
+        const delay = getBackoffDelay(newFailureCount);
+        setNextRetryIn(Math.ceil(delay / 1000)); // Convert to seconds
+
+        // Start countdown timer
+        if (countdownIntervalId) {
+          clearInterval(countdownIntervalId);
+        }
+        countdownIntervalId = setInterval(() => {
+          setNextRetryIn((prev) => Math.max(0, prev - 1));
+        }, 1000);
+
+        // Schedule next poll with backoff
+        timeoutId = setTimeout(poll, delay);
+      }
+    };
+
+    // Start polling
+    poll();
+
+    return () => {
+      clearTimeout(timeoutId);
+      if (countdownIntervalId) {
+        clearInterval(countdownIntervalId);
+      }
+    };
+  }, [sessionId, navigate, failureCount]);
 
   const handleContinueInBackground = () => {
     navigate('/');
+  };
+
+  const handleRetry = () => {
+    setFailureCount(0);
+    setNextRetryIn(0);
+    setPollingError(false);
   };
 
   const hasProgress = progress.currentStage != null && progress.totalStages != null;
@@ -59,10 +120,100 @@ export function LoadingScreen({ sessionId }: LoadingScreenProps) {
     ? (progress.currentStage! / progress.totalStages!) * 100
     : 0;
 
+  // Show error UI if job failed
+  if (error) {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-8">
+        <div className="w-full max-w-xl">
+          <div className="space-y-6">
+            <Alert variant="destructive">
+              <AlertTriangle className="h-5 w-5" />
+              <AlertTitle>Processing Failed</AlertTitle>
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+
+            <div className="flex flex-col sm:flex-row gap-3">
+              <Button
+                onClick={() => navigate('/upload')}
+                className="flex-1"
+              >
+                Try Again
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => navigate('/')}
+                className="flex-1"
+              >
+                View Dashboard
+              </Button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Show error UI if polling failed too many times
+  if (pollingError) {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-8">
+        <div className="w-full max-w-xl">
+          <div className="space-y-6">
+            <Alert variant="destructive">
+              <AlertTriangle className="h-5 w-5" />
+              <AlertTitle>Unable to Check Job Status</AlertTitle>
+              <AlertDescription>
+                Unable to check job status. The job may still be running. Please try refreshing or check your dashboard.
+              </AlertDescription>
+            </Alert>
+
+            <div className="flex flex-col sm:flex-row gap-3">
+              <Button
+                onClick={handleRetry}
+                className="flex-1"
+              >
+                Retry
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => navigate('/')}
+                className="flex-1"
+              >
+                Go to Dashboard
+              </Button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen flex items-center justify-center p-8">
       <div className="w-full max-w-xl">
         <div className="text-center">
+          {/* Warning banner for polling failures */}
+          {failureCount >= WARNING_THRESHOLD && failureCount < ERROR_THRESHOLD && (
+            <Alert variant="default" className="mb-6 text-left border-amber-500 dark:border-amber-600">
+              <AlertTriangle className="h-5 w-5 text-amber-600 dark:text-amber-500" />
+              <AlertTitle>Having Trouble Checking Status</AlertTitle>
+              <AlertDescription className="space-y-3">
+                <p>
+                  Having trouble checking status. Retrying in {nextRetryIn} second{nextRetryIn !== 1 ? 's' : ''}...
+                </p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleRetry}
+                  className="w-full sm:w-auto"
+                >
+                  <RefreshCw className="h-4 w-4 mr-2" />
+                  Refresh Now
+                </Button>
+              </AlertDescription>
+            </Alert>
+          )}
+
           {/* Progress heading */}
           <h1 className="text-foreground mb-2">
             {hasProgress

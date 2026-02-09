@@ -5,10 +5,11 @@ import { Card } from './ui/card';
 import { Button } from './ui/button';
 import { Progress } from './ui/progress';
 import { Separator } from './ui/separator';
-import { FileUp, TrendingUp, CheckCircle, BarChart3, Clock, Pencil, Check, X, Loader2, Trash2 } from 'lucide-react';
+import { FileUp, TrendingUp, CheckCircle, BarChart3, Clock, Pencil, Check, X, Loader2, Trash2, RefreshCw } from 'lucide-react';
 import { fetchDashboardData, DashboardData } from '../api/dashboard';
 import { updateSessionName, deleteSession } from '../api/sessions';
 import { formatDate } from '../utils/date';
+import { toast } from 'sonner';
 
 const POLL_INTERVAL = 5000; // 5 seconds
 
@@ -21,7 +22,30 @@ export function Dashboard() {
   const [editingName, setEditingName] = useState('');
   const [recentlyCompleted, setRecentlyCompleted] = useState<Set<string>>(new Set());
   const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null);
+  const [isDeleting, setIsDeleting] = useState<boolean>(false);
   const previousProcessingRef = useRef<string[]>([]);
+  const [deletedSessionCache, setDeletedSessionCache] = useState<any>(null);
+  const undoTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [timeAgo, setTimeAgo] = useState<string>('');
+  const [isPolling, setIsPolling] = useState(false);
+  const [isManualRefreshing, setIsManualRefreshing] = useState(false);
+
+  // Format time ago helper
+  const formatTimeAgo = (date: Date): string => {
+    const seconds = Math.floor((new Date().getTime() - date.getTime()) / 1000);
+
+    if (seconds < 5) return 'just now';
+    if (seconds < 60) return `${seconds} seconds ago`;
+
+    const minutes = Math.floor(seconds / 60);
+    if (minutes === 1) return '1 minute ago';
+    if (minutes < 60) return `${minutes} minutes ago`;
+
+    const hours = Math.floor(minutes / 60);
+    if (hours === 1) return '1 hour ago';
+    return `${hours} hours ago`;
+  };
 
   const fetchDashboard = async () => {
     setLoading(true);
@@ -30,6 +54,7 @@ export function Dashboard() {
     try {
       const data = await fetchDashboardData();
       setDashboardData(data);
+      setLastUpdated(new Date());
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to load dashboard data';
       setError(errorMessage);
@@ -45,9 +70,38 @@ export function Dashboard() {
     }
   };
 
+  const handleManualRefresh = async () => {
+    setIsManualRefreshing(true);
+    try {
+      const data = await fetchDashboardData();
+      setDashboardData(data);
+      setLastUpdated(new Date());
+      toast.success('Dashboard refreshed');
+    } catch (err) {
+      console.error('Error refreshing dashboard:', err);
+      toast.error('Failed to refresh dashboard');
+    } finally {
+      setIsManualRefreshing(false);
+    }
+  };
+
   useEffect(() => {
     fetchDashboard();
   }, []);
+
+  // Update time ago every second
+  useEffect(() => {
+    if (!lastUpdated) return;
+
+    const updateTimeAgo = () => {
+      setTimeAgo(formatTimeAgo(lastUpdated));
+    };
+
+    updateTimeAgo(); // Initial update
+    const interval = setInterval(updateTimeAgo, 1000);
+
+    return () => clearInterval(interval);
+  }, [lastUpdated]);
 
   // Poll for status updates when there are processing sessions
   useEffect(() => {
@@ -67,6 +121,7 @@ export function Dashboard() {
       .map(s => s.id) || [];
 
     const pollInterval = setInterval(async () => {
+      setIsPolling(true);
       try {
         const data = await fetchDashboardData();
 
@@ -88,8 +143,11 @@ export function Dashboard() {
           .map(s => s.id) || [];
 
         setDashboardData(data);
+        setLastUpdated(new Date());
       } catch (err) {
         console.error('Error polling dashboard:', err);
+      } finally {
+        setIsPolling(false);
       }
     }, POLL_INTERVAL);
 
@@ -123,9 +181,10 @@ export function Dashboard() {
 
       setEditingSessionId(null);
       setEditingName('');
+      toast.success('Project name updated');
     } catch (err) {
       console.error('Failed to update session name:', err);
-      alert('Failed to update project name. Please try again.');
+      toast.error('Failed to update project name. Please try again.');
     }
   };
 
@@ -136,6 +195,17 @@ export function Dashboard() {
   const handleConfirmDelete = async () => {
     if (!deletingSessionId) return;
 
+    // Cache the session data before deletion
+    const sessionToDelete = dashboardData?.recent_sessions.find(
+      session => session.id === deletingSessionId
+    );
+
+    if (!sessionToDelete) {
+      setDeletingSessionId(null);
+      return;
+    }
+
+    setIsDeleting(true);
     try {
       await deleteSession(deletingSessionId);
 
@@ -147,12 +217,61 @@ export function Dashboard() {
         setDashboardData({ ...dashboardData, recent_sessions: updatedSessions });
       }
 
+      // Cache the deleted session for undo
+      setDeletedSessionCache(sessionToDelete);
+
+      // Clear any existing undo timeout
+      if (undoTimeoutRef.current) {
+        clearTimeout(undoTimeoutRef.current);
+      }
+
+      // Set timeout to clear cache after 8 seconds
+      undoTimeoutRef.current = setTimeout(() => {
+        setDeletedSessionCache(null);
+      }, 8000);
+
       setDeletingSessionId(null);
+
+      // Show toast with undo action
+      toast.success('Project deleted', {
+        duration: 8000,
+        action: {
+          label: 'Undo',
+          onClick: () => handleUndoDelete(sessionToDelete),
+        },
+      });
     } catch (err) {
       console.error('Failed to delete session:', err);
-      alert('Failed to delete project. Please try again.');
+      toast.error('Failed to delete project. Please try again.');
       setDeletingSessionId(null);
+    } finally {
+      setIsDeleting(false);
     }
+  };
+
+  const handleUndoDelete = (session: any) => {
+    // Clear the undo timeout
+    if (undoTimeoutRef.current) {
+      clearTimeout(undoTimeoutRef.current);
+      undoTimeoutRef.current = null;
+    }
+
+    // Restore the session to local state
+    if (dashboardData) {
+      const updatedSessions = [...dashboardData.recent_sessions, session].sort(
+        (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+      );
+      setDashboardData({ ...dashboardData, recent_sessions: updatedSessions });
+    }
+
+    // Clear the cache
+    setDeletedSessionCache(null);
+
+    // Show success toast
+    toast.success('Project restored');
+
+    // Refresh dashboard data to ensure consistency
+    fetchDashboard();
   };
 
   const handleCancelDelete = () => {
@@ -191,8 +310,35 @@ export function Dashboard() {
       <main className="max-w-7xl mx-auto p-8">
         {/* Page Header */}
         <div className="mb-8">
-          <h1 className="text-foreground mb-2">Dashboard</h1>
-          <p className="text-muted-foreground">Manage and track your redirect mapping projects</p>
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-foreground mb-2">Dashboard</h1>
+              <p className="text-muted-foreground">Manage and track your redirect mapping projects</p>
+            </div>
+            {lastUpdated && (
+              <div className="flex items-center gap-3 text-sm text-muted-foreground">
+                <div className="flex items-center gap-2">
+                  {isPolling && (
+                    <span className="relative flex h-2 w-2">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-muted-foreground opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-2 w-2 bg-muted-foreground"></span>
+                    </span>
+                  )}
+                  <span>Last updated: {timeAgo}</span>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => handleManualRefresh()}
+                  disabled={isManualRefreshing}
+                  className="h-8 w-8 p-0"
+                  title="Refresh now"
+                >
+                  <RefreshCw className={`h-4 w-4 ${isManualRefreshing ? 'animate-spin' : ''}`} />
+                </Button>
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Metric Cards */}
@@ -404,14 +550,16 @@ export function Dashboard() {
               redirect mappings and cannot be undone.
             </p>
             <div className="flex justify-end gap-3">
-              <Button variant="outline" onClick={handleCancelDelete}>
+              <Button variant="outline" onClick={handleCancelDelete} disabled={isDeleting}>
                 Cancel
               </Button>
               <Button
                 variant="destructive"
                 onClick={handleConfirmDelete}
+                disabled={isDeleting}
               >
-                Delete Project
+                {isDeleting && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+                {isDeleting ? 'Deleting...' : 'Delete Project'}
               </Button>
             </div>
           </Card>

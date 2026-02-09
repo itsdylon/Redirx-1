@@ -1,4 +1,5 @@
 import { API_BASE_URL, getAuthHeaders } from './config';
+import { handleApiError } from '../utils/errorHandler';
 
 export interface DashboardData {
   success: boolean;
@@ -17,17 +18,26 @@ export interface DashboardData {
 }
 
 export async function fetchDashboardData(): Promise<DashboardData> {
-  const response = await fetch(`${API_BASE_URL}/api/user/dashboard`, {
-    method: 'GET',
-    headers: getAuthHeaders(),
-  });
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/user/dashboard`, {
+      method: 'GET',
+      headers: getAuthHeaders(),
+    });
 
-  if (!response.ok) {
-    if (response.status === 401) {
-      throw new Error('Unauthorized. Please log in again.');
+    if (!response.ok) {
+      const userError = await handleApiError(null, response);
+      throw new Error(userError.message);
     }
-    throw new Error(`Failed to fetch dashboard data: ${response.status}`);
-  }
 
-  return await response.json();
+    return await response.json();
+  } catch (error: any) {
+    // Handle network errors and other fetch failures
+    if (error instanceof TypeError || error.name === 'AbortError') {
+      const userError = await handleApiError(error);
+      throw new Error(userError.message);
+    }
+
+    // Re-throw other errors
+    throw error;
+  }
 }

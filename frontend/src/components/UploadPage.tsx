@@ -6,7 +6,8 @@ import { FileUploadZone } from './FileUploadZone';
 import { LoadingScreen } from './LoadingScreen';
 import { Button } from './ui/button';
 import { Toaster } from './ui/sonner';
-import { ArrowLeft, AlertTriangle } from 'lucide-react';
+import { ArrowLeft, AlertTriangle, Loader2 } from 'lucide-react';
+import { validateCSV, CSVValidationResult } from '../utils/validation';
 
 interface FileData {
   name: string;
@@ -23,6 +24,7 @@ interface QuotaError {
 export function UploadPage() {
   const navigate = useNavigate();
   const [isLoading, setIsLoading] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [oldSiteFile, setOldSiteFile] = useState<FileData | null>(null);
   const [newSiteFile, setNewSiteFile] = useState<FileData | null>(null);
@@ -34,7 +36,38 @@ export function UploadPage() {
   const [oldCsvFile, setOldCsvFile] = useState<File | null>(null);
   const [newCsvFile, setNewCsvFile] = useState<File | null>(null);
 
-  const handleFileUpload = (file: File, type: 'old' | 'new') => {
+  // Validation state
+  const [oldFileValidation, setOldFileValidation] = useState<CSVValidationResult | null>(null);
+  const [newFileValidation, setNewFileValidation] = useState<CSVValidationResult | null>(null);
+  const [pendingWarnings, setPendingWarnings] = useState<{ old: string[], new: string[] } | null>(null);
+
+  const handleFileUpload = async (file: File, type: 'old' | 'new') => {
+    // Clear previous errors for this file type
+    if (type === 'old') {
+      setOldFileValidation(null);
+      setOldSiteFile(null);
+      setOldCsvFile(null);
+    } else {
+      setNewFileValidation(null);
+      setNewSiteFile(null);
+      setNewCsvFile(null);
+    }
+
+    // Validate the CSV file
+    const validationResult = await validateCSV(file);
+
+    if (type === 'old') {
+      setOldFileValidation(validationResult);
+    } else {
+      setNewFileValidation(validationResult);
+    }
+
+    // If validation failed, don't proceed with file upload
+    if (!validationResult.valid) {
+      return;
+    }
+
+    // Read the file content
     const reader = new FileReader();
     reader.onload = (e) => {
       const text = e.target?.result as string;
@@ -42,7 +75,7 @@ export function UploadPage() {
 
       const fileData: FileData = {
         name: file.name,
-        rowCount: lines.length - 1,
+        rowCount: validationResult.rowCount,
         file: file,
       };
 
@@ -58,16 +91,29 @@ export function UploadPage() {
     reader.readAsText(file);
   };
 
-  const handleBeginMatching = async (force: boolean = false) => {
+  const handleBeginMatching = async (force: boolean = false, skipWarningCheck: boolean = false) => {
     if (!oldCsvFile || !newCsvFile) {
       setError("Upload both CSV files first.");
       return;
+    }
+
+    // Check for warnings if not already confirmed
+    if (!skipWarningCheck) {
+      const oldWarnings = oldFileValidation?.warnings || [];
+      const newWarnings = newFileValidation?.warnings || [];
+
+      if (oldWarnings.length > 0 || newWarnings.length > 0) {
+        setPendingWarnings({ old: oldWarnings, new: newWarnings });
+        return;
+      }
     }
 
     // Clear previous errors
     setError(null);
     setQuotaError(null);
     setDuplicateSessionId(null);
+    setPendingWarnings(null);
+    setIsUploading(true);
     setIsLoading(true);
 
     try {
@@ -78,6 +124,7 @@ export function UploadPage() {
       // Check if this is a duplicate run
       if (result.is_duplicate && !force) {
         console.log("Duplicate detected, showing warning");
+        setIsUploading(false);
         setIsLoading(false);
         setDuplicateSessionId(result.session_id);
         return;
@@ -87,8 +134,10 @@ export function UploadPage() {
       if (result.session_id) {
         setCurrentSessionId(result.session_id);
       }
+      setIsUploading(false);
     } catch (err) {
       console.error(err);
+      setIsUploading(false);
       setIsLoading(false);
       setCurrentSessionId(null);
 
@@ -112,7 +161,16 @@ export function UploadPage() {
     handleBeginMatching(true);
   };
 
+  const handleProceedWithWarnings = () => {
+    handleBeginMatching(false, true);
+  };
+
+  const handleCancelWarnings = () => {
+    setPendingWarnings(null);
+  };
+
   const bothFilesUploaded = oldSiteFile && newSiteFile;
+  const hasValidationErrors = (oldFileValidation && !oldFileValidation.valid) || (newFileValidation && !newFileValidation.valid);
 
   // Show loading screen when processing
   if (isLoading) {
@@ -201,17 +259,68 @@ export function UploadPage() {
             </div>
           )}
 
+          {/* Validation Warnings */}
+          {pendingWarnings && (
+            <div className="mb-6 border border-yellow-500 bg-yellow-500/10 p-4 flex items-start gap-3">
+              <AlertTriangle className="h-5 w-5 text-yellow-500 flex-shrink-0 mt-0.5" />
+              <div className="flex-1">
+                <div className="font-medium text-yellow-600 dark:text-yellow-400">File Warnings Detected</div>
+                <p className="text-sm text-muted-foreground mt-1">
+                  The following warnings were found in your files. You can proceed anyway, but processing may take longer or encounter issues.
+                </p>
+                {pendingWarnings.old.length > 0 && (
+                  <div className="mt-3">
+                    <div className="text-sm font-medium text-yellow-600 dark:text-yellow-400">Old Site CSV:</div>
+                    <ul className="list-disc list-inside text-sm text-muted-foreground mt-1">
+                      {pendingWarnings.old.map((warning, idx) => (
+                        <li key={idx}>{warning}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {pendingWarnings.new.length > 0 && (
+                  <div className="mt-3">
+                    <div className="text-sm font-medium text-yellow-600 dark:text-yellow-400">New Site CSV:</div>
+                    <ul className="list-disc list-inside text-sm text-muted-foreground mt-1">
+                      {pendingWarnings.new.map((warning, idx) => (
+                        <li key={idx}>{warning}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                <div className="flex gap-3 mt-3">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleCancelWarnings}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    variant="default"
+                    size="sm"
+                    onClick={handleProceedWithWarnings}
+                  >
+                    Proceed Anyway
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Upload Zones */}
           <div className="grid grid-cols-2 gap-6 mb-8">
             <FileUploadZone
               label="Old Site CSV"
               onFileUpload={(file) => handleFileUpload(file, 'old')}
               file={oldSiteFile}
+              validationError={oldFileValidation && !oldFileValidation.valid ? oldFileValidation.errors.join(', ') : null}
             />
             <FileUploadZone
               label="New Site CSV"
               onFileUpload={(file) => handleFileUpload(file, 'new')}
               file={newSiteFile}
+              validationError={newFileValidation && !newFileValidation.valid ? newFileValidation.errors.join(', ') : null}
             />
           </div>
 
@@ -237,12 +346,18 @@ export function UploadPage() {
           <div>
             <Button
               onClick={() => handleBeginMatching()}
-              disabled={!bothFilesUploaded}
+              disabled={!bothFilesUploaded || hasValidationErrors || isUploading}
               size="lg"
               className="w-full"
             >
-              Begin Matching →
+              {isUploading && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+              {isUploading ? 'Processing...' : 'Begin Matching →'}
             </Button>
+            {hasValidationErrors && (
+              <p className="text-sm text-destructive mt-2 text-center">
+                Please fix validation errors before proceeding
+              </p>
+            )}
           </div>
         </main>
       </div>

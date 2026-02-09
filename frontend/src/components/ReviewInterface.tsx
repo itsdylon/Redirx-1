@@ -1,15 +1,23 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { useHotkeys } from 'react-hotkeys-hook';
 import { Header } from './Header';
 import { StatsSidebar } from './StatsSidebar';
 import { ReviewToolbar } from './ReviewToolbar';
 import { RedirectTable } from './RedirectTable';
 import { InlineEditDialog } from './InlineEditDialog';
 import { ExportModal } from './ExportModal';
+import { KeyboardShortcutsDialog } from './KeyboardShortcutsDialog';
 import { Button } from './ui/button';
-import { ArrowLeft } from 'lucide-react';
-import { toast } from 'sonner@2.0.3';
+import { ArrowLeft, Keyboard } from 'lucide-react';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from './ui/tooltip';
+import { toast } from 'sonner';
 import { getResults } from '../api/pipeline';
+import { isMac } from '../lib/keyboard';
 import {
   Pagination,
   PaginationContent,
@@ -51,10 +59,14 @@ export function ReviewInterface() {
   const [confidenceFilter, setConfidenceFilter] = useState<string>('all');
   const [currentPage, setCurrentPage] = useState(1);
   const [exportModalOpen, setExportModalOpen] = useState(false);
+  const [keyboardShortcutsOpen, setKeyboardShortcutsOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [sortOption, setSortOption] = useState<string>('confidence-desc');
   const PAGE_SIZE = 25;
+
+  // Refs for keyboard shortcuts
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
   // Fetch results from backend when sessionId is available
   useEffect(() => {
@@ -107,23 +119,30 @@ export function ReviewInterface() {
   const handleSaveEdit = (updatedRedirect: RedirectMapping) => {
     setRedirects(redirects.map(r => r.id === updatedRedirect.id ? updatedRedirect : r));
     setEditingRow(null);
+    toast.success('Redirect updated');
   };
 
   const handleBulkAction = (action: string) => {
     if (action === 'approve-all-high') {
+      const highConfidenceCount = redirects.filter(r => r.confidenceBand === 'high').length;
       setRedirects(redirects.map((r) =>
         r.confidenceBand === 'high' ? { ...r, approved: true } : r
       ));
+      toast.success(`${highConfidenceCount} redirect${highConfidenceCount !== 1 ? 's' : ''} approved`);
     } else if (action === 'approve-selected') {
+      const count = selectedRows.size;
       setRedirects(redirects.map((r) =>
         selectedRows.has(r.id) ? { ...r, approved: true } : r
       ));
       setSelectedRows(new Set());
+      toast.success(`${count} redirect${count !== 1 ? 's' : ''} approved`);
     } else if (action === 'reject-selected') {
+      const count = selectedRows.size;
       setRedirects(redirects.map((r) =>
         selectedRows.has(r.id) ? { ...r, approved: false } : r
       ));
       setSelectedRows(new Set());
+      toast.success(`${count} redirect${count !== 1 ? 's' : ''} rejected`);
     }
   };
 
@@ -171,6 +190,16 @@ export function ReviewInterface() {
     return matchesSearch && matchesConfidence;
   });
 
+  // Determine if filters are active
+  const hasActiveFilters = searchQuery.trim().length > 0 || confidenceFilter !== 'all';
+
+  // Handler to clear all filters
+  const handleClearFilters = () => {
+    setSearchQuery('');
+    setConfidenceFilter('all');
+    setCurrentPage(1);
+  };
+
   // Sort according to toolbar selection
   const sortedRedirects = [...filteredRedirects].sort((a, b) => {
     switch (sortOption) {
@@ -200,6 +229,47 @@ export function ReviewInterface() {
     approved: redirects.filter(r => r.approved).length,
     approvalProgress: redirects.length > 0 ? Math.round((redirects.filter(r => r.approved).length / redirects.length) * 100) : 0,
   };
+
+  // Keyboard shortcuts
+  const modKey = isMac() ? 'meta' : 'ctrl';
+
+  // Ctrl/Cmd+K: Focus search
+  useHotkeys(`${modKey}+k`, (e) => {
+    e.preventDefault();
+    searchInputRef.current?.focus();
+  }, []);
+
+  // Ctrl/Cmd+E: Open export modal
+  useHotkeys(`${modKey}+e`, (e) => {
+    e.preventDefault();
+    if (!exportModalOpen) {
+      setExportModalOpen(true);
+    }
+  }, [exportModalOpen]);
+
+  // Escape: Close modals
+  useHotkeys('escape', () => {
+    if (exportModalOpen) {
+      setExportModalOpen(false);
+    } else if (keyboardShortcutsOpen) {
+      setKeyboardShortcutsOpen(false);
+    } else if (editingRow) {
+      setEditingRow(null);
+    }
+  }, [exportModalOpen, keyboardShortcutsOpen, editingRow]);
+
+  // Ctrl/Cmd+A: Select all visible redirects
+  useHotkeys(`${modKey}+a`, (e) => {
+    e.preventDefault();
+    const allVisibleIds = new Set(pageRedirects.map(r => r.id));
+    setSelectedRows(allVisibleIds);
+    toast.success(`Selected ${allVisibleIds.size} redirect${allVisibleIds.size !== 1 ? 's' : ''}`);
+  }, [pageRedirects]);
+
+  // ?: Show keyboard shortcuts
+  useHotkeys('shift+/', () => {
+    setKeyboardShortcutsOpen(true);
+  }, []);
 
   // Show loading state
   if (isLoading) {
@@ -262,6 +332,9 @@ export function ReviewInterface() {
             sortOption={sortOption}
             onSortChange={setSortOption}
             onExportClick={() => setExportModalOpen(true)}
+            totalCount={redirects.length}
+            filteredCount={sortedRedirects.length}
+            searchInputRef={searchInputRef}
           />
 
           {/* Table */}
@@ -274,6 +347,10 @@ export function ReviewInterface() {
             onToggleExpand={handleToggleExpand}
             onEdit={handleEdit}
             onApprove={handleApproveRow}
+            hasActiveFilters={hasActiveFilters}
+            onClearFilters={handleClearFilters}
+            totalRedirectsCount={redirects.length}
+            isLoading={isLoading}
           />
 
           </div>
@@ -348,6 +425,25 @@ export function ReviewInterface() {
         </main>
       </div>
 
+      {/* Floating Keyboard Shortcuts Button */}
+      <div className="fixed bottom-6 right-6 z-40">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={() => setKeyboardShortcutsOpen(true)}
+              className="h-10 w-10 rounded-full shadow-lg border-2"
+            >
+              <Keyboard className="h-5 w-5" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="left">
+            <p>Keyboard shortcuts (?)</p>
+          </TooltipContent>
+        </Tooltip>
+      </div>
+
       {/* Inline Edit Dialog */}
       {editingRow && (
         <InlineEditDialog
@@ -363,6 +459,12 @@ export function ReviewInterface() {
         onOpenChange={setExportModalOpen}
         onExport={handleExport}
         redirects={redirects}
+      />
+
+      {/* Keyboard Shortcuts Dialog */}
+      <KeyboardShortcutsDialog
+        open={keyboardShortcutsOpen}
+        onOpenChange={setKeyboardShortcutsOpen}
       />
     </div>
   );

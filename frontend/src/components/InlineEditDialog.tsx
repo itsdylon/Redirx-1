@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { X } from 'lucide-react';
+import { useState, useEffect, useCallback } from 'react';
+import { X, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -19,6 +19,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from './ui/select';
+import { validateUrl, debounce } from '../utils/validation';
 
 interface InlineEditDialogProps {
   redirect: RedirectMapping;
@@ -28,9 +29,47 @@ interface InlineEditDialogProps {
 
 export function InlineEditDialog({ redirect, onSave, onCancel }: InlineEditDialogProps) {
   const [editedRedirect, setEditedRedirect] = useState(redirect);
+  const [urlError, setUrlError] = useState<string | null>(null);
+  const [isUrlValid, setIsUrlValid] = useState<boolean>(true);
+  const [isValidating, setIsValidating] = useState<boolean>(false);
+  const [isSaving, setIsSaving] = useState<boolean>(false);
 
-  const handleSave = () => {
-    onSave(editedRedirect);
+  // Debounced validation function
+  const debouncedValidate = useCallback(
+    debounce((url: string) => {
+      const result = validateUrl(url);
+      setUrlError(result.error);
+      setIsUrlValid(result.valid);
+      setIsValidating(false);
+    }, 300),
+    []
+  );
+
+  // Validate initial URL on mount
+  useEffect(() => {
+    const result = validateUrl(editedRedirect.newUrl);
+    setUrlError(result.error);
+    setIsUrlValid(result.valid);
+  }, []);
+
+  // Handle new URL changes with debounced validation
+  const handleNewUrlChange = (newUrl: string) => {
+    setEditedRedirect({ ...editedRedirect, newUrl });
+    setIsValidating(true);
+    debouncedValidate(newUrl);
+  };
+
+  const handleSave = async () => {
+    // Final validation check before saving
+    const result = validateUrl(editedRedirect.newUrl);
+    if (result.valid) {
+      setIsSaving(true);
+      try {
+        await onSave(editedRedirect);
+      } finally {
+        setIsSaving(false);
+      }
+    }
   };
 
   return (
@@ -64,14 +103,44 @@ export function InlineEditDialog({ redirect, onSave, onCancel }: InlineEditDialo
             <Label htmlFor="new-url" className="text-foreground">
               New Target URL
             </Label>
-            <Input
-              id="new-url"
-              value={editedRedirect.newUrl}
-              onChange={(e) => setEditedRedirect({ ...editedRedirect, newUrl: e.target.value })}
-              className="font-mono text-sm"
-              placeholder="/new/url/path"
-            />
-            <p className="text-xs text-muted-foreground">Enter the correct target URL for this redirect</p>
+            <div className="relative">
+              <Input
+                id="new-url"
+                value={editedRedirect.newUrl}
+                onChange={(e) => handleNewUrlChange(e.target.value)}
+                className={`font-mono text-sm pr-10 ${
+                  !isValidating && !isUrlValid
+                    ? 'border-red-500 dark:border-red-400 focus-visible:ring-red-500'
+                    : !isValidating && isUrlValid
+                    ? 'border-green-500 dark:border-green-400 focus-visible:ring-green-500'
+                    : ''
+                }`}
+                placeholder="/new/url/path"
+              />
+              {/* Validation icon */}
+              {!isValidating && (
+                <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                  {isUrlValid ? (
+                    <CheckCircle2 className="h-5 w-5 text-green-500 dark:text-green-400" />
+                  ) : (
+                    <AlertCircle className="h-5 w-5 text-red-500 dark:text-red-400" />
+                  )}
+                </div>
+              )}
+            </div>
+            {/* Error message */}
+            {urlError && !isValidating && (
+              <div className="flex items-start gap-2 text-sm text-red-600 dark:text-red-400">
+                <AlertCircle className="h-4 w-4 mt-0.5 flex-shrink-0" />
+                <span>{urlError}</span>
+              </div>
+            )}
+            {/* Help text */}
+            {!urlError && (
+              <p className="text-xs text-muted-foreground">
+                Enter a relative path (e.g., /about) or absolute URL (e.g., https://example.com/page)
+              </p>
+            )}
           </div>
 
           {/* Match Score Override */}
@@ -124,11 +193,12 @@ export function InlineEditDialog({ redirect, onSave, onCancel }: InlineEditDialo
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={onCancel}>
+          <Button variant="outline" onClick={onCancel} disabled={isSaving}>
             Cancel
           </Button>
-          <Button onClick={handleSave}>
-            Save Changes
+          <Button onClick={handleSave} disabled={!isUrlValid || isValidating || isSaving}>
+            {isSaving && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+            {isSaving ? 'Saving...' : 'Save Changes'}
           </Button>
         </DialogFooter>
       </DialogContent>

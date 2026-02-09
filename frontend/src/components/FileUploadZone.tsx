@@ -1,14 +1,16 @@
 import { useState, useRef } from 'react';
-import { Upload, File, X } from 'lucide-react';
+import { Upload, File, X, AlertCircle } from 'lucide-react';
 import { Button } from './ui/button';
+import { Alert, AlertDescription } from './ui/alert';
 
 interface FileUploadZoneProps {
   label: string;
   onFileUpload: (file: File) => void;
   file: { name: string; rowCount: number } | null;
+  validationError?: string | null;
 }
 
-export function FileUploadZone({ label, onFileUpload, file }: FileUploadZoneProps) {
+export function FileUploadZone({ label, onFileUpload, file, validationError }: FileUploadZoneProps) {
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -53,6 +55,14 @@ export function FileUploadZone({ label, onFileUpload, file }: FileUploadZoneProp
   return (
     <div>
       <label className="block mb-2 text-foreground">{label}</label>
+
+      {validationError && (
+        <Alert variant="destructive" className="mb-3">
+          <AlertCircle className="h-4 w-4" />
+          <AlertDescription>{validationError}</AlertDescription>
+        </Alert>
+      )}
+
       <div
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
@@ -63,6 +73,7 @@ export function FileUploadZone({ label, onFileUpload, file }: FileUploadZoneProp
           transition-colors min-h-[200px] flex flex-col items-center justify-center
           ${isDragging ? 'border-primary bg-primary/10' : 'border-border bg-card'}
           ${file ? 'bg-muted' : ''}
+          ${validationError ? 'border-destructive' : ''}
         `}
       >
         <input

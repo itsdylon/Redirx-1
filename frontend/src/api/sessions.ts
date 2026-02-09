@@ -1,4 +1,5 @@
 import { API_BASE_URL, getAuthHeaders } from './config';
+import { handleApiError } from '../utils/errorHandler';
 
 export interface SessionStatus {
   success: boolean;
@@ -12,81 +13,102 @@ export interface SessionStatus {
 }
 
 export async function getSessionStatus(sessionId: string): Promise<SessionStatus> {
-  const response = await fetch(`${API_BASE_URL}/api/user/sessions/${sessionId}/status`, {
-    method: 'GET',
-    headers: getAuthHeaders(),
-  });
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/user/sessions/${sessionId}/status`, {
+      method: 'GET',
+      headers: getAuthHeaders(),
+    });
 
-  if (!response.ok) {
-    if (response.status === 401) {
-      throw new Error('Unauthorized. Please log in again.');
+    if (!response.ok) {
+      const userError = await handleApiError(null, response);
+      throw new Error(userError.message);
     }
-    if (response.status === 404) {
-      throw new Error('Session not found.');
+
+    return await response.json();
+  } catch (error: any) {
+    // Handle network errors and other fetch failures
+    if (error instanceof TypeError || error.name === 'AbortError') {
+      const userError = await handleApiError(error);
+      throw new Error(userError.message);
     }
-    throw new Error(`Failed to fetch session status: ${response.status}`);
+
+    // Re-throw other errors
+    throw error;
   }
-
-  return await response.json();
 }
 
 export async function updateSessionName(sessionId: string, projectName: string): Promise<any> {
-  const response = await fetch(`${API_BASE_URL}/api/user/sessions/${sessionId}`, {
-    method: 'PUT',
-    headers: getAuthHeaders(),
-    body: JSON.stringify({ project_name: projectName }),
-  });
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/user/sessions/${sessionId}`, {
+      method: 'PUT',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ project_name: projectName }),
+    });
 
-  if (!response.ok) {
-    if (response.status === 401) {
-      throw new Error('Unauthorized. Please log in again.');
+    if (!response.ok) {
+      const userError = await handleApiError(null, response);
+      throw new Error(userError.message);
     }
-    if (response.status === 403) {
-      throw new Error('You do not have permission to edit this session.');
+
+    return await response.json();
+  } catch (error: any) {
+    // Handle network errors and other fetch failures
+    if (error instanceof TypeError || error.name === 'AbortError') {
+      const userError = await handleApiError(error);
+      throw new Error(userError.message);
     }
-    if (response.status === 404) {
-      throw new Error('Session not found.');
-    }
-    throw new Error(`Failed to update session name: ${response.status}`);
+
+    // Re-throw other errors
+    throw error;
   }
-
-  return await response.json();
 }
 
 export async function deleteSession(sessionId: string): Promise<any> {
-  const response = await fetch(`${API_BASE_URL}/api/user/sessions/${sessionId}`, {
-    method: 'DELETE',
-    headers: getAuthHeaders(),
-  });
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/user/sessions/${sessionId}`, {
+      method: 'DELETE',
+      headers: getAuthHeaders(),
+    });
 
-  if (!response.ok) {
-    if (response.status === 401) {
-      throw new Error('Unauthorized. Please log in again.');
+    if (!response.ok) {
+      const userError = await handleApiError(null, response);
+      throw new Error(userError.message);
     }
-    if (response.status === 403) {
-      throw new Error('You do not have permission to delete this session.');
+
+    return await response.json();
+  } catch (error: any) {
+    // Handle network errors and other fetch failures
+    if (error instanceof TypeError || error.name === 'AbortError') {
+      const userError = await handleApiError(error);
+      throw new Error(userError.message);
     }
-    if (response.status === 404) {
-      throw new Error('Session not found.');
-    }
-    throw new Error(`Failed to delete session: ${response.status}`);
+
+    // Re-throw other errors
+    throw error;
   }
-
-  return await response.json();
 }
 
 export async function fetchAllSessions(): Promise<any> {
-  const response = await fetch(`${API_BASE_URL}/api/user/sessions`, {
-    method: 'GET',
-    headers: getAuthHeaders(),
-  });
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/user/sessions`, {
+      method: 'GET',
+      headers: getAuthHeaders(),
+    });
 
-  if (!response.ok) {
-    if (response.status === 401) {
-      throw new Error('Unauthorized. Please log in again.');
+    if (!response.ok) {
+      const userError = await handleApiError(null, response);
+      throw new Error(userError.message);
     }
-    throw new Error(`Failed to fetch sessions: ${response.status}`);
-  }
 
-  return await response.json();
+    return await response.json();
+  } catch (error: any) {
+    // Handle network errors and other fetch failures
+    if (error instanceof TypeError || error.name === 'AbortError') {
+      const userError = await handleApiError(error);
+      throw new Error(userError.message);
+    }
+
+    // Re-throw other errors
+    throw error;
+  }
 }

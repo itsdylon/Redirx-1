@@ -4,19 +4,49 @@ import { useAuth } from '../contexts/AuthContext';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Card } from './ui/card';
+import { validateEmail } from '../utils/validation';
 
 export function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [emailError, setEmailError] = useState('');
+  const [emailTouched, setEmailTouched] = useState(false);
 
   const { login } = useAuth();
   const navigate = useNavigate();
 
+  const handleEmailBlur = () => {
+    setEmailTouched(true);
+    const validation = validateEmail(email);
+    if (!validation.valid) {
+      setEmailError(validation.error || 'Invalid email');
+    } else {
+      setEmailError('');
+    }
+  };
+
+  const handleEmailChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setEmail(e.target.value);
+    // Clear error when user starts typing again
+    if (emailTouched) {
+      setEmailError('');
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+
+    // Validate email before submission
+    const emailValidation = validateEmail(email);
+    if (!emailValidation.valid) {
+      setEmailError(emailValidation.error || 'Invalid email');
+      setEmailTouched(true);
+      return;
+    }
+
     setLoading(true);
 
     try {
@@ -53,12 +83,16 @@ export function LoginPage() {
             <Input
               type="email"
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              onChange={handleEmailChange}
+              onBlur={handleEmailBlur}
               placeholder="you@example.com"
               required
               autoComplete="email"
-              className="w-full"
+              className={`w-full ${emailError ? 'border-destructive' : ''}`}
             />
+            {emailError && (
+              <p className="text-destructive text-sm mt-1">{emailError}</p>
+            )}
           </div>
 
           <div>
@@ -76,7 +110,11 @@ export function LoginPage() {
             />
           </div>
 
-          <Button type="submit" className="w-full" disabled={loading}>
+          <Button
+            type="submit"
+            className="w-full"
+            disabled={loading || !!emailError || !email}
+          >
             {loading ? 'Logging in...' : 'Login'}
           </Button>
         </form>

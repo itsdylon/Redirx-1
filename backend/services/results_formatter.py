@@ -145,6 +145,7 @@ def transform_mapping_for_frontend(
         'confidence': confidence_int,
         'confidenceBand': confidence_band,
         'matchScore': confidence_int,
+        'matchType': db_record.get('match_type', 'semantic'),
         'approved': not db_record.get('needs_review', False),
         'warnings': warnings,
         'pathSimilarity': path_sim,

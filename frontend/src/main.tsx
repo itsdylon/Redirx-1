@@ -3,7 +3,7 @@ import { BrowserRouter } from "react-router-dom";
 import { ThemeProvider } from "next-themes";
 import { AuthProvider } from "./contexts/AuthContext";
 import App from "./App.tsx";
-import "./index.css";
+import "./styles/globals.css";
 
 createRoot(document.getElementById("root")!).render(
   <BrowserRouter>

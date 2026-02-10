@@ -8,6 +8,7 @@ import { AllProjects } from './components/AllProjects';
 import { UploadPage } from './components/UploadPage';
 import { ReviewInterface } from './components/ReviewInterface';
 import { AccountPage } from './components/AccountPage';
+import { Settings } from './components/Settings';
 import { Toaster } from './components/ui/sonner';
 
 export default function App() {
@@ -58,6 +59,10 @@ export default function App() {
       <Route
         path="/review/:sessionId"
         element={user ? <ReviewInterface /> : <Navigate to="/login" replace />}
+      />
+      <Route
+        path="/settings"
+        element={user ? <Settings /> : <Navigate to="/login" replace />}
       />
       <Route
         path="/account"

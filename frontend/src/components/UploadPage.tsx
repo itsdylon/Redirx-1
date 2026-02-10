@@ -1,12 +1,11 @@
 import { uploadCSVs, QuotaExceededError } from "../api/pipeline";
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Header } from './Header';
+import { DashboardLayout } from './DashboardLayout';
 import { FileUploadZone } from './FileUploadZone';
 import { LoadingScreen } from './LoadingScreen';
 import { Button } from './ui/button';
-import { Toaster } from './ui/sonner';
-import { ArrowLeft, AlertTriangle, Loader2 } from 'lucide-react';
+import { AlertTriangle, Loader2 } from 'lucide-react';
 import { validateCSV, CSVValidationResult } from '../utils/validation';
 
 interface FileData {
@@ -175,30 +174,17 @@ export function UploadPage() {
   // Show loading screen when processing
   if (isLoading) {
     return (
-      <>
+      <DashboardLayout title="Processing">
         <LoadingScreen sessionId={currentSessionId} />
-        <Toaster position="top-right" />
-      </>
+      </DashboardLayout>
     );
   }
 
   return (
-    <>
-      <div className="min-h-screen">
-        <Header currentView="upload" />
-
-        <main className="max-w-7xl mx-auto p-8">
-          {/* Back to Dashboard */}
-          <div className="mb-6">
-            <Button variant="outline" onClick={() => navigate('/')}>
-              <ArrowLeft className="h-4 w-4 mr-2" />
-              Back to Dashboard
-            </Button>
-          </div>
-
-          {/* Page Title */}
+    <DashboardLayout title="Upload CSV Files">
+      <div className="max-w-5xl">
+          {/* Subtitle */}
           <div className="mb-8">
-            <h1 className="text-foreground mb-2">Upload CSV Files</h1>
             <p className="text-muted-foreground">Upload CSV files from your old and new site to begin the redirect mapping process.</p>
           </div>
 
@@ -359,9 +345,7 @@ export function UploadPage() {
               </p>
             )}
           </div>
-        </main>
       </div>
-      <Toaster position="top-right" />
-    </>
+    </DashboardLayout>
   );
 }

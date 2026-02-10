@@ -1,0 +1,35 @@
+import { ReactNode } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../contexts/AuthContext';
+import { Sidebar } from './Sidebar';
+import { TopBar } from './TopBar';
+
+interface DashboardLayoutProps {
+  title: string;
+  children: ReactNode;
+}
+
+export function DashboardLayout({ title, children }: DashboardLayoutProps) {
+  const navigate = useNavigate();
+  const { logout } = useAuth();
+
+  const handleLogout = async () => {
+    await logout();
+    navigate('/login');
+  };
+
+  return (
+    <div className="flex h-screen">
+      <Sidebar onLogout={handleLogout} />
+      <div className="flex-1 flex flex-col overflow-hidden">
+        <TopBar
+          title={title}
+          onCreateJob={() => navigate('/upload')}
+        />
+        <main className="flex-1 flex flex-col overflow-auto p-8 bg-muted/20">
+          {children}
+        </main>
+      </div>
+    </div>
+  );
+}

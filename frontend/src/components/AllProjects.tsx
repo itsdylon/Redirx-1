@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Header } from './Header';
+import { DashboardLayout } from './DashboardLayout';
 import { Card } from './ui/card';
 import { Button } from './ui/button';
 import { Clock, Pencil, Check, X, Loader2, Trash2, Search } from 'lucide-react';
@@ -184,176 +184,157 @@ export function AllProjects() {
 
   if (loading) {
     return (
-      <div className="min-h-screen">
-        <Header currentView="dashboard" />
-        <main className="max-w-7xl mx-auto p-8">
-          <div className="text-center py-8 text-muted-foreground">Loading projects...</div>
-        </main>
-      </div>
+      <DashboardLayout title="All Projects">
+        <div className="text-center py-8 text-muted-foreground">Loading projects...</div>
+      </DashboardLayout>
     );
   }
 
   if (error) {
     return (
-      <div className="min-h-screen">
-        <Header currentView="dashboard" />
-        <main className="max-w-7xl mx-auto p-8">
-          <div className="bg-destructive/10 border border-destructive/50 text-destructive px-4 py-3 rounded mb-4">
-            {error}
-          </div>
-          <Button onClick={fetchSessions}>Retry</Button>
-        </main>
-      </div>
+      <DashboardLayout title="All Projects">
+        <div className="bg-destructive/10 border border-destructive/50 text-destructive px-4 py-3 rounded mb-4">
+          {error}
+        </div>
+        <Button onClick={fetchSessions}>Retry</Button>
+      </DashboardLayout>
     );
   }
 
   return (
-    <div className="min-h-screen">
-      <Header currentView="dashboard" />
-
-      <main className="max-w-7xl mx-auto p-8">
-        {/* Page Header */}
-        <div className="mb-8">
-          <div className="flex justify-between items-center mb-2">
-            <h1 className="text-foreground">All Projects</h1>
-            <Button variant="outline" onClick={() => navigate('/dashboard')}>
-              Back to Dashboard
-            </Button>
-          </div>
-          <p className="text-muted-foreground">View and manage all your redirect mapping projects</p>
+    <DashboardLayout title="All Projects">
+      {/* Search Bar */}
+      <div className="mb-6">
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <input
+            type="text"
+            placeholder="Search projects by name or status..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full pl-10 pr-4 py-2 border border-border bg-background text-foreground rounded-md focus:outline-none focus:ring-2 focus:ring-primary"
+          />
         </div>
+      </div>
 
-        {/* Search Bar */}
-        <div className="mb-6">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <input
-              type="text"
-              placeholder="Search projects by name or status..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 border border-border bg-background text-foreground rounded-md focus:outline-none focus:ring-2 focus:ring-primary"
-            />
-          </div>
-        </div>
-
-        {/* Projects Table */}
-        <Card>
-          <div className="overflow-hidden">
-            <table className="w-full">
-              <thead className="bg-muted border-b border-border">
-                <tr>
-                  <th className="text-left p-4 text-muted-foreground text-sm">Project Name</th>
-                  <th className="text-left p-4 text-muted-foreground text-sm">Date</th>
-                  <th className="text-left p-4 text-muted-foreground text-sm">Redirects</th>
-                  <th className="text-left p-4 text-muted-foreground text-sm">Status</th>
-                  <th className="text-left p-4 text-muted-foreground text-sm">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredSessions.map((session, index) => (
-                  <tr
-                    key={session.id}
-                    className={index !== filteredSessions.length - 1 ? 'border-b border-border' : ''}
-                  >
-                    <td className="p-4 text-foreground">
-                      {editingSessionId === session.id ? (
-                        <div className="flex items-center gap-2">
-                          <input
-                            type="text"
-                            value={editingName}
-                            onChange={(e) => setEditingName(e.target.value)}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') handleSaveEdit(session.id);
-                              if (e.key === 'Escape') handleCancelEdit();
-                            }}
-                            className="border border-border bg-background text-foreground rounded px-2 py-1 text-sm flex-1"
-                            autoFocus
-                          />
-                          <button
-                            onClick={() => handleSaveEdit(session.id)}
-                            className="text-green-600 dark:text-green-400 hover:text-green-700 dark:hover:text-green-300"
-                            title="Save"
-                          >
-                            <Check className="h-4 w-4" />
-                          </button>
-                          <button
-                            onClick={handleCancelEdit}
-                            className="text-destructive hover:text-destructive/80"
-                            title="Cancel"
-                          >
-                            <X className="h-4 w-4" />
-                          </button>
-                        </div>
-                      ) : (
-                        <div className="flex items-center gap-2">
-                          <span>{session.project_name || 'Untitled Session'}</span>
-                          <button
-                            onClick={() => handleStartEdit(session.id, session.project_name)}
-                            className="text-muted-foreground hover:text-foreground"
-                            title="Edit project name"
-                          >
-                            <Pencil className="h-3 w-3" />
-                          </button>
-                        </div>
-                      )}
-                    </td>
-                    <td className="p-4 text-muted-foreground flex items-center gap-2">
+      {/* Projects Table */}
+      <Card>
+        <div className="overflow-hidden">
+          <table className="w-full">
+            <thead className="bg-muted border-b border-border">
+              <tr>
+                <th className="text-left p-4 text-muted-foreground text-sm">Project Name</th>
+                <th className="text-left p-4 text-muted-foreground text-sm">Date</th>
+                <th className="text-left p-4 text-muted-foreground text-sm">Redirects</th>
+                <th className="text-left p-4 text-muted-foreground text-sm">Status</th>
+                <th className="text-left p-4 text-muted-foreground text-sm">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredSessions.map((session, index) => (
+                <tr
+                  key={session.id}
+                  className={index !== filteredSessions.length - 1 ? 'border-b border-border' : ''}
+                >
+                  <td className="p-4 text-foreground">
+                    {editingSessionId === session.id ? (
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          value={editingName}
+                          onChange={(e) => setEditingName(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') handleSaveEdit(session.id);
+                            if (e.key === 'Escape') handleCancelEdit();
+                          }}
+                          className="border border-border bg-background text-foreground rounded px-2 py-1 text-sm flex-1"
+                          autoFocus
+                        />
+                        <button
+                          onClick={() => handleSaveEdit(session.id)}
+                          className="text-green-600 dark:text-green-400 hover:text-green-700 dark:hover:text-green-300"
+                          title="Save"
+                        >
+                          <Check className="h-4 w-4" />
+                        </button>
+                        <button
+                          onClick={handleCancelEdit}
+                          className="text-destructive hover:text-destructive/80"
+                          title="Cancel"
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-2">
+                        <span>{session.project_name || 'Untitled Session'}</span>
+                        <button
+                          onClick={() => handleStartEdit(session.id, session.project_name)}
+                          className="text-muted-foreground hover:text-foreground"
+                          title="Edit project name"
+                        >
+                          <Pencil className="h-3 w-3" />
+                        </button>
+                      </div>
+                    )}
+                  </td>
+                  <td className="p-4 text-muted-foreground">
+                    <div className="flex items-center gap-2">
                       <Clock className="h-3 w-3" />
                       {formatDate(session.created_at)}
-                    </td>
-                    <td className="p-4 text-foreground">{session.total_mappings || 0}</td>
-                    <td className="p-4">
-                      <span className={`inline-flex items-center gap-1 border px-2 py-1 text-xs ${
-                        session.status === 'completed'
-                          ? 'border-green-600 dark:border-green-400 text-green-700 dark:text-green-400'
-                          : session.status === 'processing'
-                            ? 'border-blue-500 text-blue-600 dark:text-blue-400'
-                            : session.status === 'pending'
-                              ? 'border-yellow-500 text-yellow-600 dark:text-yellow-400'
-                              : session.status === 'failed'
-                                ? 'border-red-500 text-red-600 dark:text-red-400'
-                                : 'border-border text-muted-foreground'
-                      }`}>
-                        {(session.status === 'processing' || session.status === 'pending') && (
-                          <Loader2 className="h-3 w-3 animate-spin" />
-                        )}
-                        {session.status === 'pending' ? 'Queued' : session.status}
-                      </span>
-                    </td>
-                    <td className="p-4">
-                      <div className="flex items-center gap-2">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => navigate(`/review/${session.id}`)}
-                        >
-                          View Details
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handleDeleteClick(session.id)}
-                          className="text-destructive hover:text-destructive hover:bg-destructive/10"
-                          title="Delete project"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                    </div>
+                  </td>
+                  <td className="p-4 text-foreground">{session.total_mappings || 0}</td>
+                  <td className="p-4">
+                    <span className={`inline-flex items-center gap-1 border px-2 py-1 text-xs ${
+                      session.status === 'completed'
+                        ? 'border-green-600 dark:border-green-400 text-green-700 dark:text-green-400'
+                        : session.status === 'processing'
+                          ? 'border-blue-500 text-blue-600 dark:text-blue-400'
+                          : session.status === 'pending'
+                            ? 'border-yellow-500 text-yellow-600 dark:text-yellow-400'
+                            : session.status === 'failed'
+                              ? 'border-red-500 text-red-600 dark:text-red-400'
+                              : 'border-border text-muted-foreground'
+                    }`}>
+                      {(session.status === 'processing' || session.status === 'pending') && (
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                      )}
+                      {session.status === 'pending' ? 'Queued' : session.status}
+                    </span>
+                  </td>
+                  <td className="p-4">
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => navigate(`/review/${session.id}`)}
+                      >
+                        View Details
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleDeleteClick(session.id)}
+                        className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                        title="Delete project"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
 
-          {filteredSessions.length === 0 && (
-            <div className="p-8 text-center text-muted-foreground">
-              {searchQuery ? 'No projects match your search.' : 'No projects found. Start by creating a new mapping!'}
-            </div>
-          )}
-        </Card>
-      </main>
+        {filteredSessions.length === 0 && (
+          <div className="p-8 text-center text-muted-foreground">
+            {searchQuery ? 'No projects match your search.' : 'No projects found. Start by creating a new mapping!'}
+          </div>
+        )}
+      </Card>
 
       {/* Delete Confirmation Dialog */}
       {deletingSessionId && (
@@ -378,6 +359,6 @@ export function AllProjects() {
           </Card>
         </div>
       )}
-    </div>
+    </DashboardLayout>
   );
 }

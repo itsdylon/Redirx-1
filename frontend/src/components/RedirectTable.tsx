@@ -1,5 +1,5 @@
 import React from 'react';
-import { ChevronDown, ChevronRight, Edit2, AlertTriangle, CheckCircle, Search, FileQuestion } from 'lucide-react';
+import { ChevronDown, ChevronRight, Edit2, AlertTriangle, CheckCircle, Circle, Search, FileQuestion, Link2 } from 'lucide-react';
 import { Checkbox } from './ui/checkbox';
 import { Badge } from './ui/badge';
 import { Button } from './ui/button';
@@ -46,8 +46,19 @@ export function RedirectTable({
   totalRedirectsCount = 0,
   isLoading = false
 }: RedirectTableProps) {
-  const getConfidenceBadge = (band: string) => {
-    switch (band) {
+  const isExactMatch = (redirect: RedirectMapping) =>
+    redirect.matchType === 'exact_url';
+
+  const getConfidenceBadge = (redirect: RedirectMapping) => {
+    if (isExactMatch(redirect)) {
+      return (
+        <Badge className="bg-blue-100 text-blue-800 border-blue-300 dark:bg-blue-900/30 dark:text-blue-400 dark:border-blue-700">
+          <Link2 className="h-3 w-3 mr-1" />
+          Exact
+        </Badge>
+      );
+    }
+    switch (redirect.confidenceBand) {
       case 'high':
         return <Badge className="bg-green-100 text-green-800 border-green-300 dark:bg-green-900/30 dark:text-green-400 dark:border-green-700">High</Badge>;
       case 'medium':
@@ -158,7 +169,7 @@ export function RedirectTable({
   };
 
   return (
-    <div className="border border-border bg-card">
+    <div className="border border-border bg-card overflow-hidden">
       <Table>
         <TableHeader>
           <TableRow className="bg-muted">
@@ -182,8 +193,8 @@ export function RedirectTable({
                 }}
               />
             </TableHead>
-            <TableHead className="text-foreground">Old URL</TableHead>
-            <TableHead className="text-foreground">Suggested New URL</TableHead>
+            <TableHead className="text-foreground w-[30%]">Old URL</TableHead>
+            <TableHead className="text-foreground w-[30%]">Suggested New URL</TableHead>
             <TableHead className="text-foreground w-32">Confidence</TableHead>
             <TableHead className="text-foreground w-24 text-center">Score</TableHead>
             <TableHead className="w-20 text-foreground text-center">Status</TableHead>
@@ -229,9 +240,10 @@ export function RedirectTable({
             <React.Fragment key={redirect.id}>
               <TableRow
                 className={`
-                  ${redirect.confidenceBand === 'high' ? 'border-l-4 border-l-green-500' : ''}
-                  ${redirect.confidenceBand === 'medium' ? 'border-l-4 border-l-yellow-500' : ''}
-                  ${redirect.confidenceBand === 'low' ? 'border-l-4 border-l-red-500' : ''}
+                  ${isExactMatch(redirect) ? 'border-l-4 border-l-blue-500' : ''}
+                  ${!isExactMatch(redirect) && redirect.confidenceBand === 'high' ? 'border-l-4 border-l-green-500' : ''}
+                  ${!isExactMatch(redirect) && redirect.confidenceBand === 'medium' ? 'border-l-4 border-l-yellow-500' : ''}
+                  ${!isExactMatch(redirect) && redirect.confidenceBand === 'low' ? 'border-l-4 border-l-red-500' : ''}
                 `}
               >
                 <TableCell>
@@ -253,24 +265,44 @@ export function RedirectTable({
                     onCheckedChange={() => onToggleSelect(redirect.id)}
                   />
                 </TableCell>
-                <TableCell className="text-foreground font-mono text-sm">
-                  {redirect.oldUrl}
+                <TableCell className="max-w-0" title={redirect.oldUrl}>
+                  <div className="text-foreground font-mono text-sm line-clamp-2 break-all">
+                    {redirect.oldUrl}
+                  </div>
                 </TableCell>
-                <TableCell className="text-foreground font-mono text-sm">
-                  {redirect.newUrl}
+                <TableCell className="max-w-0" title={redirect.newUrl}>
+                  <div className="text-foreground font-mono text-sm line-clamp-2 break-all">
+                    {redirect.newUrl}
+                  </div>
                 </TableCell>
                 <TableCell>
-                  {getConfidenceBadge(redirect.confidenceBand)}
+                  {getConfidenceBadge(redirect)}
                 </TableCell>
                 <TableCell className="text-center">
                   <span className="text-foreground">{redirect.matchScore}%</span>
                 </TableCell>
                 <TableCell className="text-center">
-                  {redirect.approved ? (
-                    <CheckCircle className="h-5 w-5 text-green-600 mx-auto" />
-                  ) : (
-                    <span className="text-muted-foreground text-sm">Pending</span>
-                  )}
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        onClick={() => onApprove(redirect.id)}
+                        className={`mx-auto flex items-center justify-center rounded-md p-1 transition-colors ${
+                          redirect.approved
+                            ? 'text-green-600 hover:text-muted-foreground'
+                            : 'text-muted-foreground hover:text-green-600'
+                        }`}
+                      >
+                        {redirect.approved ? (
+                          <CheckCircle className="h-5 w-5" />
+                        ) : (
+                          <Circle className="h-5 w-5" />
+                        )}
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      {redirect.approved ? 'Click to unapprove' : 'Click to approve'}
+                    </TooltipContent>
+                  </Tooltip>
                 </TableCell>
                 <TableCell>
                   <div className="flex items-center justify-center gap-1">
@@ -292,88 +324,132 @@ export function RedirectTable({
               {expandedRow === redirect.id && (
                 <TableRow className="bg-muted">
                   <TableCell colSpan={9} className="p-6">
-                    <div className="max-w-3xl">
-                      <h3 className="text-foreground mb-4">Matching Details</h3>
-                      <div className="grid grid-cols-3 gap-6">
-                        <div className="border border-border bg-card p-4">
-                          <div className="text-muted-foreground text-sm mb-2">Path Similarity</div>
-                          <div className="flex items-end gap-2">
-                            <span className="text-foreground text-2xl">{redirect.pathSimilarity}%</span>
-                          </div>
-                          <div className="mt-2 h-2 bg-muted rounded-full overflow-hidden">
-                            <div
-                              className="h-full bg-primary"
-                              style={{ width: `${redirect.pathSimilarity}%` }}
-                            />
-                          </div>
+                    <div>
+                      {/* Full URLs */}
+                      <div className="grid grid-cols-2 gap-4 mb-4">
+                        <div>
+                          <div className="text-xs text-muted-foreground mb-1">Old URL</div>
+                          <div className="text-sm font-mono text-foreground break-all">{redirect.oldUrl}</div>
                         </div>
-
-                        <div className="border border-border bg-card p-4">
-                          <div className="text-muted-foreground text-sm mb-2">Title Similarity</div>
-                          <div className="flex items-end gap-2">
-                            <span className="text-foreground text-2xl">{redirect.titleSimilarity}%</span>
-                          </div>
-                          <div className="mt-2 h-2 bg-muted rounded-full overflow-hidden">
-                            <div
-                              className="h-full bg-primary"
-                              style={{ width: `${redirect.titleSimilarity}%` }}
-                            />
-                          </div>
-                        </div>
-
-                        <div className="border border-border bg-card p-4">
-                          <div className="text-muted-foreground text-sm mb-2">Content Similarity</div>
-                          <div className="flex items-end gap-2">
-                            <span className="text-foreground text-2xl">{redirect.contentSimilarity}%</span>
-                          </div>
-                          <div className="mt-2 h-2 bg-muted rounded-full overflow-hidden">
-                            <div
-                              className="h-full bg-primary"
-                              style={{ width: `${redirect.contentSimilarity}%` }}
-                            />
-                          </div>
+                        <div>
+                          <div className="text-xs text-muted-foreground mb-1">New URL</div>
+                          <div className="text-sm font-mono text-foreground break-all">{redirect.newUrl}</div>
                         </div>
                       </div>
 
-                      {redirect.warnings.length > 0 && (
-                        <div className="mt-4 p-4 border border-yellow-500/50 bg-yellow-500/10">
-                          <h4 className="text-foreground text-sm mb-2">Warnings</h4>
-                          <ul className="text-sm text-muted-foreground space-y-1">
-                            {redirect.warnings.map((warning, index) => (
-                              <li key={index} className="list-disc list-inside">
-                                {warning === 'duplicate-target' && 'This URL is already assigned to another redirect'}
-                                {warning === 'invalid-target' && 'Target URL does not exist in new site'}
-                                {warning === 'near-tie' && 'Multiple URLs have similar confidence scores'}
-                              </li>
-                            ))}
-                          </ul>
-                        </div>
+                      {isExactMatch(redirect) ? (
+                        <>
+                          <div className="flex items-center gap-3 mb-4">
+                            <Link2 className="h-5 w-5 text-blue-600" />
+                            <h3 className="text-foreground">Exact URL Match</h3>
+                          </div>
+                          <div className="border border-blue-500/30 bg-blue-500/5 p-4 rounded-md">
+                            <p className="text-sm text-muted-foreground">
+                              The URL paths on the old and new sites are identical. No redirect rule is needed since the content will be served at the same path.
+                            </p>
+                          </div>
+                          <div className="mt-4 flex gap-3">
+                            <Button
+                              variant={redirect.approved ? "outline" : "default"}
+                              size="sm"
+                              onClick={() => onApprove(redirect.id)}
+                            >
+                              {redirect.approved ? 'Unapprove Match' : 'Approve Match'}
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => onEdit(redirect)}
+                            >
+                              Edit Mapping
+                            </Button>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <h3 className="text-foreground mb-4">Matching Details</h3>
+                          <div className="grid grid-cols-3 gap-6">
+                            <div className="border border-border bg-card p-4">
+                              <div className="text-muted-foreground text-sm mb-2">Path Similarity</div>
+                              <div className="flex items-end gap-2">
+                                <span className="text-foreground text-2xl">{redirect.pathSimilarity ?? 0}%</span>
+                              </div>
+                              <div className="mt-2 h-2 bg-muted rounded-full overflow-hidden">
+                                <div
+                                  className="h-full bg-primary transition-all"
+                                  style={{ width: `${redirect.pathSimilarity ?? 0}%` }}
+                                />
+                              </div>
+                            </div>
+
+                            <div className="border border-border bg-card p-4">
+                              <div className="text-muted-foreground text-sm mb-2">Title Similarity</div>
+                              <div className="flex items-end gap-2">
+                                <span className="text-foreground text-2xl">{redirect.titleSimilarity ?? 0}%</span>
+                              </div>
+                              <div className="mt-2 h-2 bg-muted rounded-full overflow-hidden">
+                                <div
+                                  className="h-full bg-primary transition-all"
+                                  style={{ width: `${redirect.titleSimilarity ?? 0}%` }}
+                                />
+                              </div>
+                            </div>
+
+                            <div className="border border-border bg-card p-4">
+                              <div className="text-muted-foreground text-sm mb-2">Content Similarity</div>
+                              <div className="flex items-end gap-2">
+                                <span className="text-foreground text-2xl">{redirect.contentSimilarity ?? 0}%</span>
+                              </div>
+                              <div className="mt-2 h-2 bg-muted rounded-full overflow-hidden">
+                                <div
+                                  className="h-full bg-primary transition-all"
+                                  style={{ width: `${redirect.contentSimilarity ?? 0}%` }}
+                                />
+                              </div>
+                            </div>
+                          </div>
+
+                          {redirect.warnings.length > 0 && (
+                            <div className="mt-4 p-4 border border-yellow-500/50 bg-yellow-500/10">
+                              <h4 className="text-foreground text-sm mb-2">Warnings</h4>
+                              <ul className="text-sm text-muted-foreground space-y-1">
+                                {redirect.warnings.map((warning, index) => (
+                                  <li key={index} className="list-disc list-inside">
+                                    {warning === 'duplicate-target' && 'This URL is already assigned to another redirect'}
+                                    {warning === 'invalid-target' && 'Target URL does not exist in new site'}
+                                    {warning === 'near-tie' && 'Multiple URLs have similar confidence scores'}
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+
+                          <div className="mt-4 flex gap-3">
+                            <Button
+                              variant={redirect.approved ? "outline" : "default"}
+                              size="sm"
+                              onClick={() => onApprove(redirect.id)}
+                            >
+                              {redirect.approved ? 'Unapprove Match' : 'Approve Match'}
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => onEdit(redirect)}
+                            >
+                              Edit Mapping
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              disabled
+                              title="Alternative matches coming soon"
+                            >
+                              View Alternatives
+                            </Button>
+                          </div>
+                        </>
                       )}
-
-                      <div className="mt-4 flex gap-3">
-                        <Button
-                          variant="default"
-                          size="sm"
-                          onClick={() => onApprove(redirect.id)}
-                        >
-                          Approve Match
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => onEdit(redirect)}
-                        >
-                          Edit Mapping
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          disabled
-                          title="Alternative matches coming soon"
-                        >
-                          View Alternatives
-                        </Button>
-                      </div>
                     </div>
                   </TableCell>
                 </TableRow>

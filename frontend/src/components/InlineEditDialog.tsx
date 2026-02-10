@@ -74,7 +74,7 @@ export function InlineEditDialog({ redirect, onSave, onCancel }: InlineEditDialo
 
   return (
     <Dialog open={true} onOpenChange={onCancel}>
-      <DialogContent className="max-w-2xl">
+      <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>Edit Redirect Mapping</DialogTitle>
           <DialogDescription>

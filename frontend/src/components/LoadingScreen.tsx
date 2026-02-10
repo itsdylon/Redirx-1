@@ -123,7 +123,7 @@ export function LoadingScreen({ sessionId }: LoadingScreenProps) {
   // Show error UI if job failed
   if (error) {
     return (
-      <div className="min-h-screen flex items-center justify-center p-8">
+      <div className="min-h-0 flex-1 flex items-center justify-center p-8">
         <div className="w-full max-w-xl">
           <div className="space-y-6">
             <Alert variant="destructive">
@@ -156,7 +156,7 @@ export function LoadingScreen({ sessionId }: LoadingScreenProps) {
   // Show error UI if polling failed too many times
   if (pollingError) {
     return (
-      <div className="min-h-screen flex items-center justify-center p-8">
+      <div className="min-h-0 flex-1 flex items-center justify-center p-8">
         <div className="w-full max-w-xl">
           <div className="space-y-6">
             <Alert variant="destructive">
@@ -189,7 +189,7 @@ export function LoadingScreen({ sessionId }: LoadingScreenProps) {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-8">
+    <div className="min-h-0 flex-1 flex items-center justify-center p-8">
       <div className="w-full max-w-xl">
         <div className="text-center">
           {/* Warning banner for polling failures */}

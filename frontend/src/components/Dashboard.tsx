@@ -1,11 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Header } from './Header';
+import { DashboardLayout } from './DashboardLayout';
 import { Card } from './ui/card';
 import { Button } from './ui/button';
+import { Clock, Pencil, Check, X, Loader2, Trash2, RefreshCw, Plus, FolderOpen, FileUp, ArrowUpRight, CheckCircle2, BarChart3, Layers } from 'lucide-react';
 import { Progress } from './ui/progress';
-import { Separator } from './ui/separator';
-import { FileUp, TrendingUp, CheckCircle, BarChart3, Clock, Pencil, Check, X, Loader2, Trash2, RefreshCw } from 'lucide-react';
 import { fetchDashboardData, DashboardData } from '../api/dashboard';
 import { updateSessionName, deleteSession } from '../api/sessions';
 import { formatDate } from '../utils/date';
@@ -110,12 +109,10 @@ export function Dashboard() {
     );
 
     if (!hasProcessingSessions) {
-      // Update the ref when no processing sessions
       previousProcessingRef.current = [];
       return;
     }
 
-    // Track currently processing sessions
     const currentProcessing = dashboardData?.recent_sessions
       ?.filter(s => s.status === 'pending' || s.status === 'processing')
       .map(s => s.id) || [];
@@ -125,7 +122,6 @@ export function Dashboard() {
       try {
         const data = await fetchDashboardData();
 
-        // Check for newly completed sessions
         const newlyCompleted = previousProcessingRef.current.filter(id => {
           const session = data.recent_sessions.find(s => s.id === id);
           return session && session.status === 'completed';
@@ -133,11 +129,9 @@ export function Dashboard() {
 
         if (newlyCompleted.length > 0) {
           setRecentlyCompleted(new Set(newlyCompleted));
-          // Clear highlight after 3 seconds
           setTimeout(() => setRecentlyCompleted(new Set()), 3000);
         }
 
-        // Update the ref with current processing sessions
         previousProcessingRef.current = data.recent_sessions
           ?.filter(s => s.status === 'pending' || s.status === 'processing')
           .map(s => s.id) || [];
@@ -151,7 +145,6 @@ export function Dashboard() {
       }
     }, POLL_INTERVAL);
 
-    // Initialize the ref
     previousProcessingRef.current = currentProcessing;
 
     return () => clearInterval(pollInterval);
@@ -171,7 +164,6 @@ export function Dashboard() {
     try {
       await updateSessionName(sessionId, editingName);
 
-      // Update local state optimistically
       if (dashboardData) {
         const updatedSessions = dashboardData.recent_sessions.map(session =>
           session.id === sessionId ? { ...session, project_name: editingName } : session
@@ -195,7 +187,6 @@ export function Dashboard() {
   const handleConfirmDelete = async () => {
     if (!deletingSessionId) return;
 
-    // Cache the session data before deletion
     const sessionToDelete = dashboardData?.recent_sessions.find(
       session => session.id === deletingSessionId
     );
@@ -209,7 +200,6 @@ export function Dashboard() {
     try {
       await deleteSession(deletingSessionId);
 
-      // Update local state by removing the deleted session
       if (dashboardData) {
         const updatedSessions = dashboardData.recent_sessions.filter(
           session => session.id !== deletingSessionId
@@ -217,22 +207,18 @@ export function Dashboard() {
         setDashboardData({ ...dashboardData, recent_sessions: updatedSessions });
       }
 
-      // Cache the deleted session for undo
       setDeletedSessionCache(sessionToDelete);
 
-      // Clear any existing undo timeout
       if (undoTimeoutRef.current) {
         clearTimeout(undoTimeoutRef.current);
       }
 
-      // Set timeout to clear cache after 8 seconds
       undoTimeoutRef.current = setTimeout(() => {
         setDeletedSessionCache(null);
       }, 8000);
 
       setDeletingSessionId(null);
 
-      // Show toast with undo action
       toast.success('Project deleted', {
         duration: 8000,
         action: {
@@ -250,13 +236,11 @@ export function Dashboard() {
   };
 
   const handleUndoDelete = (session: any) => {
-    // Clear the undo timeout
     if (undoTimeoutRef.current) {
       clearTimeout(undoTimeoutRef.current);
       undoTimeoutRef.current = null;
     }
 
-    // Restore the session to local state
     if (dashboardData) {
       const updatedSessions = [...dashboardData.recent_sessions, session].sort(
         (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
@@ -264,13 +248,8 @@ export function Dashboard() {
       setDashboardData({ ...dashboardData, recent_sessions: updatedSessions });
     }
 
-    // Clear the cache
     setDeletedSessionCache(null);
-
-    // Show success toast
     toast.success('Project restored');
-
-    // Refresh dashboard data to ensure consistency
     fetchDashboard();
   };
 
@@ -278,148 +257,173 @@ export function Dashboard() {
     setDeletingSessionId(null);
   };
 
+  // Compute summary stats from session data
+  const sessions = dashboardData?.recent_sessions || [];
+  const totalSessions = dashboardData?.total_sessions ?? sessions.length;
+  const totalRedirects = dashboardData?.total_redirects ?? sessions.reduce((sum, s) => sum + (s.total_mappings || 0), 0);
+  const totalApproved = sessions.reduce((sum, s) => sum + (s.approved_mappings || 0), 0);
+  const approvalProgress = totalRedirects > 0 ? Math.round((totalApproved / totalRedirects) * 100) : 0;
+  const completedSessions = sessions.filter(s => s.status === 'completed');
+  const processingSessions = sessions.filter(s => s.status === 'processing' || s.status === 'pending');
+  // Use API average_confidence if available, otherwise compute from session data
+  const avgConfidence = (() => {
+    if (dashboardData?.average_confidence && dashboardData.average_confidence > 0) {
+      return dashboardData.average_confidence;
+    }
+    // Estimate from approved/total ratio of completed sessions as a proxy
+    const completedWithMappings = completedSessions.filter(s => (s.total_mappings || 0) > 0);
+    if (completedWithMappings.length === 0) return 0;
+    const avgApprovalRate = completedWithMappings.reduce((sum, s) => {
+      const rate = (s.approved_mappings || 0) / (s.total_mappings || 1);
+      return sum + rate;
+    }, 0) / completedWithMappings.length;
+    return Math.round(avgApprovalRate * 100);
+  })();
+  const confidenceBreakdown = dashboardData?.confidence_breakdown ?? { high: 0, medium: 0, low: 0, exact: 0 };
+  const confidenceTotal = confidenceBreakdown.high + confidenceBreakdown.medium + confidenceBreakdown.low + confidenceBreakdown.exact;
+
   if (loading) {
     return (
-      <div className="min-h-screen">
-        <Header currentView="dashboard" />
-        <main className="max-w-7xl mx-auto p-8">
-          <div className="text-center py-8 text-muted-foreground">Loading dashboard...</div>
-        </main>
-      </div>
+      <DashboardLayout title="Dashboard">
+        <div className="text-center py-8 text-muted-foreground">Loading dashboard...</div>
+      </DashboardLayout>
     );
   }
 
   if (error) {
     return (
-      <div className="min-h-screen">
-        <Header currentView="dashboard" />
-        <main className="max-w-7xl mx-auto p-8">
-          <div className="bg-destructive/10 border border-destructive/50 text-destructive px-4 py-3 rounded mb-4">
-            {error}
-          </div>
-          <Button onClick={fetchDashboard}>Retry</Button>
-        </main>
-      </div>
+      <DashboardLayout title="Dashboard">
+        <div className="bg-destructive/10 border border-destructive/50 text-destructive px-4 py-3 rounded mb-4">
+          {error}
+        </div>
+        <Button onClick={fetchDashboard}>Retry</Button>
+      </DashboardLayout>
     );
   }
 
   return (
-    <div className="min-h-screen">
-      <Header currentView="dashboard" />
+    <DashboardLayout title="Dashboard">
+      {sessions.length === 0 ? (
+        /* Empty State */
+        <div className="flex flex-col items-center justify-center py-24">
+          <div className="border border-border rounded-full p-4 w-16 h-16 mx-auto mb-4 bg-muted">
+            <FileUp className="h-8 w-8 text-muted-foreground" />
+          </div>
+          <p className="text-muted-foreground mb-6 text-center max-w-md">
+            Upload CSV files containing your old and new URLs to start generating redirect mappings.
+          </p>
+          <Button size="lg" onClick={() => navigate('/upload')}>
+            Create Your First Redirect Job
+          </Button>
+        </div>
+      ) : (
+        <div>
+          {/* Bento Stats Grid */}
+          <div className="grid grid-cols-4 gap-4 mb-6">
+            {/* Total Redirects */}
+            <Card className="!gap-0 p-5 flex flex-col justify-between">
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-muted-foreground">Total Redirects</span>
+                <ArrowUpRight className="h-4 w-4 text-muted-foreground" />
+              </div>
+              <div>
+                <div className="text-3xl font-semibold text-foreground mt-3">{totalRedirects.toLocaleString()}</div>
+                <p className="text-xs text-muted-foreground mt-1">
+                  across {totalSessions} project{totalSessions !== 1 ? 's' : ''}
+                </p>
+              </div>
+            </Card>
 
-      <main className="max-w-7xl mx-auto p-8">
-        {/* Page Header */}
-        <div className="mb-8">
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-foreground mb-2">Dashboard</h1>
-              <p className="text-muted-foreground">Manage and track your redirect mapping projects</p>
-            </div>
-            {lastUpdated && (
-              <div className="flex items-center gap-3 text-sm text-muted-foreground">
-                <div className="flex items-center gap-2">
+            {/* Approval Progress */}
+            <Card className="!gap-0 p-5 flex flex-col justify-between">
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-muted-foreground">Approval Progress</span>
+                <CheckCircle2 className="h-4 w-4 text-muted-foreground" />
+              </div>
+              <div>
+                <div className="text-3xl font-semibold text-foreground mt-3">{approvalProgress}%</div>
+                <Progress value={approvalProgress} className="h-1.5 mt-2" />
+                <p className="text-xs text-muted-foreground mt-1">
+                  {totalApproved.toLocaleString()} of {totalRedirects.toLocaleString()} approved
+                </p>
+              </div>
+            </Card>
+
+            {/* Avg Confidence */}
+            <Card className="!gap-0 p-5 flex flex-col justify-between">
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-muted-foreground">Avg. Confidence</span>
+                <BarChart3 className="h-4 w-4 text-muted-foreground" />
+              </div>
+              <div>
+                <div className="text-3xl font-semibold text-foreground mt-3">{avgConfidence > 0 ? `${avgConfidence}%` : '0%'}</div>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {completedSessions.length} completed job{completedSessions.length !== 1 ? 's' : ''}
+                </p>
+              </div>
+            </Card>
+
+            {/* Active Jobs */}
+            <Card className="!gap-0 p-5 flex flex-col justify-between">
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-muted-foreground">Active Jobs</span>
+                <Layers className="h-4 w-4 text-muted-foreground" />
+              </div>
+              <div>
+                <div className="text-3xl font-semibold text-foreground mt-3">{processingSessions.length}</div>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {processingSessions.length > 0 ? 'currently processing' : 'none in progress'}
+                </p>
+              </div>
+            </Card>
+          </div>
+
+          {/* Recent Jobs Header */}
+          <div className="flex justify-between items-center mb-4">
+            <div className="flex items-center gap-3">
+              <h2 className="text-lg font-semibold text-foreground">Recent Jobs</h2>
+              {lastUpdated && (
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
                   {isPolling && (
                     <span className="relative flex h-2 w-2">
                       <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-muted-foreground opacity-75"></span>
                       <span className="relative inline-flex rounded-full h-2 w-2 bg-muted-foreground"></span>
                     </span>
                   )}
-                  <span>Last updated: {timeAgo}</span>
+                  <span>{timeAgo}</span>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => handleManualRefresh()}
+                    disabled={isManualRefreshing}
+                    className="h-6 w-6 p-0"
+                    title="Refresh now"
+                  >
+                    <RefreshCw className={`h-3.5 w-3.5 ${isManualRefreshing ? 'animate-spin' : ''}`} />
+                  </Button>
                 </div>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => handleManualRefresh()}
-                  disabled={isManualRefreshing}
-                  className="h-8 w-8 p-0"
-                  title="Refresh now"
-                >
-                  <RefreshCw className={`h-4 w-4 ${isManualRefreshing ? 'animate-spin' : ''}`} />
-                </Button>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Metric Cards */}
-        <div className="grid grid-cols-3 gap-6 mb-8">
-          {/* Total Redirects */}
-          <Card className="p-6">
-            <div className="flex items-start justify-between mb-4">
-              <div>
-                <p className="text-muted-foreground text-sm mb-1">Total Redirects</p>
-                <p className="text-foreground">{dashboardData?.total_redirects?.toLocaleString() || 0}</p>
-              </div>
-              <div className="border border-border p-2 rounded bg-muted">
-                <BarChart3 className="h-5 w-5 text-muted-foreground" />
-              </div>
+              )}
             </div>
-            <Separator className="mb-3" />
-            <p className="text-muted-foreground text-xs">Across {dashboardData?.total_sessions || 0} projects</p>
-          </Card>
-
-          {/* Approval Progress */}
-          <Card className="p-6">
-            <div className="flex items-start justify-between mb-4">
-              <div>
-                <p className="text-muted-foreground text-sm mb-1">Approval Progress</p>
-                <p className="text-foreground">{dashboardData?.approval_progress || 0}%</p>
-              </div>
-              <div className="border border-border p-2 rounded bg-muted">
-                <CheckCircle className="h-5 w-5 text-muted-foreground" />
-              </div>
-            </div>
-            <Progress value={dashboardData?.approval_progress || 0} className="h-2 mb-3" />
-            <p className="text-muted-foreground text-xs">
-              {Math.round((dashboardData?.total_redirects || 0) * (dashboardData?.approval_progress || 0) / 100).toLocaleString()} of {dashboardData?.total_redirects?.toLocaleString() || 0} approved
-            </p>
-          </Card>
-
-          {/* Average Confidence */}
-          <Card className="p-6">
-            <div className="flex items-start justify-between mb-4">
-              <div>
-                <p className="text-muted-foreground text-sm mb-1">Average Confidence</p>
-                <p className="text-foreground">{dashboardData?.average_confidence || 0}</p>
-              </div>
-              <div className="border border-border p-2 rounded bg-muted">
-                <TrendingUp className="h-5 w-5 text-muted-foreground" />
-              </div>
-            </div>
-            <Separator className="mb-3" />
-            <p className="text-muted-foreground text-xs">Match quality score</p>
-          </Card>
-        </div>
-
-        {/* Action Section */}
-        <div className="mb-8">
-          <Card className="p-8 text-center">
-            <div className="max-w-md mx-auto">
-              <div className="border border-border rounded-full p-4 w-16 h-16 mx-auto mb-4 bg-muted">
-                <FileUp className="h-8 w-8 text-muted-foreground" />
-              </div>
-              <h2 className="text-foreground mb-2">Create New Mapping</h2>
-              <p className="text-muted-foreground mb-6">
-                Upload CSV files to start matching URLs and creating redirect mappings
-              </p>
-              <Button size="lg" onClick={() => navigate('/upload')}>
-                Start New Redirect Mapping
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => navigate('/projects')}
+              >
+                <FolderOpen className="h-4 w-4 mr-2" />
+                View All
+              </Button>
+              <Button
+                size="sm"
+                onClick={() => navigate('/upload')}
+              >
+                <Plus className="h-4 w-4 mr-2" />
+                New Job
               </Button>
             </div>
-          </Card>
-        </div>
-
-        {/* Recent Projects */}
-        <div>
-          <div className="flex justify-between items-center mb-4">
-            <h2 className="text-foreground">Recent Projects</h2>
-            <Button
-              variant="outline"
-              onClick={() => navigate('/projects')}
-            >
-              View All Projects
-            </Button>
           </div>
+
+          {/* Jobs Table */}
           <Card>
             <div className="overflow-hidden">
               <table className="w-full">
@@ -433,10 +437,10 @@ export function Dashboard() {
                   </tr>
                 </thead>
                 <tbody>
-                  {dashboardData?.recent_sessions?.map((session, index) => (
+                  {sessions.map((session, index) => (
                     <tr
                       key={session.id}
-                      className={index !== (dashboardData?.recent_sessions?.length || 0) - 1 ? 'border-b border-border' : ''}
+                      className={index !== sessions.length - 1 ? 'border-b border-border' : ''}
                     >
                       <td className="p-4 text-foreground">
                         {editingSessionId === session.id ? (
@@ -480,9 +484,11 @@ export function Dashboard() {
                           </div>
                         )}
                       </td>
-                      <td className="p-4 text-muted-foreground flex items-center gap-2">
-                        <Clock className="h-3 w-3" />
-                        {formatDate(session.created_at)}
+                      <td className="p-4 text-muted-foreground">
+                        <div className="flex items-center gap-2">
+                          <Clock className="h-3 w-3" />
+                          {formatDate(session.created_at)}
+                        </div>
                       </td>
                       <td className="p-4 text-foreground">{session.total_mappings || 0}</td>
                       <td className="p-4">
@@ -530,15 +536,77 @@ export function Dashboard() {
                 </tbody>
               </table>
             </div>
-
-            {(!dashboardData?.recent_sessions || dashboardData.recent_sessions.length === 0) && (
-              <div className="p-8 text-center text-muted-foreground">
-                No recent projects found. Start by creating a new mapping!
-              </div>
-            )}
           </Card>
+
+          {/* Confidence Breakdown */}
+          {confidenceTotal > 0 && (
+            <Card className="!gap-0 p-5 mt-6">
+              <div className="flex items-center justify-between mb-4">
+                <span className="text-sm text-muted-foreground">Confidence Breakdown</span>
+                <span className="text-sm text-muted-foreground">{confidenceTotal.toLocaleString()} total mappings</span>
+              </div>
+
+              {/* Stacked Bar */}
+              <div className="flex h-4 rounded-full overflow-hidden">
+                {confidenceBreakdown.exact > 0 && (
+                  <div
+                    className="bg-blue-500 transition-all"
+                    style={{ width: `${(confidenceBreakdown.exact / confidenceTotal) * 100}%` }}
+                  />
+                )}
+                {confidenceBreakdown.high > 0 && (
+                  <div
+                    className="bg-green-500 transition-all"
+                    style={{ width: `${(confidenceBreakdown.high / confidenceTotal) * 100}%` }}
+                  />
+                )}
+                {confidenceBreakdown.medium > 0 && (
+                  <div
+                    className="bg-yellow-500 transition-all"
+                    style={{ width: `${(confidenceBreakdown.medium / confidenceTotal) * 100}%` }}
+                  />
+                )}
+                {confidenceBreakdown.low > 0 && (
+                  <div
+                    className="bg-red-500 transition-all"
+                    style={{ width: `${(confidenceBreakdown.low / confidenceTotal) * 100}%` }}
+                  />
+                )}
+              </div>
+
+              {/* Legend */}
+              <div className="flex items-center gap-6 mt-4 text-sm">
+                {confidenceBreakdown.exact > 0 && (
+                  <div className="flex items-center gap-1.5">
+                    <div className="w-2.5 h-2.5 rounded-full bg-blue-500" />
+                    <span className="text-muted-foreground">Exact</span>
+                    <span className="font-medium text-foreground">{confidenceBreakdown.exact}</span>
+                    <span className="text-muted-foreground text-xs">({Math.round((confidenceBreakdown.exact / confidenceTotal) * 100)}%)</span>
+                  </div>
+                )}
+                <div className="flex items-center gap-1.5">
+                  <div className="w-2.5 h-2.5 rounded-full bg-green-500" />
+                  <span className="text-muted-foreground">High</span>
+                  <span className="font-medium text-foreground">{confidenceBreakdown.high}</span>
+                  <span className="text-muted-foreground text-xs">({confidenceTotal > 0 ? Math.round((confidenceBreakdown.high / confidenceTotal) * 100) : 0}%)</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <div className="w-2.5 h-2.5 rounded-full bg-yellow-500" />
+                  <span className="text-muted-foreground">Medium</span>
+                  <span className="font-medium text-foreground">{confidenceBreakdown.medium}</span>
+                  <span className="text-muted-foreground text-xs">({confidenceTotal > 0 ? Math.round((confidenceBreakdown.medium / confidenceTotal) * 100) : 0}%)</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <div className="w-2.5 h-2.5 rounded-full bg-red-500" />
+                  <span className="text-muted-foreground">Low</span>
+                  <span className="font-medium text-foreground">{confidenceBreakdown.low}</span>
+                  <span className="text-muted-foreground text-xs">({confidenceTotal > 0 ? Math.round((confidenceBreakdown.low / confidenceTotal) * 100) : 0}%)</span>
+                </div>
+              </div>
+            </Card>
+          )}
         </div>
-      </main>
+      )}
 
       {/* Delete Confirmation Dialog */}
       {deletingSessionId && (
@@ -565,6 +633,6 @@ export function Dashboard() {
           </Card>
         </div>
       )}
-    </div>
+    </DashboardLayout>
   );
 }

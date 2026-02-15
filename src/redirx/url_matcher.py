@@ -65,14 +65,24 @@ _INDEX_FILES = {'index', 'default'}
 _CAMEL_RE = re.compile(r'(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])')
 
 
-def _normalize_url(url: str) -> dict:
+def _normalize_url(url: str, strip_prefix: str = '') -> dict:
     """
     Decompose and normalize a URL for comparison.
+
+    Args:
+        url: The URL to normalize.
+        strip_prefix: Base path prefix to strip (e.g., '/mock-old-site').
 
     Returns a dict with: path, segments, slug, slug_tokens, all_tokens, depth, directory
     """
     parsed = urlparse(url)
     path = unquote(parsed.path).lower().rstrip('/')
+
+    # Strip base path prefix if provided (for same-domain different-prefix sites)
+    if strip_prefix and path.startswith(strip_prefix.lower()):
+        path = path[len(strip_prefix):]
+        if not path.startswith('/'):
+            path = '/' + path
 
     # Remove query params and fragments (already handled by urlparse)
     # Remove file extensions
@@ -134,6 +144,29 @@ class UrlMatcher:
     def __init__(self, config: Optional[UrlMatchConfig] = None):
         self.config = config or UrlMatchConfig()
 
+    @staticmethod
+    def _detect_common_prefix(urls: list[str]) -> str:
+        """
+        Detect the common first-segment path prefix among a set of URLs.
+
+        Fails fast — returns '' as soon as any URL breaks the candidate prefix.
+        Only O(n) when all URLs genuinely share the same prefix.
+        """
+        candidate = None
+        for url in urls:
+            parsed = urlparse(url)
+            path = unquote(parsed.path).lower().rstrip('/')
+            if not path or path == '/':
+                continue
+            first_segment = path.strip('/').split('/')[0]
+            if not first_segment:
+                continue
+            if candidate is None:
+                candidate = first_segment
+            elif first_segment != candidate:
+                return ''  # Fail fast
+        return '/' + candidate if candidate else ''
+
     def match(self, old_urls: list[str], new_urls: list[str]) -> list[MatchResult]:
         """
         Run all matching passes and return combined results.
@@ -151,9 +184,18 @@ class UrlMatcher:
         old_urls = old_urls[:cfg.max_old_urls]
         new_urls = new_urls[:cfg.max_new_urls]
 
-        # Pre-normalize all URLs
-        old_norm = [(url, _normalize_url(url)) for url in old_urls]
-        new_norm = [(url, _normalize_url(url)) for url in new_urls]
+        # Detect differing base path prefixes (e.g., /mock-old-site vs /mock-new-site)
+        old_prefix = self._detect_common_prefix(old_urls)
+        new_prefix = self._detect_common_prefix(new_urls)
+        if old_prefix == new_prefix:
+            old_prefix = ''
+            new_prefix = ''
+        elif old_prefix != new_prefix:
+            print(f"UrlMatcher: Stripping base paths: '{old_prefix}' (old) / '{new_prefix}' (new)")
+
+        # Pre-normalize all URLs (stripping detected base path prefixes)
+        old_norm = [(url, _normalize_url(url, strip_prefix=old_prefix)) for url in old_urls]
+        new_norm = [(url, _normalize_url(url, strip_prefix=new_prefix)) for url in new_urls]
 
         # Filter root paths if configured
         if cfg.skip_root_paths:

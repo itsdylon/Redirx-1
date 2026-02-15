@@ -161,7 +161,7 @@ export function UploadPage() {
   };
 
   const handleProceedAnyway = () => {
-    handleBeginMatching(true);
+    handleBeginMatching(true, true);
   };
 
   const handleProceedWithWarnings = () => {

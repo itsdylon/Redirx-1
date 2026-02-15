@@ -211,23 +211,34 @@ class ExactUrlMatchStage(Stage):
         self.session_id = session_id
         self.mapping_db = URLMappingDB() if session_id else None
 
+    # Extensions to strip during path normalization
+    _STRIP_EXTENSIONS = {'.html', '.htm', '.php', '.asp', '.aspx', '.jsp', '.shtml'}
+    _INDEX_FILES = {'index', 'default'}
+
     @staticmethod
     def _get_path(url: str) -> str:
         """Extract and normalize path from URL (ignoring domain)."""
-        from urllib.parse import urlparse
+        from urllib.parse import urlparse, unquote
         try:
+            # Add scheme if missing so urlparse separates domain from path
+            if not url.startswith(('http://', 'https://', '//')):
+                url = 'http://' + url
+
             parsed = urlparse(url)
-            path = parsed.path
+            path = unquote(parsed.path).lower().rstrip('/')
 
-            # Normalize root path variants: /, /index.html, /index.htm all become "/"
-            if path in ['/', '/index.html', '/index.htm']:
-                return '/'
+            # Strip common file extensions (.html, .htm, .php, etc.)
+            for ext in ExactUrlMatchStage._STRIP_EXTENSIONS:
+                if path.endswith(ext):
+                    path = path[:-len(ext)]
+                    break
 
-            # Remove trailing /index.html or /index.htm from other paths
-            if path.endswith('/index.html'):
-                path = path[:-11]  # Remove /index.html
-            elif path.endswith('/index.htm'):
-                path = path[:-10]  # Remove /index.htm
+            # Remove trailing /index or /default (after extension strip)
+            parts = path.split('/')
+            if parts and parts[-1] in ExactUrlMatchStage._INDEX_FILES:
+                parts = parts[:-1]
+
+            path = '/'.join(parts) or '/'
 
             # Ensure path starts with /
             if not path.startswith('/'):
@@ -237,31 +248,63 @@ class ExactUrlMatchStage(Stage):
         except Exception:
             return url
 
+    @staticmethod
+    def _common_path_prefix(paths: list[str]) -> str:
+        """
+        Find the common first-segment prefix among all paths.
+
+        Fails fast — returns '' as soon as any path breaks the candidate prefix.
+        Only O(n) when all paths genuinely share the same prefix.
+
+        E.g., ['/mock-old/about', '/mock-old/contact'] → '/mock-old'
+             ['/about', '/contact', '/products'] → '' (fails on URL #2)
+        """
+        candidate = None
+        for path in paths:
+            if path == '/':
+                continue
+            first_segment = path.strip('/').split('/')[0]
+            if not first_segment:
+                continue
+            if candidate is None:
+                candidate = first_segment
+            elif first_segment != candidate:
+                return ''  # Fail fast
+        return '/' + candidate if candidate else ''
+
+    @staticmethod
+    def _strip_prefix(path: str, prefix: str) -> str:
+        """Strip a base path prefix from a path, returning the relative portion."""
+        if prefix and path.startswith(prefix):
+            stripped = path[len(prefix):]
+            return stripped if stripped.startswith('/') else '/' + stripped
+        return path
+
     async def execute(self, input: tuple[list[str], list[str]]) -> tuple[list[str], list[str]]:
         """
         Find and remove exact URL path matches.
+
+        Detects differing base path prefixes (e.g., /mock-old-site/ vs /mock-new-site/)
+        and strips them before comparing, so same-domain sites with different path
+        prefixes still match.
 
         Args:
             input: Tuple of (old_urls, new_urls)
 
         Returns:
             Tuple of (unmatched_old_urls, unmatched_new_urls)
-
-        Note: Exact matches are inserted directly to the database via PairingStage later
         """
         old_urls, new_urls = input
 
         print(f"\nExactUrlMatchStage: Checking {len(old_urls)} old vs {len(new_urls)} new URLs for exact path matches...")
 
         # Deduplicate old URLs by normalized path (prefer shorter/cleaner URLs)
-        # e.g., if both "/" and "/index.html" exist, keep only "/"
         old_url_by_path = {}
         for url in old_urls:
             path = self._get_path(url)
             if path not in old_url_by_path:
                 old_url_by_path[path] = url
             else:
-                # Prefer shorter URL (/ over /index.html)
                 if len(url) < len(old_url_by_path[path]):
                     old_url_by_path[path] = url
 
@@ -272,9 +315,32 @@ class ExactUrlMatchStage(Stage):
             if path not in new_url_by_path:
                 new_url_by_path[path] = url
             else:
-                # Prefer shorter URL
                 if len(url) < len(new_url_by_path[path]):
                     new_url_by_path[path] = url
+
+        # Detect differing base path prefixes (e.g., /mock-old-site vs /mock-new-site)
+        old_paths = list(old_url_by_path.keys())
+        new_paths = list(new_url_by_path.keys())
+        old_prefix = self._common_path_prefix(old_paths)
+        new_prefix = self._common_path_prefix(new_paths)
+
+        strip_prefixes = old_prefix != new_prefix and (old_prefix or new_prefix)
+        if strip_prefixes:
+            print(f"ExactUrlMatchStage: Detected different base paths: '{old_prefix}' (old) vs '{new_prefix}' (new) — stripping for comparison")
+            # Rebuild maps keyed by stripped paths, values are still original URLs
+            stripped_old = {}
+            for path, url in old_url_by_path.items():
+                stripped = self._strip_prefix(path, old_prefix)
+                if stripped not in stripped_old or len(url) < len(stripped_old[stripped]):
+                    stripped_old[stripped] = url
+            stripped_new = {}
+            for path, url in new_url_by_path.items():
+                stripped = self._strip_prefix(path, new_prefix)
+                if stripped not in stripped_new or len(url) < len(stripped_new[stripped]):
+                    stripped_new[stripped] = url
+
+            old_url_by_path = stripped_old
+            new_url_by_path = stripped_new
 
         matched_pairs = []
         unmatched_old = []
@@ -296,8 +362,9 @@ class ExactUrlMatchStage(Stage):
             else:
                 unmatched_old.append(old_url)
 
-        # Remove matched new URLs
-        unmatched_new = [url for url in new_urls if self._get_path(url) not in matched_new_paths]
+        # Remove matched new URLs — need to check stripped paths
+        matched_new_urls = {url for _, url in matched_pairs}
+        unmatched_new = [url for url in new_urls if url not in matched_new_urls]
 
         duplicates_removed = len(old_urls) - len(old_url_by_path)
         if duplicates_removed > 0:

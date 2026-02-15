@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { ChevronDown, ChevronRight, Edit2, AlertTriangle, CheckCircle, Circle, Search, FileQuestion, Link2 } from 'lucide-react';
 import { Checkbox } from './ui/checkbox';
 import { Badge } from './ui/badge';
@@ -19,6 +19,75 @@ import {
 } from './ui/tooltip';
 import { RedirectMapping } from './ReviewInterface';
 
+function AnimatedNumber({ value, duration = 500, delay = 0 }: { value: number; duration?: number; delay?: number }) {
+  const [display, setDisplay] = useState(0);
+
+  useEffect(() => {
+    let rafId: number;
+    const timeoutId = setTimeout(() => {
+      const start = performance.now();
+      const tick = () => {
+        const elapsed = performance.now() - start;
+        const progress = Math.min(elapsed / duration, 1);
+        const eased = 1 - Math.pow(1 - progress, 3);
+        setDisplay(Math.round(value * eased));
+        if (progress < 1) rafId = requestAnimationFrame(tick);
+      };
+      rafId = requestAnimationFrame(tick);
+    }, delay);
+
+    return () => {
+      clearTimeout(timeoutId);
+      if (rafId) cancelAnimationFrame(rafId);
+    };
+  }, [value, duration, delay]);
+
+  return <>{display}</>;
+}
+
+function AnimatedBar({ value, delay = 0 }: { value: number; delay?: number }) {
+  const [width, setWidth] = useState(0);
+
+  useEffect(() => {
+    const timeout = setTimeout(() => setWidth(value), delay + 50);
+    return () => clearTimeout(timeout);
+  }, [value, delay]);
+
+  return (
+    <div className="mt-2 h-2 bg-muted rounded-full overflow-hidden">
+      <div
+        className="h-full bg-primary"
+        style={{
+          width: `${width}%`,
+          transition: 'width 700ms ease-out',
+        }}
+      />
+    </div>
+  );
+}
+
+function AnimateIn({ delay = 0, children, className = '' }: { delay?: number; children: React.ReactNode; className?: string }) {
+  const [visible, setVisible] = useState(false);
+
+  useEffect(() => {
+    const timeout = setTimeout(() => setVisible(true), delay + 10);
+    return () => clearTimeout(timeout);
+  }, [delay]);
+
+  return (
+    <div
+      className={className}
+      style={{
+        opacity: visible ? 1 : 0,
+        transform: visible ? 'translateY(0)' : 'translateY(8px)',
+        transition: `opacity 300ms ease-out, transform 300ms ease-out`,
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
 interface RedirectTableProps {
   redirects: RedirectMapping[];
   selectedRows: Set<string>;
@@ -31,6 +100,7 @@ interface RedirectTableProps {
   onClearFilters?: () => void;
   totalRedirectsCount?: number;
   isLoading?: boolean;
+  pipelineType?: string;
 }
 
 export function RedirectTable({
@@ -44,7 +114,8 @@ export function RedirectTable({
   hasActiveFilters = false,
   onClearFilters,
   totalRedirectsCount = 0,
-  isLoading = false
+  isLoading = false,
+  pipelineType = 'content'
 }: RedirectTableProps) {
   const isExactMatch = (redirect: RedirectMapping) =>
     redirect.matchType === 'exact_url';
@@ -324,7 +395,7 @@ export function RedirectTable({
               {expandedRow === redirect.id && (
                 <TableRow className="bg-muted">
                   <TableCell colSpan={9} className="p-6">
-                    <div>
+                    <AnimateIn>
                       {/* Full URLs */}
                       <div className="grid grid-cols-2 gap-4 mb-4">
                         <div>
@@ -343,12 +414,12 @@ export function RedirectTable({
                             <Link2 className="h-5 w-5 text-blue-600" />
                             <h3 className="text-foreground">Exact URL Match</h3>
                           </div>
-                          <div className="border border-blue-500/30 bg-blue-500/5 p-4 rounded-md">
+                          <AnimateIn delay={100} className="border border-blue-500/30 bg-blue-500/5 p-4 rounded-md">
                             <p className="text-sm text-muted-foreground">
                               The URL paths on the old and new sites are identical. No redirect rule is needed since the content will be served at the same path.
                             </p>
-                          </div>
-                          <div className="mt-4 flex gap-3">
+                          </AnimateIn>
+                          <AnimateIn delay={200} className="mt-4 flex gap-3">
                             <Button
                               variant={redirect.approved ? "outline" : "default"}
                               size="sm"
@@ -363,68 +434,61 @@ export function RedirectTable({
                             >
                               Edit Mapping
                             </Button>
-                          </div>
+                          </AnimateIn>
                         </>
                       ) : (
                         <>
                           <h3 className="text-foreground mb-4">Matching Details</h3>
-                          <div className="grid grid-cols-3 gap-6">
-                            <div className="border border-border bg-card p-4">
-                              <div className="text-muted-foreground text-sm mb-2">Path Similarity</div>
-                              <div className="flex items-end gap-2">
-                                <span className="text-foreground text-2xl">{redirect.pathSimilarity ?? 0}%</span>
-                              </div>
-                              <div className="mt-2 h-2 bg-muted rounded-full overflow-hidden">
-                                <div
-                                  className="h-full bg-primary transition-all"
-                                  style={{ width: `${redirect.pathSimilarity ?? 0}%` }}
-                                />
-                              </div>
-                            </div>
-
-                            <div className="border border-border bg-card p-4">
-                              <div className="text-muted-foreground text-sm mb-2">Title Similarity</div>
-                              <div className="flex items-end gap-2">
-                                <span className="text-foreground text-2xl">{redirect.titleSimilarity ?? 0}%</span>
-                              </div>
-                              <div className="mt-2 h-2 bg-muted rounded-full overflow-hidden">
-                                <div
-                                  className="h-full bg-primary transition-all"
-                                  style={{ width: `${redirect.titleSimilarity ?? 0}%` }}
-                                />
-                              </div>
-                            </div>
-
-                            <div className="border border-border bg-card p-4">
-                              <div className="text-muted-foreground text-sm mb-2">Content Similarity</div>
-                              <div className="flex items-end gap-2">
-                                <span className="text-foreground text-2xl">{redirect.contentSimilarity ?? 0}%</span>
-                              </div>
-                              <div className="mt-2 h-2 bg-muted rounded-full overflow-hidden">
-                                <div
-                                  className="h-full bg-primary transition-all"
-                                  style={{ width: `${redirect.contentSimilarity ?? 0}%` }}
-                                />
-                              </div>
-                            </div>
+                          <div className={`grid gap-6 ${pipelineType === 'url_only' ? 'grid-cols-2' : 'grid-cols-3'}`}>
+                            {[
+                              { label: 'Path Similarity', value: redirect.pathSimilarity ?? 0, delay: 0, show: true },
+                              { label: 'Match Method', value: redirect.matchScore ?? 0, delay: 100, show: pipelineType === 'url_only' },
+                              { label: 'Title Similarity', value: redirect.titleSimilarity ?? 0, delay: 100, show: pipelineType !== 'url_only' },
+                              { label: 'Content Similarity', value: redirect.contentSimilarity ?? 0, delay: 200, show: pipelineType !== 'url_only' },
+                            ].filter(card => card.show).map((card) => (
+                              <AnimateIn
+                                key={card.label}
+                                delay={card.delay}
+                                className="border border-border bg-card p-4"
+                              >
+                                <div className="text-muted-foreground text-sm mb-2">{card.label}</div>
+                                <div className="flex items-end gap-1">
+                                  <span className="text-foreground text-2xl tabular-nums">
+                                    <AnimatedNumber value={card.value} delay={card.delay} />
+                                  </span>
+                                  <span className="text-foreground text-lg mb-px">%</span>
+                                </div>
+                                <AnimatedBar value={card.value} delay={card.delay} />
+                              </AnimateIn>
+                            ))}
                           </div>
 
                           {redirect.warnings.length > 0 && (
-                            <div className="mt-4 p-4 border border-yellow-500/50 bg-yellow-500/10">
+                            <AnimateIn delay={300} className="mt-4 p-4 border border-yellow-500/50 bg-yellow-500/10">
                               <h4 className="text-foreground text-sm mb-2">Warnings</h4>
                               <ul className="text-sm text-muted-foreground space-y-1">
-                                {redirect.warnings.map((warning, index) => (
-                                  <li key={index} className="list-disc list-inside">
-                                    {warning === 'duplicate-target' && 'This URL is already assigned to another redirect'}
-                                    {warning === 'invalid-target' && 'Target URL does not exist in new site'}
-                                    {warning === 'near-tie' && 'Multiple URLs have similar confidence scores'}
-                                  </li>
-                                ))}
+                                {redirect.warnings
+                                  .map((warning) => {
+                                    const messages: Record<string, string> = {
+                                      'duplicate-target': 'This URL is already assigned to another redirect',
+                                      'invalid-target': 'Target URL does not exist in new site',
+                                      'near-tie': 'Multiple URLs have similar confidence scores',
+                                      'needs-review': 'This mapping requires manual review',
+                                      'low-confidence': 'Low confidence match — review recommended',
+                                    };
+                                    return messages[warning] || null;
+                                  })
+                                  .filter(Boolean)
+                                  .map((message, index) => (
+                                    <li key={index} className="list-disc list-inside">
+                                      {message}
+                                    </li>
+                                  ))}
                               </ul>
-                            </div>
+                            </AnimateIn>
                           )}
 
-                          <div className="mt-4 flex gap-3">
+                          <AnimateIn delay={350} className="mt-4 flex gap-3">
                             <Button
                               variant={redirect.approved ? "outline" : "default"}
                               size="sm"
@@ -439,18 +503,19 @@ export function RedirectTable({
                             >
                               Edit Mapping
                             </Button>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              disabled
-                              title="Alternative matches coming soon"
-                            >
-                              View Alternatives
-                            </Button>
-                          </div>
+                            {pipelineType !== 'url_only' && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => onEdit(redirect)}
+                              >
+                                View Alternatives
+                              </Button>
+                            )}
+                          </AnimateIn>
                         </>
                       )}
-                    </div>
+                    </AnimateIn>
                   </TableCell>
                 </TableRow>
               )}

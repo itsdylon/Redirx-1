@@ -1,0 +1,374 @@
+from __future__ import annotations
+
+import asyncio
+import ipaddress
+import json
+import xml.etree.ElementTree as ET
+from collections import defaultdict
+from urllib.parse import urlparse, urljoin
+
+import aiohttp
+from bs4 import BeautifulSoup
+
+from redirx.stages import UrlPruneStage, BlogPruneStage, WebPage
+
+
+def _is_private_ip(hostname: str) -> bool:
+    """Reject private/loopback IPs to prevent SSRF."""
+    if hostname in ("localhost", "127.0.0.1", "::1", "0.0.0.0"):
+        return True
+    try:
+        addr = ipaddress.ip_address(hostname)
+        return addr.is_private or addr.is_loopback or addr.is_reserved
+    except ValueError:
+        # Not a raw IP — it's a hostname, allow it
+        return False
+
+
+def _url_depth(url: str) -> int:
+    """Count path segments (depth from root)."""
+    path = urlparse(url).path.strip("/")
+    if not path:
+        return 0
+    return len(path.split("/"))
+
+
+def _categorize(url: str) -> str:
+    """Categorize a URL by its path patterns."""
+    if not UrlPruneStage._sanitizer(url):
+        return "asset"
+    if BlogPruneStage._is_blog_post(url):
+        return "blog_post"
+
+    path = urlparse(url).path.lower()
+
+    # Blog landing pages
+    if path.rstrip("/") in ("/blog", "/blogs", "/news"):
+        return "blog_landing"
+
+    # Product-like pages
+    product_keywords = ("/product", "/shop", "/store", "/catalog", "/item", "/collection")
+    if any(kw in path for kw in product_keywords):
+        return "product_page"
+
+    return "landing_page"
+
+
+class SiteAuditor:
+    """Crawl a site and yield SSE event dicts for real-time streaming."""
+
+    MAX_URLS = 50
+    SEMAPHORE_LIMIT = 10
+
+    async def run_audit(self, url: str):
+        """Async generator that yields SSE event dicts."""
+        parsed = urlparse(url)
+        base_url = f"{parsed.scheme}://{parsed.netloc}"
+
+        # SSRF check
+        if _is_private_ip(parsed.hostname or ""):
+            yield {"event": "error", "data": {"message": "Private/local addresses are not allowed", "code": "ssrf_blocked"}}
+            return
+
+        async with aiohttp.ClientSession(
+            timeout=aiohttp.ClientTimeout(total=30),
+            headers={"User-Agent": "Redirx-SiteAudit/1.0"}
+        ) as session:
+
+            # --- URL Discovery ---
+            discovered: list[str] = []
+            discovery_method = "none"
+
+            # 1. Try sitemap.xml
+            yield {"event": "progress", "data": {"phase": "discovery", "message": "Trying sitemap.xml...", "urls_found": 0}}
+            sitemap_urls = await self._try_sitemap(session, base_url)
+            if sitemap_urls:
+                discovered.extend(sitemap_urls)
+                discovery_method = "sitemap"
+
+            # 2. Try robots.txt for Sitemap directives
+            if not discovered:
+                yield {"event": "progress", "data": {"phase": "discovery", "message": "Trying robots.txt...", "urls_found": 0}}
+                robots_urls = await self._try_robots_txt(session, base_url)
+                if robots_urls:
+                    discovered.extend(robots_urls)
+                    discovery_method = "robots_txt"
+
+            # 3. Recursive crawl as fallback
+            if not discovered:
+                yield {"event": "progress", "data": {"phase": "discovery", "message": "Crawling site links...", "urls_found": 0}}
+                crawl_urls = await self._recursive_crawl(session, base_url)
+                if crawl_urls:
+                    discovered.extend(crawl_urls)
+                    discovery_method = "crawl"
+
+            # Deduplicate
+            seen = set()
+            unique_urls: list[str] = []
+            for u in discovered:
+                normalized = u.rstrip("/")
+                if normalized not in seen:
+                    seen.add(normalized)
+                    unique_urls.append(u)
+
+            # Filter through UrlPruneStage (but not the base sitemap URL itself)
+            filtered_urls = [u for u in unique_urls if UrlPruneStage._sanitizer(u)]
+
+            total_discovered = len(filtered_urls)
+
+            if total_discovered == 0:
+                yield {"event": "error", "data": {"message": f"Could not discover any pages on {parsed.netloc}", "code": "no_urls"}}
+                return
+
+            # Cap at MAX_URLS
+            urls_to_scrape = filtered_urls[:self.MAX_URLS]
+
+            yield {"event": "progress", "data": {
+                "phase": "discovery",
+                "message": f"Found {total_discovered} pages" + (f" (auditing first {self.MAX_URLS})" if total_discovered > self.MAX_URLS else ""),
+                "urls_found": total_discovered
+            }}
+
+            # --- Page Analysis ---
+            semaphore = asyncio.Semaphore(self.SEMAPHORE_LIMIT)
+            pages: list[dict] = []
+            content_hashes: dict[int, list[str]] = defaultdict(list)
+            issues_summary: dict[str, list[str]] = defaultdict(list)
+            categories: dict[str, int] = defaultdict(int)
+            max_depth = 0
+
+            for i, page_url in enumerate(urls_to_scrape):
+                yield {"event": "progress", "data": {
+                    "phase": "scraping",
+                    "message": f"Scraping page {i + 1} of {len(urls_to_scrape)}...",
+                    "pages_scraped": i,
+                    "total_pages": len(urls_to_scrape)
+                }}
+
+                page_data = await self._analyze_page(session, semaphore, page_url)
+                pages.append(page_data)
+
+                # Track duplicates via content hash
+                if page_data["content_hash"] is not None:
+                    content_hashes[page_data["content_hash"]].append(page_url)
+
+                # Track categories
+                categories[page_data["category"]] += 1
+
+                # Track depth
+                if page_data["depth"] > max_depth:
+                    max_depth = page_data["depth"]
+
+                # Track issues
+                for issue in page_data["issues"]:
+                    issues_summary[issue].append(page_url)
+
+                # Yield per-page event
+                yield {"event": "page", "data": {
+                    "url": page_data["url"],
+                    "title": page_data["title"],
+                    "content_length": page_data["content_length"],
+                    "category": page_data["category"],
+                    "depth": page_data["depth"],
+                    "issues": page_data["issues"]
+                }}
+
+            # Mark duplicate content as an issue
+            for h, urls in content_hashes.items():
+                if len(urls) > 1:
+                    for u in urls:
+                        issues_summary["duplicate_content"].append(u)
+                        # Also add to the individual page data
+                        for p in pages:
+                            if p["url"] == u and "duplicate_content" not in p["issues"]:
+                                p["issues"].append("duplicate_content")
+
+            # --- Complete Event ---
+            yield {"event": "complete", "data": {
+                "summary": {
+                    "total_pages": total_discovered,
+                    "pages_audited": len(pages),
+                    "total_issues": sum(len(urls) for urls in issues_summary.values()),
+                    "max_depth": max_depth,
+                    "discovery_method": discovery_method,
+                },
+                "categories": dict(categories),
+                "issues": {k: {"count": len(set(v)), "urls": list(set(v))} for k, v in issues_summary.items()},
+                "pages": [{
+                    "url": p["url"],
+                    "title": p["title"],
+                    "content_length": p["content_length"],
+                    "category": p["category"],
+                    "depth": p["depth"],
+                    "issues": p["issues"]
+                } for p in pages]
+            }}
+
+    async def _analyze_page(self, session: aiohttp.ClientSession, semaphore: asyncio.Semaphore, url: str) -> dict:
+        """Scrape and analyze a single page."""
+        async with semaphore:
+            page = await WebPage.scrape(session, url, max_retries=2)
+
+        issues: list[str] = []
+        title = ""
+        content_length = 0
+        content_hash = None
+
+        if not page.html:
+            issues.append("scrape_failed")
+        else:
+            title = page.extract_title()
+            text = page.extract_text()
+            content_length = len(text)
+            content_hash = hash(page)
+
+            if not title:
+                issues.append("missing_title")
+            if content_length < 200:
+                issues.append("thin_content")
+
+        category = _categorize(url)
+        depth = _url_depth(url)
+
+        return {
+            "url": url,
+            "title": title,
+            "content_length": content_length,
+            "category": category,
+            "depth": depth,
+            "issues": issues,
+            "content_hash": content_hash,
+        }
+
+    # ---- URL Discovery Methods ----
+
+    async def _try_sitemap(self, session: aiohttp.ClientSession, base_url: str) -> list[str]:
+        """Fetch /sitemap.xml and extract URLs."""
+        urls: list[str] = []
+        try:
+            sitemap_url = f"{base_url}/sitemap.xml"
+            async with session.get(sitemap_url) as resp:
+                if resp.status != 200:
+                    return []
+                text = await resp.text()
+
+            urls = self._parse_sitemap_xml(text, base_url)
+        except Exception:
+            pass
+        return urls
+
+    def _parse_sitemap_xml(self, xml_text: str, base_url: str, depth: int = 0) -> list[str]:
+        """Parse sitemap XML, handling sitemapindex recursively (sync parse only)."""
+        urls: list[str] = []
+        if depth > 1:  # Limit recursion
+            return urls
+        try:
+            root = ET.fromstring(xml_text)
+            ns = ""
+            # Handle namespace
+            if root.tag.startswith("{"):
+                ns = root.tag.split("}")[0] + "}"
+
+            # Check if it's a sitemap index
+            if root.tag == f"{ns}sitemapindex":
+                # We'll only fetch child sitemaps synchronously parsed from this XML
+                for sitemap in root.findall(f"{ns}sitemap"):
+                    loc = sitemap.find(f"{ns}loc")
+                    if loc is not None and loc.text:
+                        urls.append(loc.text.strip())
+                # Return child sitemap URLs — they'll be fetched in _try_sitemap_index
+                return urls
+
+            # Regular urlset
+            for url_elem in root.findall(f"{ns}url"):
+                loc = url_elem.find(f"{ns}loc")
+                if loc is not None and loc.text:
+                    urls.append(loc.text.strip())
+        except ET.ParseError:
+            pass
+        return urls
+
+    async def _try_robots_txt(self, session: aiohttp.ClientSession, base_url: str) -> list[str]:
+        """Fetch /robots.txt, extract Sitemap: directives, fetch those sitemaps."""
+        urls: list[str] = []
+        try:
+            async with session.get(f"{base_url}/robots.txt") as resp:
+                if resp.status != 200:
+                    return []
+                text = await resp.text()
+
+            sitemap_urls = []
+            for line in text.splitlines():
+                line = line.strip()
+                if line.lower().startswith("sitemap:"):
+                    sitemap_url = line.split(":", 1)[1].strip()
+                    sitemap_urls.append(sitemap_url)
+
+            # Fetch up to 5 sitemaps
+            for sm_url in sitemap_urls[:5]:
+                try:
+                    async with session.get(sm_url) as resp:
+                        if resp.status == 200:
+                            xml_text = await resp.text()
+                            urls.extend(self._parse_sitemap_xml(xml_text, base_url))
+                except Exception:
+                    continue
+        except Exception:
+            pass
+        return urls
+
+    async def _recursive_crawl(self, session: aiohttp.ClientSession, base_url: str, max_depth: int = 2) -> list[str]:
+        """BFS crawl from homepage, following internal <a href> links."""
+        parsed_base = urlparse(base_url)
+        base_domain = parsed_base.netloc
+        visited: set[str] = set()
+        to_visit: list[tuple[str, int]] = [(base_url, 0)]
+        found: list[str] = []
+
+        while to_visit and len(found) < 200:  # Hard cap to avoid runaway crawls
+            url, depth = to_visit.pop(0)
+            normalized = url.rstrip("/")
+            if normalized in visited:
+                continue
+            if depth > max_depth:
+                continue
+
+            visited.add(normalized)
+            found.append(url)
+
+            if depth >= max_depth:
+                continue
+
+            try:
+                async with session.get(url, allow_redirects=True) as resp:
+                    if resp.status != 200:
+                        continue
+                    content_type = resp.headers.get("Content-Type", "")
+                    if "text/html" not in content_type:
+                        continue
+                    html = await resp.text()
+            except Exception:
+                continue
+
+            try:
+                soup = BeautifulSoup(html, "lxml")
+                for a_tag in soup.find_all("a", href=True):
+                    href = a_tag["href"]
+                    absolute = urljoin(url, href)
+                    parsed_link = urlparse(absolute)
+
+                    # Same-domain internal links only
+                    if parsed_link.netloc != base_domain:
+                        continue
+
+                    # Strip fragment
+                    clean_url = f"{parsed_link.scheme}://{parsed_link.netloc}{parsed_link.path}"
+                    if parsed_link.query:
+                        clean_url += f"?{parsed_link.query}"
+
+                    if clean_url.rstrip("/") not in visited:
+                        to_visit.append((clean_url, depth + 1))
+            except Exception:
+                continue
+
+        return found

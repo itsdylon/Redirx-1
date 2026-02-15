@@ -9,6 +9,7 @@ import { UploadPage } from './components/UploadPage';
 import { ReviewInterface } from './components/ReviewInterface';
 import { AccountPage } from './components/AccountPage';
 import { Settings } from './components/Settings';
+import { DemoPage } from './components/DemoPage';
 import { Toaster } from './components/ui/sonner';
 
 export default function App() {
@@ -37,6 +38,10 @@ export default function App() {
       <Route
         path="/auth/callback"
         element={<AuthCallback />}
+      />
+      <Route
+        path="/demo"
+        element={<DemoPage />}
       />
 
       {/* Protected routes */}

@@ -202,10 +202,15 @@ class RedirxWorker:
                 await self.release_lease(session_id, 'permanently_failed', 'No URLs provided')
                 return False
 
-            print(f"[Worker] Processing {len(old_urls)} old URLs and {len(new_urls)} new URLs")
+            pipeline_type = job.get('pipeline_type', 'content')
+            print(f"[Worker] Processing {len(old_urls)} old URLs and {len(new_urls)} new URLs (pipeline: {pipeline_type})")
+
+            # Only validate OpenAI key for content pipeline (url_only doesn't need it)
+            if pipeline_type == 'content':
+                Config.validate_embeddings()
 
             # Run pipeline
-            pipeline = Pipeline(input=(old_urls, new_urls), session_id=session_id)
+            pipeline = Pipeline(input=(old_urls, new_urls), session_id=session_id, pipeline_type=pipeline_type)
             total = pipeline.total_stages
             names = pipeline.stage_names
 
@@ -443,7 +448,7 @@ class RedirxWorker:
         try:
             # Validate configuration
             Config.validate()
-            Config.validate_embeddings()
+            # Note: OpenAI key is validated per-job in process_job for content pipelines only
 
             # Start LISTEN loop (will fallback to polling if needed)
             await self.listen_loop()

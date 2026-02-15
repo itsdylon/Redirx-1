@@ -80,10 +80,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     localStorage.setItem('access_token', data.access_token);
     localStorage.setItem('refresh_token', data.refresh_token);
 
-    setUser({
-      id: data.user_id,
-      email: data.email
-    });
+    // Fetch full profile (including subscription_plan)
+    try {
+      const meResponse = await fetch(`${API_BASE_URL}/api/auth/me`, {
+        headers: { 'Authorization': `Bearer ${data.access_token}` }
+      });
+      if (meResponse.ok) {
+        const meData = await meResponse.json();
+        setUser(meData.user);
+      } else {
+        setUser({ id: data.user_id, email: data.email });
+      }
+    } catch {
+      setUser({ id: data.user_id, email: data.email });
+    }
   };
 
   const register = async (email: string, password: string, fullName: string): Promise<RegisterResult> => {
@@ -112,10 +122,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     localStorage.setItem('access_token', data.access_token);
     localStorage.setItem('refresh_token', data.refresh_token);
 
-    setUser({
-      id: data.user_id,
-      email: data.email
-    });
+    // Fetch full profile (including subscription_plan)
+    try {
+      const meResponse = await fetch(`${API_BASE_URL}/api/auth/me`, {
+        headers: { 'Authorization': `Bearer ${data.access_token}` }
+      });
+      if (meResponse.ok) {
+        const meData = await meResponse.json();
+        setUser(meData.user);
+      } else {
+        setUser({ id: data.user_id, email: data.email });
+      }
+    } catch {
+      setUser({ id: data.user_id, email: data.email });
+    }
 
     return {
       emailConfirmationRequired: false

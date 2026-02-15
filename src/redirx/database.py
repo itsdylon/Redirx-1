@@ -55,7 +55,8 @@ class MigrationSessionDB:
         project_name: Optional[str] = None,
         old_urls: Optional[List[str]] = None,
         new_urls: Optional[List[str]] = None,
-        idempotency_key: Optional[str] = None
+        idempotency_key: Optional[str] = None,
+        pipeline_type: str = 'content',
     ) -> UUID:
         """
         Create a new migration session.
@@ -66,13 +67,15 @@ class MigrationSessionDB:
             old_urls: Optional list of old site URLs (for background processing).
             new_urls: Optional list of new site URLs (for background processing).
             idempotency_key: Optional idempotency key to prevent duplicate job creation.
+            pipeline_type: 'content' (default) or 'url_only' (free tier).
 
         Returns:
             UUID: The created session ID.
         """
         session_data = {
             'user_id': user_id,
-            'status': 'pending'
+            'status': 'pending',
+            'pipeline_type': pipeline_type,
         }
 
         if project_name:
@@ -343,6 +346,25 @@ class UserQuotaDB:
                     'usage_current_month': current + count
                 }).eq('id', user_id).execute()
 
+    def get_subscription_plan(self, user_id: str) -> str:
+        """
+        Get the user's subscription plan.
+
+        Args:
+            user_id: The user's ID.
+
+        Returns:
+            Subscription plan string ('free', 'pro', or 'enterprise'). Defaults to 'free'.
+        """
+        result = self.client.table('user_profiles').select(
+            'subscription_plan'
+        ).eq('id', user_id).execute()
+
+        if not result.data:
+            return 'free'
+
+        return result.data[0].get('subscription_plan') or 'free'
+
     def get_remaining_quota(self, user_id: str) -> int:
         """
         Get the remaining quota for a user.
@@ -423,6 +445,21 @@ class URLMappingDB:
 
         result = query.execute()
         return result.data
+
+    def get_mapping_by_id(self, mapping_id: UUID) -> Optional[Dict[str, Any]]:
+        """
+        Fetch a single URL mapping by its ID.
+
+        Args:
+            mapping_id: The mapping UUID.
+
+        Returns:
+            Mapping record dict, or None if not found.
+        """
+        result = self.client.table('url_mappings').select('*').eq(
+            'id', str(mapping_id)
+        ).execute()
+        return result.data[0] if result.data else None
 
     def update_mapping(
         self,

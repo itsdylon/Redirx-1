@@ -227,13 +227,16 @@ def format_results_response(
         Complete response with mappings, stats, and metadata
     """
     # Build title map from embeddings if we have a session
+    # Skip for url_only pipelines (no embeddings exist)
     title_map = {}
-    if session_metadata and session_metadata.get('id'):
-        title_map = _build_title_map(str(session_metadata['id']))
-    elif db_mappings:
-        session_id = db_mappings[0].get('session_id')
-        if session_id:
-            title_map = _build_title_map(str(session_id))
+    pipeline_type = session_metadata.get('pipeline_type', 'content') if session_metadata else 'content'
+    if pipeline_type != 'url_only':
+        if session_metadata and session_metadata.get('id'):
+            title_map = _build_title_map(str(session_metadata['id']))
+        elif db_mappings:
+            session_id = db_mappings[0].get('session_id')
+            if session_id:
+                title_map = _build_title_map(str(session_id))
 
     # Transform all mappings
     frontend_mappings = [
@@ -255,7 +258,8 @@ def format_results_response(
             'id': str(session_metadata.get('id', '')),
             'status': session_metadata.get('status', 'unknown'),
             'created_at': session_metadata.get('created_at', ''),
-            'user_id': session_metadata.get('user_id', '')
+            'user_id': session_metadata.get('user_id', ''),
+            'pipeline_type': session_metadata.get('pipeline_type', 'content')
         }
 
     return response

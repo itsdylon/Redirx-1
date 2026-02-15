@@ -16,6 +16,7 @@ import {
   TooltipTrigger,
 } from './ui/tooltip';
 import { toast } from 'sonner';
+import { Info } from 'lucide-react';
 import { getResults } from '../api/pipeline';
 import { isMac } from '../lib/keyboard';
 import {
@@ -65,6 +66,7 @@ export function ReviewInterface() {
   const [error, setError] = useState<string | null>(null);
   const [sortOption, setSortOption] = useState<string>('confidence-desc');
   const [showExactMatches, setShowExactMatches] = useState(true);
+  const [pipelineType, setPipelineType] = useState<string>('content');
   const PAGE_SIZE = 25;
 
   // Refs for keyboard shortcuts
@@ -86,6 +88,9 @@ export function ReviewInterface() {
 
         if (data.success && data.mappings) {
           setRedirects(data.mappings);
+          if (data.session?.pipeline_type) {
+            setPipelineType(data.session.pipeline_type);
+          }
         } else {
           setError("Failed to load results");
         }
@@ -300,6 +305,16 @@ export function ReviewInterface() {
 
   return (
     <DashboardLayout title="Review Redirects">
+          {/* URL-only upgrade banner */}
+          {pipelineType === 'url_only' && (
+            <div className="mb-4 border border-blue-500/30 bg-blue-500/5 p-3 flex items-center gap-3">
+              <Info className="h-4 w-4 text-blue-500 flex-shrink-0" />
+              <p className="text-sm text-muted-foreground">
+                These results use URL pattern matching. Upgrade for content-based deep matching with AI-powered semantic analysis and alternative suggestions.
+              </p>
+            </div>
+          )}
+
           {/* Stats Bar */}
           <StatsBar stats={stats} />
 
@@ -333,6 +348,7 @@ export function ReviewInterface() {
             onClearFilters={handleClearFilters}
             totalRedirectsCount={redirects.length}
             isLoading={isLoading}
+            pipelineType={pipelineType}
           />
 
           </div>
@@ -428,8 +444,10 @@ export function ReviewInterface() {
       {editingRow && (
         <InlineEditDialog
           redirect={editingRow}
+          sessionId={sessionId!}
           onSave={handleSaveEdit}
           onCancel={() => setEditingRow(null)}
+          pipelineType={pipelineType}
         />
       )}
 

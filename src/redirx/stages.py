@@ -10,6 +10,7 @@ from openai import AsyncOpenAI
 
 from .config import Config
 from .database import WebPageEmbeddingDB, MigrationSessionDB, URLMappingDB
+from .url_matcher import UrlMatcher, UrlMatchConfig
 
 class Stage:
     name: str = "Processing"
@@ -320,6 +321,59 @@ class ExactUrlMatchStage(Stage):
                     match_type='exact_url',
                     needs_review=False
                 )
+
+        return (unmatched_old, unmatched_new)
+
+
+# =========================
+# URL Similarity Match Stage
+# =========================
+
+class UrlSimilarityMatchStage(Stage):
+    """
+    Matches URLs using slug matching, TF-IDF cosine similarity, and RapidFuzz fallback.
+    Zero API cost — runs entirely locally. Used in the url_only pipeline (free tier).
+
+    Input: tuple[list[str], list[str]] — unmatched URLs from ExactUrlMatchStage
+    Output: tuple[list[str], list[str]] — remaining unmatched URLs
+    """
+    name = "Matching URLs by similarity"
+
+    def __init__(self, session_id: Optional[UUID] = None, config: Optional[UrlMatchConfig] = None):
+        super().__init__()
+        self.session_id = session_id
+        self.config = config or UrlMatchConfig()
+        self.matcher = UrlMatcher(config=self.config)
+        self.mapping_db = URLMappingDB() if session_id else None
+
+    async def execute(self, input: tuple[list[str], list[str]]) -> tuple[list[str], list[str]]:
+        old_urls, new_urls = input
+
+        print(f"\nUrlSimilarityMatchStage: Matching {len(old_urls)} old vs {len(new_urls)} new URLs...")
+
+        results = self.matcher.match(old_urls, new_urls)
+
+        # Store matches in database
+        if self.session_id and self.mapping_db and results:
+            print(f"UrlSimilarityMatchStage: Inserting {len(results)} matches to database...")
+            for r in results:
+                self.mapping_db.insert_mapping(
+                    session_id=self.session_id,
+                    old_url=r.old_url,
+                    new_url=r.new_url,
+                    confidence_score=r.confidence_score,
+                    match_type=r.match_type,
+                    needs_review=r.needs_review,
+                )
+
+        # Compute remaining unmatched URLs
+        matched_old = {r.old_url for r in results}
+        matched_new = {r.new_url for r in results}
+        unmatched_old = [u for u in old_urls if u not in matched_old]
+        unmatched_new = [u for u in new_urls if u not in matched_new]
+
+        print(f"UrlSimilarityMatchStage: {len(results)} matched, "
+              f"{len(unmatched_old)} orphaned old, {len(unmatched_new)} unmatched new")
 
         return (unmatched_old, unmatched_new)
 

@@ -1,4 +1,4 @@
-import { Search, Download, ArrowUpDown } from 'lucide-react';
+import { Search, Download, ArrowUpDown, Link2 } from 'lucide-react';
 import { Input } from './ui/input';
 import { Button } from './ui/button';
 import {
@@ -13,6 +13,8 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from './ui/tooltip';
+import { Switch } from './ui/switch';
+import { Label } from './ui/label';
 import { formatShortcut } from '../lib/keyboard';
 
 interface ReviewToolbarProps {
@@ -23,6 +25,8 @@ interface ReviewToolbarProps {
   onExportClick: () => void;
   sortOption: string;
   onSortChange: (value: string) => void;
+  showExactMatches: boolean;
+  onShowExactMatchesChange: (show: boolean) => void;
   totalCount: number;
   filteredCount: number;
   searchInputRef?: React.RefObject<HTMLInputElement>;
@@ -36,13 +40,12 @@ export function ReviewToolbar({
   onExportClick,
   sortOption,
   onSortChange,
+  showExactMatches,
+  onShowExactMatchesChange,
   totalCount,
   filteredCount,
   searchInputRef,
 }: ReviewToolbarProps) {
-  // Determine if filters are active
-  const isFiltered = searchQuery.trim().length > 0 || confidenceFilter !== 'all';
-
   return (
     <div className="bg-card border border-border p-4 flex items-center gap-4 flex-wrap">
       {/* Search Bar */}
@@ -54,11 +57,11 @@ export function ReviewToolbar({
           placeholder="Search old or new URLs..."
           value={searchQuery}
           onChange={(e) => onSearchChange(e.target.value)}
-          className="pl-10"
+          className="pl-10 pr-20"
         />
-        <p className="text-xs text-muted-foreground mt-1.5 ml-1">
-          Press {formatShortcut('K')} to focus search
-        </p>
+        <kbd className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none hidden sm:inline-flex h-5 items-center gap-1 rounded border border-border bg-muted px-1.5 font-mono text-[10px] font-medium text-muted-foreground">
+          {formatShortcut('K')}
+        </kbd>
       </div>
 
       {/* Confidence Filter */}
@@ -73,6 +76,19 @@ export function ReviewToolbar({
           <SelectItem value="low">Low (&lt;60%)</SelectItem>
         </SelectContent>
       </Select>
+
+      {/* Exact Match Toggle */}
+      <div className="flex items-center gap-2">
+        <Switch
+          id="show-exact"
+          checked={showExactMatches}
+          onCheckedChange={onShowExactMatchesChange}
+        />
+        <Label htmlFor="show-exact" className="text-sm text-muted-foreground cursor-pointer whitespace-nowrap flex items-center gap-1">
+          <Link2 className="h-3.5 w-3.5" />
+          Exact
+        </Label>
+      </div>
 
       {/* Sort Options */}
       <Select value={sortOption} onValueChange={onSortChange}>
@@ -109,22 +125,10 @@ export function ReviewToolbar({
       </Tooltip>
 
       {/* Result Count Display */}
-      <div className="ml-auto hidden sm:flex items-center">
-        {isFiltered ? (
-          <div className="flex items-center gap-2">
-            <span className="text-sm text-muted-foreground">Showing</span>
-            <span className="inline-flex items-center rounded-md bg-primary/10 px-2.5 py-0.5 text-sm font-semibold text-primary">
-              {filteredCount}
-            </span>
-            <span className="text-sm text-muted-foreground">of</span>
-            <span className="text-sm font-medium text-foreground">{totalCount}</span>
-            <span className="text-sm text-muted-foreground">redirects</span>
-          </div>
-        ) : (
-          <span className="text-sm text-muted-foreground">
-            {totalCount} redirect{totalCount !== 1 ? 's' : ''}
-          </span>
-        )}
+      <div className="hidden sm:flex items-center whitespace-nowrap">
+        <span className="text-sm text-muted-foreground">
+          {filteredCount} of {totalCount} pages
+        </span>
       </div>
     </div>
   );

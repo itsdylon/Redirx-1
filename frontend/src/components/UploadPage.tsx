@@ -1,12 +1,12 @@
 import { uploadCSVs, QuotaExceededError } from "../api/pipeline";
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Header } from './Header';
+import { useAuth } from '../contexts/AuthContext';
+import { DashboardLayout } from './DashboardLayout';
 import { FileUploadZone } from './FileUploadZone';
 import { LoadingScreen } from './LoadingScreen';
 import { Button } from './ui/button';
-import { Toaster } from './ui/sonner';
-import { ArrowLeft, AlertTriangle, Loader2 } from 'lucide-react';
+import { AlertTriangle, Loader2, Zap, Search, Info } from 'lucide-react';
 import { validateCSV, CSVValidationResult } from '../utils/validation';
 
 interface FileData {
@@ -23,6 +23,9 @@ interface QuotaError {
 
 export function UploadPage() {
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const isFreeUser = !user?.subscription_plan || user.subscription_plan === 'free';
+  const [pipelineType, setPipelineType] = useState<'content' | 'url_only'>(isFreeUser ? 'url_only' : 'content');
   const [isLoading, setIsLoading] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
@@ -117,7 +120,7 @@ export function UploadPage() {
     setIsLoading(true);
 
     try {
-      const result = await uploadCSVs(oldCsvFile, newCsvFile, force);
+      const result = await uploadCSVs(oldCsvFile, newCsvFile, force, isFreeUser ? 'url_only' : pipelineType);
 
       console.log("Pipeline Response:", result);
 
@@ -158,7 +161,7 @@ export function UploadPage() {
   };
 
   const handleProceedAnyway = () => {
-    handleBeginMatching(true);
+    handleBeginMatching(true, true);
   };
 
   const handleProceedWithWarnings = () => {
@@ -175,32 +178,75 @@ export function UploadPage() {
   // Show loading screen when processing
   if (isLoading) {
     return (
-      <>
+      <DashboardLayout title="Processing">
         <LoadingScreen sessionId={currentSessionId} />
-        <Toaster position="top-right" />
-      </>
+      </DashboardLayout>
     );
   }
 
   return (
-    <>
-      <div className="min-h-screen">
-        <Header currentView="upload" />
-
-        <main className="max-w-7xl mx-auto p-8">
-          {/* Back to Dashboard */}
-          <div className="mb-6">
-            <Button variant="outline" onClick={() => navigate('/')}>
-              <ArrowLeft className="h-4 w-4 mr-2" />
-              Back to Dashboard
-            </Button>
-          </div>
-
-          {/* Page Title */}
+    <DashboardLayout title="Upload CSV Files">
+      <div className="max-w-5xl">
+          {/* Subtitle */}
           <div className="mb-8">
-            <h1 className="text-foreground mb-2">Upload CSV Files</h1>
             <p className="text-muted-foreground">Upload CSV files from your old and new site to begin the redirect mapping process.</p>
           </div>
+
+          {/* Pipeline Type Selector / Tier Banner */}
+          {isFreeUser ? (
+            <div className="mb-6 border border-blue-500/30 bg-blue-500/5 p-4 flex items-start gap-3">
+              <Info className="h-5 w-5 text-blue-500 flex-shrink-0 mt-0.5" />
+              <div>
+                <div className="font-medium text-blue-600 dark:text-blue-400">Free Plan: URL Matching</div>
+                <p className="text-sm text-muted-foreground mt-1">
+                  Your free plan uses URL pattern matching (slug comparison, path similarity, and fuzzy matching) to generate redirects. Upgrade for content-based deep matching with AI-powered semantic analysis.
+                </p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="mt-3"
+                  onClick={() => navigate('/account')}
+                >
+                  Upgrade Plan
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <div className="mb-6 grid grid-cols-2 gap-4">
+              <button
+                onClick={() => setPipelineType('content')}
+                className={`border p-4 text-left transition-colors ${
+                  pipelineType === 'content'
+                    ? 'border-primary bg-primary/5'
+                    : 'border-border bg-card hover:bg-accent'
+                }`}
+              >
+                <div className="flex items-center gap-2 mb-1">
+                  <Zap className="h-4 w-4 text-primary" />
+                  <span className="font-medium text-foreground">Deep Match</span>
+                </div>
+                <p className="text-sm text-muted-foreground">
+                  Scrapes page content and uses AI embeddings for semantic matching. Most accurate.
+                </p>
+              </button>
+              <button
+                onClick={() => setPipelineType('url_only')}
+                className={`border p-4 text-left transition-colors ${
+                  pipelineType === 'url_only'
+                    ? 'border-primary bg-primary/5'
+                    : 'border-border bg-card hover:bg-accent'
+                }`}
+              >
+                <div className="flex items-center gap-2 mb-1">
+                  <Search className="h-4 w-4 text-primary" />
+                  <span className="font-medium text-foreground">Quick Match</span>
+                </div>
+                <p className="text-sm text-muted-foreground">
+                  URL pattern matching only. Fastest, no API costs, no scraping required.
+                </p>
+              </button>
+            </div>
+          )}
 
           {/* Quota Exceeded Error */}
           {quotaError && (
@@ -351,7 +397,14 @@ export function UploadPage() {
               className="w-full"
             >
               {isUploading && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
-              {isUploading ? 'Processing...' : 'Begin Matching →'}
+              {isUploading
+                ? 'Processing...'
+                : isFreeUser
+                  ? 'Begin Quick Match →'
+                  : pipelineType === 'content'
+                    ? 'Begin Deep Match →'
+                    : 'Begin Quick Match →'
+              }
             </Button>
             {hasValidationErrors && (
               <p className="text-sm text-destructive mt-2 text-center">
@@ -359,9 +412,7 @@ export function UploadPage() {
               </p>
             )}
           </div>
-        </main>
       </div>
-      <Toaster position="top-right" />
-    </>
+    </DashboardLayout>
   );
 }

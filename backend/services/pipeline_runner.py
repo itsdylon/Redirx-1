@@ -111,14 +111,15 @@ def generate_project_name(new_csv_file: FileStorage) -> str:
         return f"Redirect Project {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
 
 
-def generate_deterministic_key(user_id: str, old_urls: List[str], new_urls: List[str]) -> str:
+def generate_deterministic_key(user_id: str, old_urls: List[str], new_urls: List[str], pipeline_type: str = 'content') -> str:
     """
-    Generate a deterministic idempotency key from user_id and URLs.
+    Generate a deterministic idempotency key from user_id, URLs, and pipeline type.
 
     Args:
         user_id: User identifier
         old_urls: List of old site URLs
         new_urls: List of new site URLs
+        pipeline_type: Pipeline type ('content' or 'url_only')
 
     Returns:
         SHA256 hash as hex string
@@ -127,8 +128,8 @@ def generate_deterministic_key(user_id: str, old_urls: List[str], new_urls: List
     sorted_old = sorted(old_urls)
     sorted_new = sorted(new_urls)
 
-    # Create deterministic string
-    key_data = f"{user_id}|{','.join(sorted_old)}|{','.join(sorted_new)}"
+    # Create deterministic string (includes pipeline_type to avoid collisions)
+    key_data = f"{user_id}|{pipeline_type}|{','.join(sorted_old)}|{','.join(sorted_new)}"
 
     # Hash it
     return hashlib.sha256(key_data.encode('utf-8')).hexdigest()
@@ -138,7 +139,8 @@ def run_pipeline(
     old_csv_file: FileStorage,
     new_csv_file: FileStorage,
     user_id: str = "default_user",
-    force: bool = False
+    force: bool = False,
+    pipeline_type: str = 'content',
 ) -> tuple[Optional[str], bool]:
     """
     Queue a Redirx pipeline job for background processing.
@@ -155,6 +157,7 @@ def run_pipeline(
         new_csv_file: CSV file containing new site URLs
         user_id: User ID for tracking the migration session
         force: If True, bypass idempotency check and create a new job
+        pipeline_type: 'content' (default) or 'url_only' (free tier)
 
     Returns:
         Tuple of (session_id, is_duplicate) where:
@@ -172,7 +175,7 @@ def run_pipeline(
     new_urls = read_csv(new_csv_file)
 
     # Generate idempotency key (or None if force=True to bypass uniqueness constraint)
-    idempotency_key = None if force else generate_deterministic_key(user_id, old_urls, new_urls)
+    idempotency_key = None if force else generate_deterministic_key(user_id, old_urls, new_urls, pipeline_type)
 
     # Check if session already exists for this exact request (unless force=True)
     session_db = MigrationSessionDB()
@@ -196,7 +199,8 @@ def run_pipeline(
         project_name=project_name,
         old_urls=old_urls,
         new_urls=new_urls,
-        idempotency_key=idempotency_key
+        idempotency_key=idempotency_key,
+        pipeline_type=pipeline_type,
     )
 
     print(f"[API] Created job {session_id} with {len(old_urls)} old URLs and {len(new_urls)} new URLs")

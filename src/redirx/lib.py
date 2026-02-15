@@ -1,4 +1,5 @@
 from src.redirx import stages
+from src.redirx.url_matcher import UrlMatchConfig
 from typing import Optional
 from uuid import UUID
 
@@ -7,24 +8,34 @@ class Pipeline:
         self,
         input: any,
         stages: Optional[list[stages.Stage]] = None,
-        session_id: Optional[UUID] = None
+        session_id: Optional[UUID] = None,
+        pipeline_type: str = 'content',
+        match_config: Optional[UrlMatchConfig] = None,
     ):
         """
         Initialize the pipeline.
 
         Args:
             input: Initial input data (tuple of old URLs and new URLs).
-            stages: Optional custom stage list. If None, uses default pipeline.
-            session_id: Optional migration session ID. Required for EmbedStage and PairingStage.
+            stages: Optional custom stage list. If None, uses pipeline_type to select.
+            session_id: Optional migration session ID.
+            pipeline_type: 'content' (default 7-stage) or 'url_only' (4-stage, no API cost).
+            match_config: Optional UrlMatchConfig for url_only pipeline.
         """
-        if stages is None:
-            self.__stages = Pipeline.default_pipeline(session_id=session_id)
-        else:
+        if stages is not None:
             self.__stages = stages
+        elif pipeline_type == 'url_only':
+            self.__stages = Pipeline.url_only_pipeline(
+                session_id=session_id,
+                match_config=match_config,
+            )
+        else:
+            self.__stages = Pipeline.default_pipeline(session_id=session_id)
 
         self.__index = 0
         self.state = input
         self.session_id = session_id
+        self.pipeline_type = pipeline_type
 
     """
     Returns the default pipeline.
@@ -58,7 +69,36 @@ class Pipeline:
             stages.EmbedStage(session_id=session_id),
             stages.PairingStage(session_id=session_id),
         ]
-    
+
+    @classmethod
+    def url_only_pipeline(
+        cls,
+        session_id: Optional[UUID] = None,
+        match_config: Optional[UrlMatchConfig] = None,
+    ) -> list[stages.Stage]:
+        """
+        Create the URL-only pipeline (free tier, no API cost).
+
+        Pipeline stages (in order):
+        1. UrlPruneStage - Filter out assets
+        2. BlogPruneStage - Filter blog posts
+        3. ExactUrlMatchStage - Match identical URL paths
+        4. UrlSimilarityMatchStage - Slug, TF-IDF, and fuzzy matching
+
+        Args:
+            session_id: Migration session ID for database operations.
+            match_config: Optional UrlMatchConfig for tuning thresholds.
+
+        Returns:
+            List of Stage instances.
+        """
+        return [
+            stages.UrlPruneStage(),
+            stages.BlogPruneStage(),
+            stages.ExactUrlMatchStage(session_id=session_id),
+            stages.UrlSimilarityMatchStage(session_id=session_id, config=match_config),
+        ]
+
     @property
     def stage_names(self) -> list[str]:
         """Return the friendly name of each stage."""

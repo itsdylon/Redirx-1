@@ -1,21 +1,22 @@
 import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useHotkeys } from 'react-hotkeys-hook';
-import { Header } from './Header';
-import { StatsSidebar } from './StatsSidebar';
+import { DashboardLayout } from './DashboardLayout';
+import { StatsBar } from './StatsBar';
 import { ReviewToolbar } from './ReviewToolbar';
 import { RedirectTable } from './RedirectTable';
 import { InlineEditDialog } from './InlineEditDialog';
 import { ExportModal } from './ExportModal';
 import { KeyboardShortcutsDialog } from './KeyboardShortcutsDialog';
 import { Button } from './ui/button';
-import { ArrowLeft, Keyboard } from 'lucide-react';
+import { Keyboard } from 'lucide-react';
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from './ui/tooltip';
 import { toast } from 'sonner';
+import { Info } from 'lucide-react';
 import { getResults } from '../api/pipeline';
 import { isMac } from '../lib/keyboard';
 import {
@@ -41,6 +42,7 @@ export interface RedirectMapping {
   confidence: number;
   confidenceBand: 'high' | 'medium' | 'low';
   matchScore: number;
+  matchType?: string;
   approved: boolean;
   warnings: string[];
   pathSimilarity: number;
@@ -63,6 +65,8 @@ export function ReviewInterface() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [sortOption, setSortOption] = useState<string>('confidence-desc');
+  const [showExactMatches, setShowExactMatches] = useState(true);
+  const [pipelineType, setPipelineType] = useState<string>('content');
   const PAGE_SIZE = 25;
 
   // Refs for keyboard shortcuts
@@ -84,6 +88,9 @@ export function ReviewInterface() {
 
         if (data.success && data.mappings) {
           setRedirects(data.mappings);
+          if (data.session?.pipeline_type) {
+            setPipelineType(data.session.pipeline_type);
+          }
         } else {
           setError("Failed to load results");
         }
@@ -171,12 +178,18 @@ export function ReviewInterface() {
   };
 
   const handleApproveRow = (id: string) => {
+    const redirect = redirects.find(r => r.id === id);
+    const newApproved = !redirect?.approved;
     setRedirects(redirects.map((r) =>
-      r.id === id ? { ...r, approved: true } : r
+      r.id === id ? { ...r, approved: newApproved } : r
     ));
+    toast.success(newApproved ? 'Redirect approved' : 'Approval removed');
   };
 
   const filteredRedirects = redirects.filter((r) => {
+    // Hide exact URL matches when toggle is off
+    if (!showExactMatches && r.matchType === 'exact_url') return false;
+
     const q = searchQuery.trim().toLowerCase();
 
     const matchesSearch =
@@ -191,12 +204,13 @@ export function ReviewInterface() {
   });
 
   // Determine if filters are active
-  const hasActiveFilters = searchQuery.trim().length > 0 || confidenceFilter !== 'all';
+  const hasActiveFilters = searchQuery.trim().length > 0 || confidenceFilter !== 'all' || !showExactMatches;
 
   // Handler to clear all filters
   const handleClearFilters = () => {
     setSearchQuery('');
     setConfidenceFilter('all');
+    setShowExactMatches(true);
     setCurrentPage(1);
   };
 
@@ -223,7 +237,8 @@ export function ReviewInterface() {
 
   const stats = {
     total: redirects.length,
-    high: redirects.filter(r => r.confidenceBand === 'high').length,
+    exact: redirects.filter(r => r.matchType === 'exact_url').length,
+    high: redirects.filter(r => r.confidenceBand === 'high' && r.matchType !== 'exact_url').length,
     medium: redirects.filter(r => r.confidenceBand === 'medium').length,
     low: redirects.filter(r => r.confidenceBand === 'low').length,
     approved: redirects.filter(r => r.approved).length,
@@ -237,7 +252,7 @@ export function ReviewInterface() {
   useHotkeys(`${modKey}+k`, (e) => {
     e.preventDefault();
     searchInputRef.current?.focus();
-  }, []);
+  }, { enableOnFormTags: true, preventDefault: true });
 
   // Ctrl/Cmd+E: Open export modal
   useHotkeys(`${modKey}+e`, (e) => {
@@ -271,57 +286,37 @@ export function ReviewInterface() {
     setKeyboardShortcutsOpen(true);
   }, []);
 
-  // Show loading state
-  if (isLoading) {
-    return (
-      <div className="min-h-screen">
-        <Header currentView="review" />
-        <div className="flex items-center justify-center h-screen">
-          <div className="text-center">
-            <div className="text-lg font-medium text-foreground mb-2">Loading results...</div>
-            <div className="text-sm text-muted-foreground">Fetching your redirect mappings</div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   // Show error state
   if (error) {
     return (
-      <div className="min-h-screen">
-        <Header currentView="review" />
-        <div className="flex items-center justify-center h-screen">
+      <DashboardLayout title="Review Redirects">
+        <div className="flex-1 flex items-center justify-center">
           <div className="text-center">
             <div className="text-lg font-medium text-destructive mb-2">Error Loading Results</div>
             <div className="text-sm text-muted-foreground mb-4">{error}</div>
             <Button onClick={() => navigate('/')}>
-              <ArrowLeft className="h-4 w-4 mr-2" />
-              Back to Dashboard
+              Go to Dashboard
             </Button>
           </div>
         </div>
-      </div>
+      </DashboardLayout>
     );
   }
 
   return (
-    <div className="min-h-screen">
-      <Header currentView="review" />
+    <DashboardLayout title="Review Redirects">
+          {/* URL-only upgrade banner */}
+          {pipelineType === 'url_only' && (
+            <div className="mb-4 border border-blue-500/30 bg-blue-500/5 p-3 flex items-center gap-3">
+              <Info className="h-4 w-4 text-blue-500 flex-shrink-0" />
+              <p className="text-sm text-muted-foreground">
+                These results use URL pattern matching. Upgrade for content-based deep matching with AI-powered semantic analysis and alternative suggestions.
+              </p>
+            </div>
+          )}
 
-      <div className="flex">
-        {/* Left Sidebar */}
-        <StatsSidebar stats={stats} />
-
-        {/* Main Content */}
-        <main className="flex-1 p-8">
-          {/* Back Button */}
-          <div className="mb-4">
-            <Button variant="outline" onClick={() => navigate('/')}>
-              <ArrowLeft className="h-4 w-4 mr-2" />
-              Back to Dashboard
-            </Button>
-          </div>
+          {/* Stats Bar */}
+          <StatsBar stats={stats} />
 
           {/* Toolbar */}
           <ReviewToolbar
@@ -331,6 +326,8 @@ export function ReviewInterface() {
             onConfidenceFilterChange={setConfidenceFilter}
             sortOption={sortOption}
             onSortChange={setSortOption}
+            showExactMatches={showExactMatches}
+            onShowExactMatchesChange={setShowExactMatches}
             onExportClick={() => setExportModalOpen(true)}
             totalCount={redirects.length}
             filteredCount={sortedRedirects.length}
@@ -351,6 +348,7 @@ export function ReviewInterface() {
             onClearFilters={handleClearFilters}
             totalRedirectsCount={redirects.length}
             isLoading={isLoading}
+            pipelineType={pipelineType}
           />
 
           </div>
@@ -422,8 +420,6 @@ export function ReviewInterface() {
               </PaginationContent>
             </Pagination>
           </div>
-        </main>
-      </div>
 
       {/* Floating Keyboard Shortcuts Button */}
       <div className="fixed bottom-6 right-6 z-40">
@@ -448,8 +444,10 @@ export function ReviewInterface() {
       {editingRow && (
         <InlineEditDialog
           redirect={editingRow}
+          sessionId={sessionId!}
           onSave={handleSaveEdit}
           onCancel={() => setEditingRow(null)}
+          pipelineType={pipelineType}
         />
       )}
 
@@ -466,6 +464,6 @@ export function ReviewInterface() {
         open={keyboardShortcutsOpen}
         onOpenChange={setKeyboardShortcutsOpen}
       />
-    </div>
+    </DashboardLayout>
   );
 }

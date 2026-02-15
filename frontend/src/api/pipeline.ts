@@ -8,12 +8,15 @@ export interface QuotaExceededError {
   limit: number;
 }
 
-export async function uploadCSVs(oldFile: File, newFile: File, force: boolean = false) {
+export async function uploadCSVs(oldFile: File, newFile: File, force: boolean = false, pipelineType?: 'content' | 'url_only') {
   const formData = new FormData();
   formData.append("old_csv", oldFile);
   formData.append("new_csv", newFile);
   if (force) {
     formData.append("force", "true");
+  }
+  if (pipelineType) {
+    formData.append("pipeline_type", pipelineType);
   }
 
   try {
@@ -56,6 +59,38 @@ export async function uploadCSVs(oldFile: File, newFile: File, force: boolean = 
     }
 
     // Re-throw other errors (like Error objects from our own code)
+    throw error;
+  }
+}
+
+export interface Alternative {
+  url: string;
+  similarity: number;
+  title: string;
+  pathSimilarity: number;
+}
+
+export async function getAlternatives(sessionId: string, mappingId: string): Promise<{ success: boolean; alternatives: Alternative[]; message?: string }> {
+  try {
+    const response = await fetch(
+      `${API_BASE_URL}/api/results/${sessionId}/alternatives/${mappingId}`,
+      {
+        method: "GET",
+        headers: getAuthHeaders()
+      }
+    );
+
+    if (!response.ok) {
+      const userError = await handleApiError(null, response);
+      throw new Error(userError.message);
+    }
+
+    return await response.json();
+  } catch (error: any) {
+    if (error instanceof TypeError || error.name === 'AbortError') {
+      const userError = await handleApiError(error);
+      throw new Error(userError.message);
+    }
     throw error;
   }
 }

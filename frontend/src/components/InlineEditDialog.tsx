@@ -1,16 +1,17 @@
 import { useState, useEffect, useCallback } from 'react';
-import { X, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react';
+import { CheckCircle2, AlertCircle, Loader2 } from 'lucide-react';
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from './ui/dialog';
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetFooter,
+  SheetHeader,
+  SheetTitle,
+} from './ui/sheet';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
+import { Separator } from './ui/separator';
 import { RedirectMapping } from './ReviewInterface';
 import {
   Select,
@@ -20,21 +21,56 @@ import {
   SelectValue,
 } from './ui/select';
 import { validateUrl, debounce } from '../utils/validation';
+import { getAlternatives, Alternative } from '../api/pipeline';
+
+/**
+ * Animated number that counts up from 0 to the target value with an ease-out curve.
+ */
+function AnimatedNumber({ value, duration = 500, delay = 0 }: { value: number; duration?: number; delay?: number }) {
+  const [display, setDisplay] = useState(0);
+
+  useEffect(() => {
+    let rafId: number;
+    const timeoutId = setTimeout(() => {
+      const start = performance.now();
+      const tick = () => {
+        const elapsed = performance.now() - start;
+        const progress = Math.min(elapsed / duration, 1);
+        const eased = 1 - Math.pow(1 - progress, 3);
+        setDisplay(Math.round(value * eased));
+        if (progress < 1) rafId = requestAnimationFrame(tick);
+      };
+      rafId = requestAnimationFrame(tick);
+    }, delay);
+
+    return () => {
+      clearTimeout(timeoutId);
+      if (rafId) cancelAnimationFrame(rafId);
+    };
+  }, [value, duration, delay]);
+
+  return <>{display}</>;
+}
 
 interface InlineEditDialogProps {
   redirect: RedirectMapping;
+  sessionId: string;
   onSave: (redirect: RedirectMapping) => void;
   onCancel: () => void;
+  pipelineType?: string;
 }
 
-export function InlineEditDialog({ redirect, onSave, onCancel }: InlineEditDialogProps) {
+export function InlineEditDialog({ redirect, sessionId, onSave, onCancel, pipelineType = 'content' }: InlineEditDialogProps) {
   const [editedRedirect, setEditedRedirect] = useState(redirect);
   const [urlError, setUrlError] = useState<string | null>(null);
   const [isUrlValid, setIsUrlValid] = useState<boolean>(true);
   const [isValidating, setIsValidating] = useState<boolean>(false);
   const [isSaving, setIsSaving] = useState<boolean>(false);
+  const [alternatives, setAlternatives] = useState<Alternative[]>([]);
+  const [alternativesLoading, setAlternativesLoading] = useState<boolean>(true);
+  const [alternativesError, setAlternativesError] = useState<string | null>(null);
+  const [alternativesVisible, setAlternativesVisible] = useState(false);
 
-  // Debounced validation function
   const debouncedValidate = useCallback(
     debounce((url: string) => {
       const result = validateUrl(url);
@@ -45,14 +81,40 @@ export function InlineEditDialog({ redirect, onSave, onCancel }: InlineEditDialo
     []
   );
 
-  // Validate initial URL on mount
   useEffect(() => {
     const result = validateUrl(editedRedirect.newUrl);
     setUrlError(result.error);
     setIsUrlValid(result.valid);
   }, []);
 
-  // Handle new URL changes with debounced validation
+  useEffect(() => {
+    if (pipelineType === 'url_only') {
+      setAlternativesLoading(false);
+      return;
+    }
+    async function fetchAlternatives() {
+      try {
+        setAlternativesLoading(true);
+        setAlternativesError(null);
+        const data = await getAlternatives(sessionId, redirect.id);
+        setAlternatives(data.alternatives || []);
+        if (data.message) setAlternativesError(data.message);
+      } catch (err) {
+        setAlternativesError(err instanceof Error ? err.message : 'Failed to load alternatives');
+      } finally {
+        setAlternativesLoading(false);
+      }
+    }
+    fetchAlternatives();
+  }, [sessionId, redirect.id, pipelineType]);
+
+  useEffect(() => {
+    if (!alternativesLoading && alternatives.length > 0) {
+      const timeout = setTimeout(() => setAlternativesVisible(true), 10);
+      return () => clearTimeout(timeout);
+    }
+  }, [alternativesLoading, alternatives]);
+
   const handleNewUrlChange = (newUrl: string) => {
     setEditedRedirect({ ...editedRedirect, newUrl });
     setIsValidating(true);
@@ -60,7 +122,6 @@ export function InlineEditDialog({ redirect, onSave, onCancel }: InlineEditDialo
   };
 
   const handleSave = async () => {
-    // Final validation check before saving
     const result = validateUrl(editedRedirect.newUrl);
     if (result.valid) {
       setIsSaving(true);
@@ -72,36 +133,38 @@ export function InlineEditDialog({ redirect, onSave, onCancel }: InlineEditDialo
     }
   };
 
-  return (
-    <Dialog open={true} onOpenChange={onCancel}>
-      <DialogContent className="max-w-2xl">
-        <DialogHeader>
-          <DialogTitle>Edit Redirect Mapping</DialogTitle>
-          <DialogDescription>
-            Modify the redirect mapping details below. Changes will be reflected in the mapping table.
-          </DialogDescription>
-        </DialogHeader>
+  const scoreColor =
+    redirect.matchScore >= 85
+      ? 'text-green-500'
+      : redirect.matchScore >= 65
+      ? 'text-yellow-500'
+      : 'text-red-500';
 
-        <div className="space-y-6 py-4">
-          {/* Old URL */}
-          <div className="space-y-2">
-            <Label htmlFor="old-url" className="text-foreground">
-              Old URL
+  return (
+    <Sheet open={true} onOpenChange={onCancel}>
+      <SheetContent side="right" className="sm:max-w-lg">
+        <SheetHeader>
+          <SheetTitle>Edit Redirect</SheetTitle>
+          <SheetDescription>
+            Update the target URL or pick from alternative matches.
+          </SheetDescription>
+        </SheetHeader>
+
+        <div className="flex-1 overflow-y-auto min-h-0 space-y-6 px-4 pb-4">
+          {/* Source URL */}
+          <div className="space-y-1.5">
+            <Label className="text-xs uppercase tracking-wider text-muted-foreground">
+              Source URL
             </Label>
-            <Input
-              id="old-url"
-              value={editedRedirect.oldUrl}
-              onChange={(e) => setEditedRedirect({ ...editedRedirect, oldUrl: e.target.value })}
-              className="font-mono text-sm"
-              disabled
-            />
-            <p className="text-xs text-muted-foreground">Source URL cannot be modified</p>
+            <div className="rounded-md border border-border bg-muted px-3 py-2 font-mono text-sm text-muted-foreground break-all">
+              {editedRedirect.oldUrl}
+            </div>
           </div>
 
-          {/* New URL */}
-          <div className="space-y-2">
-            <Label htmlFor="new-url" className="text-foreground">
-              New Target URL
+          {/* Target URL */}
+          <div className="space-y-1.5">
+            <Label htmlFor="new-url" className="text-xs uppercase tracking-wider text-muted-foreground">
+              Target URL
             </Label>
             <div className="relative">
               <Input
@@ -117,37 +180,40 @@ export function InlineEditDialog({ redirect, onSave, onCancel }: InlineEditDialo
                 }`}
                 placeholder="/new/url/path"
               />
-              {/* Validation icon */}
               {!isValidating && (
                 <div className="absolute right-3 top-1/2 -translate-y-1/2">
                   {isUrlValid ? (
-                    <CheckCircle2 className="h-5 w-5 text-green-500 dark:text-green-400" />
+                    <CheckCircle2 className="h-4 w-4 text-green-500" />
                   ) : (
-                    <AlertCircle className="h-5 w-5 text-red-500 dark:text-red-400" />
+                    <AlertCircle className="h-4 w-4 text-red-500" />
                   )}
                 </div>
               )}
             </div>
-            {/* Error message */}
             {urlError && !isValidating && (
-              <div className="flex items-start gap-2 text-sm text-red-600 dark:text-red-400">
-                <AlertCircle className="h-4 w-4 mt-0.5 flex-shrink-0" />
-                <span>{urlError}</span>
-              </div>
-            )}
-            {/* Help text */}
-            {!urlError && (
-              <p className="text-xs text-muted-foreground">
-                Enter a relative path (e.g., /about) or absolute URL (e.g., https://example.com/page)
-              </p>
+              <p className="text-xs text-red-500">{urlError}</p>
             )}
           </div>
 
-          {/* Match Score Override */}
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="match-score" className="text-foreground">
-                Manual Confidence Override
+          <Separator />
+
+          {/* Match Details */}
+          <div className="flex items-center gap-6">
+            <div className="space-y-1">
+              <Label className="text-xs uppercase tracking-wider text-muted-foreground">
+                Match Score
+              </Label>
+              <div className={`text-3xl font-semibold tabular-nums ${scoreColor}`}>
+                <AnimatedNumber value={redirect.matchScore} />
+                <span className="text-lg">%</span>
+              </div>
+            </div>
+
+            <Separator orientation="vertical" className="h-12" />
+
+            <div className="flex-1 space-y-1.5">
+              <Label className="text-xs uppercase tracking-wider text-muted-foreground">
+                Confidence
               </Label>
               <Select
                 value={editedRedirect.confidenceBand}
@@ -155,44 +221,80 @@ export function InlineEditDialog({ redirect, onSave, onCancel }: InlineEditDialo
                   setEditedRedirect({ ...editedRedirect, confidenceBand: value })
                 }
               >
-                <SelectTrigger>
+                <SelectTrigger className="h-9">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="high">High Confidence</SelectItem>
-                  <SelectItem value="medium">Medium Confidence</SelectItem>
-                  <SelectItem value="low">Low Confidence</SelectItem>
+                  <SelectItem value="high">High</SelectItem>
+                  <SelectItem value="medium">Medium</SelectItem>
+                  <SelectItem value="low">Low</SelectItem>
                 </SelectContent>
               </Select>
             </div>
-
-            <div className="space-y-2">
-              <Label className="text-foreground">Current Match Score</Label>
-              <div className="flex items-center h-10 px-3 border border-border rounded-md bg-muted">
-                <span className="text-foreground">{editedRedirect.matchScore}%</span>
-              </div>
-            </div>
           </div>
 
-          {/* Alternative Suggestions */}
-          <div className="border border-border bg-muted p-4">
-            <h4 className="text-foreground text-sm mb-3">Alternative Matches</h4>
-            <div className="space-y-2">
-              <button className="w-full text-left p-2 border border-border bg-card hover:bg-accent transition-colors text-sm font-mono">
-                /solutions/consulting-services <span className="text-muted-foreground float-right">82%</span>
-              </button>
-              <button className="w-full text-left p-2 border border-border bg-card hover:bg-accent transition-colors text-sm font-mono">
-                /services/advisory <span className="text-muted-foreground float-right">76%</span>
-              </button>
-              <button className="w-full text-left p-2 border border-border bg-card hover:bg-accent transition-colors text-sm font-mono">
-                /professional-services <span className="text-muted-foreground float-right">71%</span>
-              </button>
-            </div>
-            <p className="text-xs text-muted-foreground mt-2">Click an alternative to use it as the new target</p>
+          <Separator />
+
+          {/* Alternatives */}
+          <div className="space-y-3">
+            <Label className="text-xs uppercase tracking-wider text-muted-foreground">
+              Alternative Matches
+            </Label>
+
+            {pipelineType === 'url_only' ? (
+              <div className="text-center py-6 border border-dashed border-border rounded-md">
+                <p className="text-sm text-muted-foreground">
+                  Alternative suggestions require content-based matching.
+                </p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Upgrade your plan to access AI-powered alternatives.
+                </p>
+              </div>
+            ) : alternativesLoading ? (
+              <div className="flex items-center gap-2 py-8 justify-center text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                <span className="text-sm">Finding alternatives...</span>
+              </div>
+            ) : alternativesError && alternatives.length === 0 ? (
+              <p className="text-sm text-muted-foreground py-6 text-center">
+                {alternativesError}
+              </p>
+            ) : alternatives.length === 0 ? (
+              <p className="text-sm text-muted-foreground py-6 text-center">
+                No alternative matches found
+              </p>
+            ) : (
+              <div className="space-y-1.5">
+                {alternatives.map((alt, index) => (
+                  <button
+                    key={alt.url}
+                    className="w-full flex items-center justify-between gap-3 rounded-md border border-border bg-card px-3 py-2.5 text-left hover:bg-accent"
+                    style={{
+                      opacity: alternativesVisible ? 1 : 0,
+                      transform: alternativesVisible ? 'translateY(0)' : 'translateY(8px)',
+                      transition: `opacity 200ms ease-out ${index * 75}ms, transform 200ms ease-out ${index * 75}ms, background-color 150ms`,
+                    }}
+                    onClick={() => handleNewUrlChange(alt.url)}
+                  >
+                    <span className="font-mono text-sm text-foreground break-all">
+                      {alt.url}
+                    </span>
+                    <span className={`text-sm font-medium tabular-nums shrink-0 ${
+                      alt.similarity >= 85 ? 'text-green-500' : alt.similarity >= 65 ? 'text-yellow-500' : 'text-red-500'
+                    }`}>
+                      <AnimatedNumber value={alt.similarity} delay={index * 75} />%
+                    </span>
+                  </button>
+                ))}
+                <p className="text-xs text-muted-foreground pt-1">
+                  Click to use as target URL
+                </p>
+              </div>
+            )}
           </div>
         </div>
 
-        <DialogFooter>
+        <SheetFooter className="flex-row justify-end gap-2 border-t border-border pt-4">
           <Button variant="outline" onClick={onCancel} disabled={isSaving}>
             Cancel
           </Button>
@@ -200,8 +302,8 @@ export function InlineEditDialog({ redirect, onSave, onCancel }: InlineEditDialo
             {isSaving && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
             {isSaving ? 'Saving...' : 'Save Changes'}
           </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </SheetFooter>
+      </SheetContent>
+    </Sheet>
   );
 }

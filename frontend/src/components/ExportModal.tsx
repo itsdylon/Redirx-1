@@ -37,6 +37,7 @@ export function ExportModal({ open, onOpenChange, onExport, redirects }: ExportM
   const [includeLow, setIncludeLow] = useState(false);
   const [previewExpanded, setPreviewExpanded] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
+  const [showDuplicateDetails, setShowDuplicateDetails] = useState(false);
 
   // URL format options
   const [urlFormat, setUrlFormat] = useState<'paths' | 'full' | 'custom'>('paths');
@@ -48,12 +49,15 @@ export function ExportModal({ open, onOpenChange, onExport, redirects }: ExportM
   const totalMedium = redirects.filter((r) => r.confidenceBand === 'medium').length;
   const totalLow = redirects.filter((r) => r.confidenceBand === 'low').length;
 
-  // Apply confidence filters
+  // Count exact matches for display
+  const exactMatchCount = redirects.filter((r) => r.matchType === 'exact_url').length;
+
+  // Apply confidence filters and exclude exact URL matches (identical paths don't need redirects)
   const filteredRedirects = redirects.filter((r) => {
+    if (r.matchType === 'exact_url') return false;
     if (r.confidenceBand === 'high' && !includeHigh) return false;
     if (r.confidenceBand === 'medium' && !includeMedium) return false;
     if (r.confidenceBand === 'low' && !includeLow) return false;
-    // Only export mappings that actually have a target
     if (!r.oldUrl || !r.newUrl) return false;
     return true;
   });
@@ -190,6 +194,18 @@ export function ExportModal({ open, onOpenChange, onExport, redirects }: ExportM
           .join('\n');
         break;
 
+      case 'vercel':
+        // Vercel redirects: vercel.json format
+        {
+          const redirectEntries = displayRules.map((r) => {
+            const oldPath = transformUrl(r.oldUrl, 'old');
+            const newPath = transformUrl(r.newUrl, 'new');
+            return `    { "source": ${JSON.stringify(oldPath)}, "destination": ${JSON.stringify(newPath)}, "permanent": true }`;
+          });
+          content = `{\n  "redirects": [\n${redirectEntries.join(',\n')}\n  ]\n}`;
+        }
+        break;
+
       default:
         return 'Select a format to preview rules';
     }
@@ -224,6 +240,8 @@ export function ExportModal({ open, onOpenChange, onExport, redirects }: ExportM
           ? 'redirects_nginx.conf'
           : format === 'wordpress'
           ? 'redirects_wordpress.csv'
+          : format === 'vercel'
+          ? 'vercel.json'
           : 'redirects.txt';
 
       // Create a blob and trigger a download
@@ -286,7 +304,7 @@ export function ExportModal({ open, onOpenChange, onExport, redirects }: ExportM
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="sm:max-w-4xl max-h-[90vh] overflow-y-auto">
         {/* Header */}
         <DialogHeader>
           <DialogTitle>Export Redirects</DialogTitle>
@@ -307,6 +325,7 @@ export function ExportModal({ open, onOpenChange, onExport, redirects }: ExportM
                 <SelectItem value="apache">Apache .htaccess</SelectItem>
                 <SelectItem value="nginx">Nginx map</SelectItem>
                 <SelectItem value="wordpress">WordPress Redirection CSV</SelectItem>
+                <SelectItem value="vercel">Vercel redirects (vercel.json)</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -446,11 +465,18 @@ export function ExportModal({ open, onOpenChange, onExport, redirects }: ExportM
           </div>
 
           {/* Live Count Display */}
-          <div className="border border-border bg-muted p-4">
+          <div className="border border-border bg-muted p-4 space-y-2">
             <div className="flex items-center justify-between">
               <span className="text-muted-foreground">Redirects to export:</span>
               <span className="text-foreground">{selectedCount}</span>
             </div>
+            {exactMatchCount > 0 && (
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-muted-foreground">
+                  {exactMatchCount} exact URL match{exactMatchCount !== 1 ? 'es' : ''} excluded (identical paths don't need redirects)
+                </span>
+              </div>
+            )}
           </div>
 
           {/* Warning for Unapproved High-Confidence */}
@@ -469,9 +495,47 @@ export function ExportModal({ open, onOpenChange, onExport, redirects }: ExportM
             <Alert className="border-yellow-500/50 bg-yellow-500/10">
               <AlertTriangle className="h-4 w-4 text-yellow-600" />
               <AlertDescription className="text-foreground">
-                Warning: {duplicateTargets} target URL
-                {duplicateTargets > 1 ? 's are' : ' is'} used by multiple redirects in this export.{' '}
-                <button className="underline">View Details</button>
+                <div>
+                  Warning: {duplicateTargets} target URL
+                  {duplicateTargets > 1 ? 's are' : ' is'} used by multiple redirects in this export.{' '}
+                  <button
+                    className="underline hover:text-foreground"
+                    onClick={() => setShowDuplicateDetails(!showDuplicateDetails)}
+                  >
+                    {showDuplicateDetails ? 'Hide Details' : 'View Details'}
+                  </button>
+                </div>
+                {showDuplicateDetails && (
+                  <div className="mt-3 space-y-2">
+                    {(() => {
+                      const counts = new Map<string, string[]>();
+                      for (const r of filteredRedirects) {
+                        if (!r.newUrl) continue;
+                        const existing = counts.get(r.newUrl) || [];
+                        existing.push(r.oldUrl);
+                        counts.set(r.newUrl, existing);
+                      }
+                      const dupes: { target: string; sources: string[] }[] = [];
+                      counts.forEach((sources, target) => {
+                        if (sources.length > 1) dupes.push({ target, sources });
+                      });
+                      return dupes.map(({ target, sources }) => (
+                        <div key={target} className="text-sm border border-yellow-500/30 bg-yellow-500/5 p-2 rounded">
+                          <div className="font-mono text-xs text-foreground mb-1 truncate">{target}</div>
+                          <div className="text-muted-foreground text-xs">
+                            Target of {sources.length} redirects:{' '}
+                            {sources.map((s, i) => (
+                              <span key={i}>
+                                {i > 0 && ', '}
+                                <span className="font-mono">{s}</span>
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      ));
+                    })()}
+                  </div>
+                )}
               </AlertDescription>
             </Alert>
           )}

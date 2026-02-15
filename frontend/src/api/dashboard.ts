@@ -7,6 +7,12 @@ export interface DashboardData {
   total_sessions: number;
   approval_progress: number;
   average_confidence: number;
+  confidence_breakdown?: {
+    high: number;
+    medium: number;
+    low: number;
+    exact: number;
+  };
   recent_sessions: Array<{
     id: string;
     project_name: string;

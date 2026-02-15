@@ -64,14 +64,40 @@ def get_dashboard_stats():
         # Calculate approval progress
         approval_progress = (total_approved / total_redirects * 100) if total_redirects > 0 else 0
 
-        # For average confidence, we'd need to query url_mappings table
-        # For now, use a placeholder or calculate from available data
-        average_confidence = 0
-        if sessions:
-            # Try to get average from recent sessions if confidence is stored
-            confidence_values = [s.get('average_confidence', 0) for s in sessions if s.get('average_confidence')]
-            if confidence_values:
-                average_confidence = sum(confidence_values) / len(confidence_values)
+        # Query url_mappings for confidence breakdown and average
+        session_ids = [s['id'] for s in sessions]
+        confidence_high = 0
+        confidence_medium = 0
+        confidence_low = 0
+        confidence_sum = 0.0
+        confidence_count = 0
+        exact_count = 0
+
+        if session_ids:
+            # Batch query mappings for all user sessions
+            mappings_result = session_db.client.table('url_mappings').select(
+                'confidence_score, match_type'
+            ).in_('session_id', session_ids).execute()
+
+            for m in mappings_result.data:
+                score = m.get('confidence_score', 0.0)
+                match_type = m.get('match_type', '')
+
+                if match_type == 'exact_url':
+                    exact_count += 1
+                    continue
+
+                confidence_sum += score
+                confidence_count += 1
+
+                if score >= 0.85:
+                    confidence_high += 1
+                elif score >= 0.65:
+                    confidence_medium += 1
+                else:
+                    confidence_low += 1
+
+        average_confidence = round((confidence_sum / confidence_count) * 100, 1) if confidence_count > 0 else 0
 
         # Get recent 5 sessions
         recent_sessions = sessions[:5]
@@ -81,7 +107,13 @@ def get_dashboard_stats():
             "total_redirects": total_redirects,
             "total_sessions": total_sessions,
             "approval_progress": round(approval_progress, 1),
-            "average_confidence": round(average_confidence, 1),
+            "average_confidence": average_confidence,
+            "confidence_breakdown": {
+                "high": confidence_high,
+                "medium": confidence_medium,
+                "low": confidence_low,
+                "exact": exact_count
+            },
             "recent_sessions": recent_sessions
         }), 200
 

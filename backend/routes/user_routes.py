@@ -379,9 +379,11 @@ def get_profile():
                 "email": "user@example.com",
                 "full_name": "John Doe",
                 "company": "Acme Corp",
-                "subscription_plan": "free",
-                "usage_limit_redirects": 1000,
-                "usage_current_month": 42,
+                "plan": "launch",
+                "credits_limit": 10000,
+                "credits_used": 0,
+                "quick_match_limit": 500,
+                "quick_match_used": 0,
                 ...
             }
         }

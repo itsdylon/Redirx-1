@@ -226,7 +226,9 @@ def get_current_user():
                 "id": "uuid",
                 "email": "user@example.com",
                 "full_name": "John Doe",
-                "subscription_plan": "free",
+                "plan": "launch",
+                "credits_limit": 10000,
+                "credits_used": 0,
                 ...
             }
         }

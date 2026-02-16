@@ -41,10 +41,73 @@ export function Settings() {
   const [desktopNotifications, setDesktopNotifications] = useState(false);
   const [soundOnCompletion, setSoundOnCompletion] = useState(false);
 
-  // Subscription state (mock data)
-  const redirectsUsed = 127;
-  const redirectsLimit = 1000;
-  const usagePercent = Math.round((redirectsUsed / redirectsLimit) * 100);
+  // Subscription state from user profile
+  const userPlan = user?.plan || 'launch';
+  const isLifetime = user?.is_lifetime || false;
+  const creditsUsed = isLifetime
+    ? (user?.lifetime_credits_used || 0)
+    : (user?.credits_used || 0);
+  const creditsLimit = isLifetime
+    ? (user?.lifetime_credits_total || 500000)
+    : (user?.credits_limit || 0);
+  const creditsPercent = creditsLimit > 0 ? Math.round((creditsUsed / creditsLimit) * 100) : 0;
+
+  const quickMatchUsed = user?.quick_match_used || 0;
+  const quickMatchLimit = user?.quick_match_limit;
+  const isQuickMatchUnlimited = quickMatchLimit === null || quickMatchLimit === undefined;
+
+  const planLabels: Record<string, string> = {
+    launch: 'Launch (Free Trial)',
+    starter: 'Starter',
+    growth: 'Growth',
+    scale: 'Scale',
+    enterprise: 'Enterprise',
+    founder: 'Founding Migration License',
+  };
+
+  const planFeatures: Record<string, string[]> = {
+    launch: [
+      'Quick Match only (upgrade for Deep Match)',
+      '2,500 Quick Matches per month',
+      '1 project',
+      'CSV export',
+    ],
+    starter: [
+      '50,000 Deep Match credits per month',
+      'Unlimited Quick Match',
+      '1 project',
+      'All export formats',
+      'Email support',
+    ],
+    growth: [
+      '250,000 Deep Match credits per month',
+      'Unlimited Quick Match',
+      '3 projects',
+      'All export formats',
+      'Priority email support',
+    ],
+    scale: [
+      '1,000,000 Deep Match credits per month',
+      'Unlimited Quick Match',
+      '10 projects',
+      'All export formats',
+      'Dedicated account manager',
+    ],
+    enterprise: [
+      'Custom Deep Match credits',
+      'Unlimited Quick Match',
+      'Unlimited projects',
+      'SSO/SAML, data residency, SLAs',
+      'Dedicated support with SLA',
+    ],
+    founder: [
+      '500,000 lifetime Deep Match credits',
+      'Unlimited Quick Match',
+      '2 projects, 2 seats',
+      'All export formats',
+      'Priority email support',
+    ],
+  };
 
   // Get user initials for avatar (same logic as TopBar)
   const getInitials = () => {
@@ -413,28 +476,64 @@ export function Settings() {
                   <div className="space-y-1">
                     <div className="flex items-center gap-2">
                       <h3 className="text-sm font-semibold text-foreground">
-                        Free Plan
+                        {planLabels[userPlan] || userPlan}
                       </h3>
                       <Badge variant="secondary">Current</Badge>
+                      {isLifetime && (
+                        <Badge variant="outline">Lifetime</Badge>
+                      )}
                     </div>
                     <p className="text-xs text-muted-foreground">
-                      You are on the free tier.
+                      {isLifetime
+                        ? 'One-time purchase — credits never expire.'
+                        : userPlan === 'launch'
+                          ? 'Free trial with limited credits.'
+                          : `Active subscription.`}
                     </p>
                   </div>
                 </div>
 
-                {/* Usage Meter */}
+                {/* Deep Match Credits Meter (hidden for Launch — no Deep Match access) */}
+                {userPlan !== 'launch' && (
                 <div className="space-y-3">
                   <div className="flex items-center justify-between">
-                    <Label>Monthly Usage</Label>
+                    <Label>Deep Match Credits</Label>
                     <span className="text-sm text-muted-foreground">
-                      {redirectsUsed} of {redirectsLimit.toLocaleString()}{' '}
-                      redirects used this month
+                      {creditsUsed.toLocaleString()} of{' '}
+                      {creditsLimit.toLocaleString()} credits used
+                      {isLifetime ? ' (lifetime)' : ' this month'}
                     </span>
                   </div>
-                  <Progress value={usagePercent} />
+                  <Progress value={creditsPercent} />
                   <p className="text-xs text-muted-foreground text-right">
-                    {usagePercent}% used
+                    {creditsPercent}% used &middot;{' '}
+                    {(creditsLimit - creditsUsed).toLocaleString()} remaining
+                  </p>
+                </div>
+                )}
+
+                {/* Quick Match Usage */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <Label>Quick Match</Label>
+                    <span className="text-sm text-muted-foreground">
+                      {isQuickMatchUnlimited
+                        ? 'Unlimited'
+                        : `${quickMatchUsed.toLocaleString()} of ${quickMatchLimit!.toLocaleString()} used this month`}
+                    </span>
+                  </div>
+                  {!isQuickMatchUnlimited && (
+                    <Progress
+                      value={Math.round(
+                        (quickMatchUsed / quickMatchLimit!) * 100
+                      )}
+                    />
+                  )}
+                  <p className="text-xs text-muted-foreground">
+                    Quick Match (URL-only) is always free.
+                    {isQuickMatchUnlimited
+                      ? ' Your plan includes unlimited Quick Match.'
+                      : ' Upgrade for unlimited Quick Match.'}
                   </p>
                 </div>
 
@@ -443,30 +542,26 @@ export function Settings() {
                 {/* Features List */}
                 <div className="space-y-3">
                   <h3 className="text-sm font-semibold text-foreground">
-                    Free Tier Features
+                    Plan Features
                   </h3>
                   <ul className="space-y-2 text-sm text-muted-foreground">
-                    <li className="flex items-center gap-2">
-                      <span className="h-1.5 w-1.5 rounded-full bg-primary shrink-0" />
-                      1,000 redirects per month
-                    </li>
-                    <li className="flex items-center gap-2">
-                      <span className="h-1.5 w-1.5 rounded-full bg-primary shrink-0" />
-                      3 export formats
-                    </li>
-                    <li className="flex items-center gap-2">
-                      <span className="h-1.5 w-1.5 rounded-full bg-primary shrink-0" />
-                      Community support
-                    </li>
+                    {(planFeatures[userPlan] || planFeatures.launch).map(
+                      (feature, idx) => (
+                        <li key={idx} className="flex items-center gap-2">
+                          <span className="h-1.5 w-1.5 rounded-full bg-primary shrink-0" />
+                          {feature}
+                        </li>
+                      )
+                    )}
                   </ul>
                 </div>
 
                 <Separator />
 
-                {/* Upgrade */}
+                {/* Manage Subscription */}
                 <div className="space-y-2">
                   <Button disabled className="w-full">
-                    Upgrade to Pro &mdash; Coming Soon
+                    Manage Subscription &mdash; Coming Soon
                   </Button>
                   <p className="text-xs text-muted-foreground text-center">
                     Need more? Contact us for enterprise pricing.

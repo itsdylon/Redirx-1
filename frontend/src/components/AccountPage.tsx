@@ -15,9 +15,14 @@ interface UserProfile {
   email: string;
   full_name: string;
   company: string;
-  subscription_plan: string;
-  usage_limit_redirects: number;
-  usage_current_month: number;
+  plan: string;
+  credits_limit: number;
+  credits_used: number;
+  is_lifetime?: boolean;
+  lifetime_credits_total?: number;
+  lifetime_credits_used?: number;
+  quick_match_limit?: number | null;
+  quick_match_used?: number;
 }
 
 interface MigrationSession {
@@ -65,9 +70,9 @@ export function AccountPage() {
           email: user?.email || '',
           full_name: user?.full_name || '',
           company: '',
-          subscription_plan: user?.subscription_plan || 'free',
-          usage_limit_redirects: 1000,
-          usage_current_month: 0
+          plan: user?.plan || 'launch',
+          credits_limit: user?.credits_limit || 10000,
+          credits_used: user?.credits_used || 0,
         });
         setFullName(user?.full_name || '');
       }
@@ -232,7 +237,7 @@ export function AccountPage() {
                           <CreditCard className="h-4 w-4" />
                           Subscription
                         </div>
-                        <div className="text-foreground capitalize">{profile?.subscription_plan || 'Free'}</div>
+                        <div className="text-foreground capitalize">{profile?.plan || 'Launch'}</div>
                       </div>
                     </div>
                     <Separator />
@@ -256,16 +261,26 @@ export function AccountPage() {
                 <div className="flex items-center justify-between">
                   <div>
                     <div className="text-2xl font-semibold text-foreground">
-                      {profile?.usage_current_month || 0}
+                      {(profile?.is_lifetime
+                        ? (profile?.lifetime_credits_used || 0)
+                        : (profile?.credits_used || 0)
+                      ).toLocaleString()}
                     </div>
                     <div className="text-sm text-muted-foreground">
-                      of {profile?.usage_limit_redirects || 1000} redirects used
+                      of {(profile?.is_lifetime
+                        ? (profile?.lifetime_credits_total || 0)
+                        : (profile?.credits_limit || 10000)
+                      ).toLocaleString()} Deep Match credits used
+                      {profile?.is_lifetime ? ' (lifetime)' : ''}
                     </div>
                   </div>
                   <div className="text-right">
                     <div className="text-sm text-muted-foreground">Remaining</div>
                     <div className="text-lg font-medium text-foreground">
-                      {(profile?.usage_limit_redirects || 1000) - (profile?.usage_current_month || 0)}
+                      {(profile?.is_lifetime
+                        ? (profile?.lifetime_credits_total || 0) - (profile?.lifetime_credits_used || 0)
+                        : (profile?.credits_limit || 10000) - (profile?.credits_used || 0)
+                      ).toLocaleString()}
                     </div>
                   </div>
                 </div>

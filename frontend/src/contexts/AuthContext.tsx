@@ -5,7 +5,15 @@ interface User {
   id: string;
   email: string;
   full_name?: string;
-  subscription_plan?: string;
+  plan?: string;
+  credits_limit?: number;
+  credits_used?: number;
+  is_lifetime?: boolean;
+  lifetime_credits_total?: number;
+  lifetime_credits_used?: number;
+  quick_match_limit?: number | null;
+  quick_match_used?: number;
+  max_concurrent_projects?: number;
 }
 
 interface RegisterResult {
@@ -80,7 +88,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     localStorage.setItem('access_token', data.access_token);
     localStorage.setItem('refresh_token', data.refresh_token);
 
-    // Fetch full profile (including subscription_plan)
+    // Fetch full profile (including plan and credits)
     try {
       const meResponse = await fetch(`${API_BASE_URL}/api/auth/me`, {
         headers: { 'Authorization': `Bearer ${data.access_token}` }
@@ -122,7 +130,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     localStorage.setItem('access_token', data.access_token);
     localStorage.setItem('refresh_token', data.refresh_token);
 
-    // Fetch full profile (including subscription_plan)
+    // Fetch full profile (including plan and credits)
     try {
       const meResponse = await fetch(`${API_BASE_URL}/api/auth/me`, {
         headers: { 'Authorization': `Bearer ${data.access_token}` }

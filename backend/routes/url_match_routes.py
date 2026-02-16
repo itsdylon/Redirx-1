@@ -65,17 +65,17 @@ def process_url_only():
     # Get optional 'force' parameter from form data
     force = request.form.get('force', 'false').lower() == 'true'
 
-    # Check user quota before processing
+    # Check Quick Match quota (free tier only; paid plans are unlimited)
     quota_db = UserQuotaDB()
-    has_quota, current_usage, limit = quota_db.check_quota(user_id)
+    has_qm_quota, qm_used, qm_limit = quota_db.check_quick_match_quota(user_id)
 
-    if not has_quota:
+    if not has_qm_quota:
         return jsonify({
             "success": False,
-            "error": "Usage limit exceeded",
-            "message": f"You have used {current_usage} of {limit} redirects this month. Please upgrade your plan for more.",
-            "current_usage": current_usage,
-            "limit": limit
+            "error": "Quick Match limit exceeded",
+            "message": f"You have used {qm_used} of {qm_limit} Quick Matches this month. Upgrade to a paid plan for unlimited Quick Match.",
+            "quick_match_used": qm_used,
+            "quick_match_limit": qm_limit
         }), 429
 
     try:

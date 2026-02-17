@@ -24,6 +24,20 @@ class Config:
     EMBEDDING_MODEL: str = os.getenv('EMBEDDING_MODEL', 'text-embedding-3-small')
     EMBEDDING_DIMENSION: int = int(os.getenv('EMBEDDING_DIMENSION', '1536'))
 
+    # Stripe Configuration
+    STRIPE_SECRET_KEY: Optional[str] = os.getenv('STRIPE_SECRET_KEY')
+    STRIPE_WEBHOOK_SECRET: Optional[str] = os.getenv('STRIPE_WEBHOOK_SECRET')
+
+    # Stripe Price IDs (set in .env, created in Stripe Dashboard)
+    STRIPE_PRICE_ID_STARTER_MONTHLY: Optional[str] = os.getenv('STRIPE_PRICE_ID_STARTER_MONTHLY')
+    STRIPE_PRICE_ID_STARTER_ANNUAL: Optional[str] = os.getenv('STRIPE_PRICE_ID_STARTER_ANNUAL')
+    STRIPE_PRICE_ID_GROWTH_MONTHLY: Optional[str] = os.getenv('STRIPE_PRICE_ID_GROWTH_MONTHLY')
+    STRIPE_PRICE_ID_GROWTH_ANNUAL: Optional[str] = os.getenv('STRIPE_PRICE_ID_GROWTH_ANNUAL')
+    STRIPE_PRICE_ID_SCALE_MONTHLY: Optional[str] = os.getenv('STRIPE_PRICE_ID_SCALE_MONTHLY')
+    STRIPE_PRICE_ID_SCALE_ANNUAL: Optional[str] = os.getenv('STRIPE_PRICE_ID_SCALE_ANNUAL')
+    STRIPE_PRICE_ID_FOUNDER: Optional[str] = os.getenv('STRIPE_PRICE_ID_FOUNDER')
+    STRIPE_PRICE_ID_CREDITS: Optional[str] = os.getenv('STRIPE_PRICE_ID_CREDITS')
+
     # Matching Thresholds
     # HIGH = 0.9+, MEDIUM = 0.85-0.9, LOW = 0.7-0.85, < 0.7 = rejected (orphaned)
     HIGH_CONFIDENCE_THRESHOLD: float = float(os.getenv('HIGH_CONFIDENCE_THRESHOLD', '0.85'))

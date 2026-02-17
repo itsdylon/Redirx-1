@@ -69,10 +69,10 @@ def process_csv():
     if pipeline_type not in ('content', 'url_only'):
         pipeline_type = 'content'
 
-    # Enforce tier: free users can only use url_only
+    # Enforce tier: launch (free) users can only use url_only
     quota_db = UserQuotaDB()
     subscription_plan = quota_db.get_subscription_plan(user_id)
-    if subscription_plan == 'free':
+    if subscription_plan == 'launch':
         pipeline_type = 'url_only'
 
     # Check user quota before processing

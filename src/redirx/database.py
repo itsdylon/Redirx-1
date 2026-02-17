@@ -307,16 +307,16 @@ class UserQuotaDB:
             Tuple of (has_quota, current_usage, limit).
         """
         result = self.client.table('user_profiles').select(
-            'usage_current_month, usage_limit_redirects'
+            'credits_used, credits_limit'
         ).eq('id', user_id).execute()
 
         if not result.data:
             # No profile found - allow with default limits
-            return True, 0, 1000
+            return True, 0, 10000
 
         profile = result.data[0]
-        current = profile.get('usage_current_month') or 0
-        limit = profile.get('usage_limit_redirects') or 1000
+        current = profile.get('credits_used') or 0
+        limit = profile.get('credits_limit') or 10000
 
         return current < limit, current, limit
 
@@ -326,7 +326,7 @@ class UserQuotaDB:
 
         Args:
             user_id: The user's ID.
-            count: Number of redirects to add to usage.
+            count: Number of credits to add to usage.
         """
         try:
             # Use database function for atomic increment (prevents race conditions)
@@ -337,13 +337,13 @@ class UserQuotaDB:
         except Exception:
             # Fallback to direct update if function doesn't exist
             result = self.client.table('user_profiles').select(
-                'usage_current_month'
+                'credits_used'
             ).eq('id', user_id).execute()
 
             if result.data:
-                current = result.data[0].get('usage_current_month') or 0
+                current = result.data[0].get('credits_used') or 0
                 self.client.table('user_profiles').update({
-                    'usage_current_month': current + count
+                    'credits_used': current + count
                 }).eq('id', user_id).execute()
 
     def get_subscription_plan(self, user_id: str) -> str:
@@ -354,16 +354,17 @@ class UserQuotaDB:
             user_id: The user's ID.
 
         Returns:
-            Subscription plan string ('free', 'pro', or 'enterprise'). Defaults to 'free'.
+            Subscription plan string ('launch', 'starter', 'growth', 'scale', or 'founder').
+            Defaults to 'launch'.
         """
         result = self.client.table('user_profiles').select(
-            'subscription_plan'
+            'plan'
         ).eq('id', user_id).execute()
 
         if not result.data:
-            return 'free'
+            return 'launch'
 
-        return result.data[0].get('subscription_plan') or 'free'
+        return result.data[0].get('plan') or 'launch'
 
     def get_remaining_quota(self, user_id: str) -> int:
         """

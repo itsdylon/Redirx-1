@@ -1,5 +1,6 @@
-import { useState } from 'react';
-import { User, Settings2, Bell, CreditCard } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import { User, Settings2, Bell, CreditCard, Check, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '../contexts/AuthContext';
 import { DashboardLayout } from './DashboardLayout';
@@ -19,9 +20,18 @@ import {
 } from './ui/select';
 import { Badge } from './ui/badge';
 import { Progress } from './ui/progress';
+import {
+  getSubscriptionStatus,
+  getPlans,
+  createCheckoutSession,
+  createPortalSession,
+  type SubscriptionStatus,
+  type PlanInfo,
+} from '../api/billing';
 
 export function Settings() {
   const { user } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
 
   // Profile state
   const [fullName, setFullName] = useState(user?.full_name || '');
@@ -41,10 +51,74 @@ export function Settings() {
   const [desktopNotifications, setDesktopNotifications] = useState(false);
   const [soundOnCompletion, setSoundOnCompletion] = useState(false);
 
-  // Subscription state (mock data)
-  const redirectsUsed = 127;
-  const redirectsLimit = 1000;
-  const usagePercent = Math.round((redirectsUsed / redirectsLimit) * 100);
+  // Subscription state
+  const [subscription, setSubscription] = useState<SubscriptionStatus | null>(null);
+  const [plans, setPlans] = useState<PlanInfo[]>([]);
+  const [billingCycle, setBillingCycle] = useState<'monthly' | 'annual'>('monthly');
+  const [loadingSubscription, setLoadingSubscription] = useState(true);
+  const [checkoutLoading, setCheckoutLoading] = useState<string | null>(null);
+  const [portalLoading, setPortalLoading] = useState(false);
+
+  // Fetch subscription status and plans on mount
+  useEffect(() => {
+    async function fetchBillingData() {
+      setLoadingSubscription(true);
+      try {
+        const [sub, planList] = await Promise.all([
+          getSubscriptionStatus(),
+          getPlans(),
+        ]);
+        setSubscription(sub);
+        setPlans(planList);
+      } catch {
+        // Silently fail - show free tier defaults
+      } finally {
+        setLoadingSubscription(false);
+      }
+    }
+    fetchBillingData();
+  }, []);
+
+  // Handle return from Stripe checkout
+  useEffect(() => {
+    const status = searchParams.get('status');
+    if (status === 'success') {
+      toast.success('Subscription activated! Your plan has been upgraded.');
+      searchParams.delete('status');
+      setSearchParams(searchParams, { replace: true });
+      // Refresh subscription status
+      getSubscriptionStatus().then(setSubscription).catch(() => {});
+    } else if (status === 'cancelled') {
+      toast.info('Checkout cancelled. No changes were made.');
+      searchParams.delete('status');
+      setSearchParams(searchParams, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
+
+  const handleCheckout = async (priceId: string) => {
+    setCheckoutLoading(priceId);
+    try {
+      const url = await createCheckoutSession(priceId);
+      window.location.href = url;
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to start checkout');
+      setCheckoutLoading(null);
+    }
+  };
+
+  const handleManageSubscription = async () => {
+    setPortalLoading(true);
+    try {
+      const url = await createPortalSession();
+      window.location.href = url;
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to open billing portal');
+      setPortalLoading(false);
+    }
+  };
+
+  const currentPlan = subscription?.plan || 'launch';
+  const isPaid = currentPlan !== 'launch';
 
   // Get user initials for avatar (same logic as TopBar)
   const getInitials = () => {
@@ -63,7 +137,7 @@ export function Settings() {
   return (
     <DashboardLayout title="Settings">
       <div className="max-w-4xl mx-auto w-full">
-        <Tabs defaultValue="profile" className="w-full">
+        <Tabs defaultValue={searchParams.get('tab') || 'profile'} className="w-full">
           <TabsList className="w-full">
             <TabsTrigger value="profile">
               <User className="h-4 w-4" />
@@ -407,72 +481,239 @@ export function Settings() {
 
               <Separator />
 
-              <div className="space-y-6 mt-6">
-                {/* Current Plan */}
-                <div className="flex items-center justify-between rounded-lg border border-border p-4">
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2">
-                      <h3 className="text-sm font-semibold text-foreground">
-                        Free Plan
-                      </h3>
-                      <Badge variant="secondary">Current</Badge>
+              {loadingSubscription ? (
+                <div className="flex items-center justify-center py-12 text-muted-foreground">
+                  <Loader2 className="h-5 w-5 animate-spin mr-2" />
+                  Loading subscription...
+                </div>
+              ) : (
+                <div className="space-y-6 mt-6">
+                  {/* Current Plan */}
+                  <div className="flex items-center justify-between rounded-lg border border-border p-4">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <h3 className="text-sm font-semibold text-foreground capitalize">
+                          {currentPlan} Plan
+                        </h3>
+                        <Badge variant="secondary">Current</Badge>
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        {isPaid
+                          ? `You are on the ${currentPlan} plan.`
+                          : 'You are on the free tier.'}
+                      </p>
                     </div>
-                    <p className="text-xs text-muted-foreground">
-                      You are on the free tier.
-                    </p>
+                    {isPaid && subscription?.has_subscription && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={handleManageSubscription}
+                        disabled={portalLoading}
+                      >
+                        {portalLoading ? (
+                          <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                        ) : null}
+                        Manage Subscription
+                      </Button>
+                    )}
+                  </div>
+
+                  {/* Credits & Usage */}
+                  {subscription && (
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <Label>Monthly Credits</Label>
+                        <span className="text-sm text-muted-foreground">
+                          {subscription.credits_remaining.toLocaleString()} remaining
+                        </span>
+                      </div>
+                      {subscription.credits_limit > 0 && (
+                        <Progress
+                          value={Math.round(
+                            ((subscription.credits_limit - subscription.credits_used) /
+                              subscription.credits_limit) *
+                              100
+                          )}
+                        />
+                      )}
+                      <div className="flex items-center justify-between text-xs text-muted-foreground">
+                        <span>
+                          {subscription.credits_used.toLocaleString()} of{' '}
+                          {subscription.credits_limit.toLocaleString()} monthly credits used
+                        </span>
+                        {subscription.is_lifetime && subscription.lifetime_credits_remaining > 0 && (
+                          <span>
+                            + {subscription.lifetime_credits_remaining.toLocaleString()} lifetime credits
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center justify-between mt-2">
+                        <Label>Quick Match</Label>
+                        <span className="text-sm text-muted-foreground">
+                          {subscription.quick_match_unlimited
+                            ? 'Unlimited'
+                            : `${(subscription.quick_match_limit - subscription.quick_match_used).toLocaleString()} of ${subscription.quick_match_limit.toLocaleString()}/mo`}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <Label>Concurrent Projects</Label>
+                        <span className="text-sm text-muted-foreground">
+                          {subscription.max_concurrent_projects}
+                        </span>
+                      </div>
+                    </div>
+                  )}
+
+                  <Separator />
+
+                  {/* Plan Cards */}
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-sm font-semibold text-foreground">
+                        {isPaid ? 'Change Plan' : 'Upgrade Your Plan'}
+                      </h3>
+                      <div className="flex items-center gap-2 text-sm">
+                        <button
+                          className={`px-3 py-1 rounded-md transition-colors ${
+                            billingCycle === 'monthly'
+                              ? 'bg-primary text-primary-foreground'
+                              : 'text-muted-foreground hover:text-foreground'
+                          }`}
+                          onClick={() => setBillingCycle('monthly')}
+                        >
+                          Monthly
+                        </button>
+                        <button
+                          className={`px-3 py-1 rounded-md transition-colors ${
+                            billingCycle === 'annual'
+                              ? 'bg-primary text-primary-foreground'
+                              : 'text-muted-foreground hover:text-foreground'
+                          }`}
+                          onClick={() => setBillingCycle('annual')}
+                        >
+                          Annual
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      {plans
+                        .filter((p) => p.id !== 'launch' && p.id !== 'founder')
+                        .map((plan) => {
+                          const priceId =
+                            billingCycle === 'annual'
+                              ? plan.price_id_annual
+                              : plan.price_id_monthly;
+                          const isCurrent = plan.id === currentPlan;
+
+                          return (
+                            <div
+                              key={plan.id}
+                              className={`rounded-lg border p-4 space-y-3 ${
+                                isCurrent
+                                  ? 'border-primary bg-primary/5'
+                                  : 'border-border'
+                              }`}
+                            >
+                              <div className="flex items-center justify-between">
+                                <h4 className="font-semibold text-foreground">
+                                  {plan.name}
+                                </h4>
+                                {isCurrent && (
+                                  <Badge variant="secondary">Current</Badge>
+                                )}
+                              </div>
+                              <div className="text-2xl font-bold text-foreground">
+                                ${plan.monthly_price}
+                                <span className="text-sm font-normal text-muted-foreground">
+                                  /mo
+                                </span>
+                              </div>
+                              <ul className="space-y-1.5 text-sm text-muted-foreground">
+                                <li className="flex items-center gap-2">
+                                  <Check className="h-3.5 w-3.5 text-primary shrink-0" />
+                                  {plan.credits_limit.toLocaleString()} credits/mo
+                                </li>
+                                <li className="flex items-center gap-2">
+                                  <Check className="h-3.5 w-3.5 text-primary shrink-0" />
+                                  {plan.quick_match_limit === null
+                                    ? 'Unlimited'
+                                    : plan.quick_match_limit.toLocaleString()}{' '}
+                                  quick matches
+                                </li>
+                                <li className="flex items-center gap-2">
+                                  <Check className="h-3.5 w-3.5 text-primary shrink-0" />
+                                  {plan.max_concurrent_projects} concurrent project
+                                  {plan.max_concurrent_projects > 1 ? 's' : ''}
+                                </li>
+                              </ul>
+                              {isCurrent ? (
+                                <Button variant="outline" className="w-full" disabled>
+                                  Current Plan
+                                </Button>
+                              ) : priceId ? (
+                                <Button
+                                  className="w-full"
+                                  onClick={() => handleCheckout(priceId)}
+                                  disabled={checkoutLoading === priceId}
+                                >
+                                  {checkoutLoading === priceId ? (
+                                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                                  ) : null}
+                                  {isPaid ? 'Switch Plan' : 'Get Started'}
+                                </Button>
+                              ) : (
+                                <Button variant="outline" className="w-full" disabled>
+                                  Not Available
+                                </Button>
+                              )}
+                            </div>
+                          );
+                        })}
+                    </div>
+
+                    {/* Founder plan */}
+                    {plans
+                      .filter((p) => p.id === 'founder')
+                      .map((plan) => (
+                        <div
+                          key={plan.id}
+                          className={`rounded-lg border p-4 ${
+                            currentPlan === 'founder'
+                              ? 'border-primary bg-primary/5'
+                              : 'border-border'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <h4 className="font-semibold text-foreground">
+                                {plan.name}
+                              </h4>
+                              <p className="text-xs text-muted-foreground mt-1">
+                                One-time purchase: {plan.lifetime_credits_total.toLocaleString()} lifetime
+                                credits + {plan.max_concurrent_projects} concurrent projects + unlimited quick match
+                              </p>
+                            </div>
+                            {currentPlan === 'founder' ? (
+                              <Badge variant="secondary">Current</Badge>
+                            ) : plan.price_id ? (
+                              <Button
+                                size="sm"
+                                onClick={() => handleCheckout(plan.price_id!)}
+                                disabled={checkoutLoading === plan.price_id}
+                              >
+                                {checkoutLoading === plan.price_id ? (
+                                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                                ) : null}
+                                Buy Founder
+                              </Button>
+                            ) : null}
+                          </div>
+                        </div>
+                      ))}
                   </div>
                 </div>
-
-                {/* Usage Meter */}
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <Label>Monthly Usage</Label>
-                    <span className="text-sm text-muted-foreground">
-                      {redirectsUsed} of {redirectsLimit.toLocaleString()}{' '}
-                      redirects used this month
-                    </span>
-                  </div>
-                  <Progress value={usagePercent} />
-                  <p className="text-xs text-muted-foreground text-right">
-                    {usagePercent}% used
-                  </p>
-                </div>
-
-                <Separator />
-
-                {/* Features List */}
-                <div className="space-y-3">
-                  <h3 className="text-sm font-semibold text-foreground">
-                    Free Tier Features
-                  </h3>
-                  <ul className="space-y-2 text-sm text-muted-foreground">
-                    <li className="flex items-center gap-2">
-                      <span className="h-1.5 w-1.5 rounded-full bg-primary shrink-0" />
-                      1,000 redirects per month
-                    </li>
-                    <li className="flex items-center gap-2">
-                      <span className="h-1.5 w-1.5 rounded-full bg-primary shrink-0" />
-                      3 export formats
-                    </li>
-                    <li className="flex items-center gap-2">
-                      <span className="h-1.5 w-1.5 rounded-full bg-primary shrink-0" />
-                      Community support
-                    </li>
-                  </ul>
-                </div>
-
-                <Separator />
-
-                {/* Upgrade */}
-                <div className="space-y-2">
-                  <Button disabled className="w-full">
-                    Upgrade to Pro &mdash; Coming Soon
-                  </Button>
-                  <p className="text-xs text-muted-foreground text-center">
-                    Need more? Contact us for enterprise pricing.
-                  </p>
-                </div>
-              </div>
+              )}
             </Card>
           </TabsContent>
         </Tabs>

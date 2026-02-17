@@ -5,7 +5,8 @@ interface User {
   id: string;
   email: string;
   full_name?: string;
-  subscription_plan?: string;
+  plan?: string;
+  subscription_plan?: string; // legacy fallback
 }
 
 interface RegisterResult {

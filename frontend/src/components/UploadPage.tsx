@@ -24,7 +24,7 @@ interface QuotaError {
 export function UploadPage() {
   const navigate = useNavigate();
   const { user } = useAuth();
-  const isFreeUser = !user?.subscription_plan || user.subscription_plan === 'free';
+  const isFreeUser = !user?.plan || user.plan === 'launch';
   const [pipelineType, setPipelineType] = useState<'content' | 'url_only'>(isFreeUser ? 'url_only' : 'content');
   const [isLoading, setIsLoading] = useState(false);
   const [isUploading, setIsUploading] = useState(false);

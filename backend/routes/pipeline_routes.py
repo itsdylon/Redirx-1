@@ -69,23 +69,37 @@ def process_csv():
     if pipeline_type not in ('content', 'url_only'):
         pipeline_type = 'content'
 
-    # Enforce tier: launch (free) users can only use url_only
+    # Enforce tier: launch (free trial) users can only use url_only
     quota_db = UserQuotaDB()
-    subscription_plan = quota_db.get_subscription_plan(user_id)
-    if subscription_plan == 'launch':
+    user_plan = quota_db.get_plan(user_id)
+    if user_plan == 'launch':
         pipeline_type = 'url_only'
 
-    # Check user quota before processing
-    has_quota, current_usage, limit = quota_db.check_quota(user_id)
+    # Check credits quota for Deep Match pipeline
+    if pipeline_type == 'content':
+        has_credits, credits_used, credits_limit = quota_db.check_credits(user_id)
 
-    if not has_quota:
-        return jsonify({
-            "success": False,
-            "error": "Usage limit exceeded",
-            "message": f"You have used {current_usage} of {limit} redirects this month. Please upgrade your plan for more.",
-            "current_usage": current_usage,
-            "limit": limit
-        }), 429
+        if not has_credits:
+            return jsonify({
+                "success": False,
+                "error": "Credit limit exceeded",
+                "message": f"You have used {credits_used} of {credits_limit} Deep Match credits. Please upgrade your plan for more.",
+                "credits_used": credits_used,
+                "credits_limit": credits_limit
+            }), 429
+
+    # Check Quick Match quota (free tier only; paid plans are unlimited)
+    if pipeline_type == 'url_only':
+        has_qm_quota, qm_used, qm_limit = quota_db.check_quick_match_quota(user_id)
+
+        if not has_qm_quota:
+            return jsonify({
+                "success": False,
+                "error": "Quick Match limit exceeded",
+                "message": f"You have used {qm_used} of {qm_limit} Quick Matches this month. Upgrade to a paid plan for unlimited Quick Match.",
+                "quick_match_used": qm_used,
+                "quick_match_limit": qm_limit
+            }), 429
 
     try:
         # Run the pipeline

@@ -19,6 +19,11 @@ interface UserProfile {
   plan: string;
   credits_limit: number;
   credits_used: number;
+  is_lifetime?: boolean;
+  lifetime_credits_total?: number;
+  lifetime_credits_used?: number;
+  quick_match_limit?: number | null;
+  quick_match_used?: number;
 }
 
 interface MigrationSession {
@@ -68,8 +73,8 @@ export function AccountPage() {
           full_name: user?.full_name || '',
           company: '',
           plan: user?.plan || 'launch',
-          credits_limit: 10000,
-          credits_used: 0
+          credits_limit: user?.credits_limit || 10000,
+          credits_used: user?.credits_used || 0,
         });
         setFullName(user?.full_name || '');
       }
@@ -266,16 +271,26 @@ export function AccountPage() {
                 <div className="flex items-center justify-between">
                   <div>
                     <div className="text-2xl font-semibold text-foreground">
-                      {profile?.credits_used || 0}
+                      {(profile?.is_lifetime
+                        ? (profile?.lifetime_credits_used || 0)
+                        : (profile?.credits_used || 0)
+                      ).toLocaleString()}
                     </div>
                     <div className="text-sm text-muted-foreground">
-                      of {(profile?.credits_limit || 10000).toLocaleString()} credits used
+                      of {(profile?.is_lifetime
+                        ? (profile?.lifetime_credits_total || 0)
+                        : (profile?.credits_limit || 10000)
+                      ).toLocaleString()} Deep Match credits used
+                      {profile?.is_lifetime ? ' (lifetime)' : ''}
                     </div>
                   </div>
                   <div className="text-right">
                     <div className="text-sm text-muted-foreground">Remaining</div>
                     <div className="text-lg font-medium text-foreground">
-                      {((profile?.credits_limit || 10000) - (profile?.credits_used || 0)).toLocaleString()}
+                      {(profile?.is_lifetime
+                        ? (profile?.lifetime_credits_total || 0) - (profile?.lifetime_credits_used || 0)
+                        : (profile?.credits_limit || 10000) - (profile?.credits_used || 0)
+                      ).toLocaleString()}
                     </div>
                   </div>
                 </div>

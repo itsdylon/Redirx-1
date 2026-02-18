@@ -290,71 +290,30 @@ class WebPageEmbeddingDB:
 
 class UserQuotaDB:
     """
-    Database operations for user usage quotas.
+    Database operations for user credit quotas.
     """
+
+    # Plans that get unlimited Quick Match (no quota check)
+    PAID_PLANS = ('starter', 'growth', 'scale', 'enterprise', 'founder')
 
     def __init__(self, client: Optional[Client] = None):
         self.client = client or SupabaseClient.get_client()
 
-    def check_quota(self, user_id: str) -> tuple[bool, int, int]:
-        """
-        Check if user has remaining quota for processing.
-
-        Args:
-            user_id: The user's ID.
-
-        Returns:
-            Tuple of (has_quota, current_usage, limit).
-        """
+    def _get_profile(self, user_id: str) -> Optional[Dict[str, Any]]:
+        """Fetch user profile row. Returns None if not found."""
         result = self.client.table('user_profiles').select(
-            'credits_used, credits_limit'
+            'plan, credits_limit, credits_used, is_lifetime, '
+            'lifetime_credits_total, lifetime_credits_used, '
+            'quick_match_limit, quick_match_used, max_concurrent_projects'
         ).eq('id', user_id).execute()
+        return result.data[0] if result.data else None
 
-        if not result.data:
-            # No profile found - allow with default limits
-            return True, 0, 10000
-
-        profile = result.data[0]
-        current = profile.get('credits_used') or 0
-        limit = profile.get('credits_limit') or 10000
-
-        return current < limit, current, limit
-
-    def increment_usage(self, user_id: str, count: int) -> None:
+    def get_plan(self, user_id: str) -> str:
         """
-        Increment the user's monthly usage count.
-
-        Args:
-            user_id: The user's ID.
-            count: Number of credits to add to usage.
-        """
-        try:
-            # Use database function for atomic increment (prevents race conditions)
-            self.client.rpc('increment_user_usage', {
-                'target_user_id': user_id,
-                'amount': count
-            }).execute()
-        except Exception:
-            # Fallback to direct update if function doesn't exist
-            result = self.client.table('user_profiles').select(
-                'credits_used'
-            ).eq('id', user_id).execute()
-
-            if result.data:
-                current = result.data[0].get('credits_used') or 0
-                self.client.table('user_profiles').update({
-                    'credits_used': current + count
-                }).eq('id', user_id).execute()
-
-    def get_subscription_plan(self, user_id: str) -> str:
-        """
-        Get the user's subscription plan.
-
-        Args:
-            user_id: The user's ID.
+        Get the user's current plan.
 
         Returns:
-            Subscription plan string ('launch', 'starter', 'growth', 'scale', or 'founder').
+            Plan string ('launch', 'starter', 'growth', 'scale', 'enterprise', 'founder').
             Defaults to 'launch'.
         """
         result = self.client.table('user_profiles').select(
@@ -366,18 +325,128 @@ class UserQuotaDB:
 
         return result.data[0].get('plan') or 'launch'
 
-    def get_remaining_quota(self, user_id: str) -> int:
+    def check_credits(self, user_id: str) -> tuple[bool, int, int]:
         """
-        Get the remaining quota for a user.
-
-        Args:
-            user_id: The user's ID.
+        Check if user has remaining Deep Match credits.
 
         Returns:
-            Number of remaining redirects allowed.
+            Tuple of (has_credits, credits_used, credits_limit).
         """
-        has_quota, current, limit = self.check_quota(user_id)
-        return max(0, limit - current)
+        profile = self._get_profile(user_id)
+
+        if not profile:
+            return False, 0, 0
+
+        # Founder / lifetime plan
+        if profile.get('is_lifetime') and profile.get('lifetime_credits_total') is not None:
+            used = profile.get('lifetime_credits_used') or 0
+            total = profile['lifetime_credits_total']
+            return used < total, used, total
+
+        used = profile.get('credits_used') or 0
+        limit = profile.get('credits_limit') or 0
+        return used < limit, used, limit
+
+    def check_quick_match_quota(self, user_id: str) -> tuple[bool, int, Optional[int]]:
+        """
+        Check if user has remaining Quick Match quota.
+
+        Returns:
+            Tuple of (has_quota, quick_match_used, quick_match_limit).
+            quick_match_limit is None for paid plans (unlimited).
+        """
+        profile = self._get_profile(user_id)
+
+        if not profile:
+            return True, 0, 2500
+
+        plan = profile.get('plan') or 'launch'
+
+        # Paid plans get unlimited Quick Match
+        if plan in self.PAID_PLANS:
+            return True, 0, None
+
+        used = profile.get('quick_match_used') or 0
+        limit = profile.get('quick_match_limit') or 2500
+        return used < limit, used, limit
+
+    def increment_credits(self, user_id: str, count: int) -> None:
+        """
+        Increment the user's Deep Match credit usage.
+        Routes to lifetime_credits_used for founder plan.
+        """
+        profile = self._get_profile(user_id)
+
+        if profile and profile.get('is_lifetime'):
+            try:
+                self.client.rpc('increment_lifetime_usage', {
+                    'target_user_id': user_id,
+                    'amount': count
+                }).execute()
+                return
+            except Exception:
+                pass
+
+        try:
+            self.client.rpc('increment_user_usage', {
+                'target_user_id': user_id,
+                'amount': count
+            }).execute()
+        except Exception:
+            result = self.client.table('user_profiles').select(
+                'credits_used'
+            ).eq('id', user_id).execute()
+
+            if result.data:
+                current = result.data[0].get('credits_used') or 0
+                self.client.table('user_profiles').update({
+                    'credits_used': current + count
+                }).eq('id', user_id).execute()
+
+    def increment_quick_match_usage(self, user_id: str, count: int) -> None:
+        """
+        Increment the user's Quick Match usage count.
+        Only relevant for free-tier users (paid plans skip quota checks).
+        """
+        try:
+            self.client.rpc('increment_quick_match_usage', {
+                'target_user_id': user_id,
+                'amount': count
+            }).execute()
+        except Exception:
+            result = self.client.table('user_profiles').select(
+                'quick_match_used'
+            ).eq('id', user_id).execute()
+
+            if result.data:
+                current = result.data[0].get('quick_match_used') or 0
+                self.client.table('user_profiles').update({
+                    'quick_match_used': current + count
+                }).eq('id', user_id).execute()
+
+    def get_remaining_credits(self, user_id: str) -> int:
+        """
+        Get remaining Deep Match credits for a user.
+        """
+        has_credits, used, limit = self.check_credits(user_id)
+        return max(0, limit - used)
+
+    # Backward-compatible aliases
+    def check_quota(self, user_id: str) -> tuple[bool, int, int]:
+        """Alias for check_credits (backward compatibility)."""
+        return self.check_credits(user_id)
+
+    def increment_usage(self, user_id: str, count: int) -> None:
+        """Alias for increment_credits (backward compatibility)."""
+        return self.increment_credits(user_id, count)
+
+    def get_subscription_plan(self, user_id: str) -> str:
+        """Alias for get_plan (backward compatibility)."""
+        return self.get_plan(user_id)
+
+    def get_remaining_quota(self, user_id: str) -> int:
+        """Alias for get_remaining_credits (backward compatibility)."""
+        return self.get_remaining_credits(user_id)
 
 
 class URLMappingDB:

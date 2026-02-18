@@ -24,7 +24,8 @@ interface QuotaError {
 export function UploadPage() {
   const navigate = useNavigate();
   const { user } = useAuth();
-  const isFreeUser = !user?.plan || user.plan === 'launch';
+  const userPlan = user?.plan || 'launch';
+  const isFreeUser = userPlan === 'launch';
   const [pipelineType, setPipelineType] = useState<'content' | 'url_only'>(isFreeUser ? 'url_only' : 'content');
   const [isLoading, setIsLoading] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
@@ -197,9 +198,9 @@ export function UploadPage() {
             <div className="mb-6 border border-blue-500/30 bg-blue-500/5 p-4 flex items-start gap-3">
               <Info className="h-5 w-5 text-blue-500 flex-shrink-0 mt-0.5" />
               <div>
-                <div className="font-medium text-blue-600 dark:text-blue-400">Free Plan: URL Matching</div>
+                <div className="font-medium text-blue-600 dark:text-blue-400">Launch Plan: Quick Match</div>
                 <p className="text-sm text-muted-foreground mt-1">
-                  Your free plan uses URL pattern matching (slug comparison, path similarity, and fuzzy matching) to generate redirects. Upgrade for content-based deep matching with AI-powered semantic analysis.
+                  Your Launch plan includes free Quick Match (URL pattern matching). Upgrade to a paid plan to unlock Deep Match with AI-powered semantic analysis using mapping credits.
                 </p>
                 <Button
                   variant="outline"
@@ -228,6 +229,9 @@ export function UploadPage() {
                 <p className="text-sm text-muted-foreground">
                   Scrapes page content and uses AI embeddings for semantic matching. Most accurate.
                 </p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Uses mapping credits &middot; {((user?.is_lifetime ? (user?.lifetime_credits_total || 0) - (user?.lifetime_credits_used || 0) : (user?.credits_limit || 0) - (user?.credits_used || 0))).toLocaleString()} remaining
+                </p>
               </button>
               <button
                 onClick={() => setPipelineType('url_only')}
@@ -240,9 +244,10 @@ export function UploadPage() {
                 <div className="flex items-center gap-2 mb-1">
                   <Search className="h-4 w-4 text-primary" />
                   <span className="font-medium text-foreground">Quick Match</span>
+                  <span className="text-xs bg-green-500/10 text-green-600 dark:text-green-400 px-1.5 py-0.5 rounded font-medium">Free</span>
                 </div>
                 <p className="text-sm text-muted-foreground">
-                  URL pattern matching only. Fastest, no API costs, no scraping required.
+                  URL pattern matching only. Fastest, no credits used, no scraping required.
                 </p>
               </button>
             </div>
@@ -253,9 +258,9 @@ export function UploadPage() {
             <div className="mb-6 border border-yellow-500 bg-yellow-500/10 p-4 flex items-start gap-3">
               <AlertTriangle className="h-5 w-5 text-yellow-500 flex-shrink-0 mt-0.5" />
               <div>
-                <div className="font-medium text-yellow-600 dark:text-yellow-400">Usage Limit Reached</div>
+                <div className="font-medium text-yellow-600 dark:text-yellow-400">Credit Limit Reached</div>
                 <p className="text-sm text-muted-foreground mt-1">
-                  You've used {quotaError.current_usage} of {quotaError.limit} redirects this month.
+                  You've used {quotaError.current_usage.toLocaleString()} of {quotaError.limit.toLocaleString()} credits.
                 </p>
                 <Button
                   variant="outline"

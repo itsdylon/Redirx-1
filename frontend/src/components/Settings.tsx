@@ -25,7 +25,7 @@ import {
   getPlans,
   createCheckoutSession,
   createPortalSession,
-  reactivateSubscription,
+
   type SubscriptionStatus,
   type PlanInfo,
 } from '../api/billing';
@@ -60,7 +60,7 @@ export function Settings() {
   const [subscriptionError, setSubscriptionError] = useState<string | null>(null);
   const [checkoutLoading, setCheckoutLoading] = useState<string | null>(null);
   const [portalLoading, setPortalLoading] = useState(false);
-  const [reactivateLoading, setReactivateLoading] = useState(false);
+
   const [postCheckoutPolling, setPostCheckoutPolling] = useState(false);
 
   const pollingRef = useRef(false);
@@ -167,20 +167,6 @@ export function Settings() {
         toast.error(message);
       }
       setPortalLoading(false);
-    }
-  };
-
-  const handleReactivate = async () => {
-    if (reactivateLoading) return;
-    setReactivateLoading(true);
-    try {
-      await reactivateSubscription();
-      toast.success('Subscription reactivated! Your plan will continue.');
-      await fetchBillingData();
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to reactivate subscription');
-    } finally {
-      setReactivateLoading(false);
     }
   };
 
@@ -633,10 +619,10 @@ export function Settings() {
                         </div>
                         <Button
                           size="sm"
-                          onClick={handleReactivate}
-                          disabled={reactivateLoading}
+                          onClick={handleManageSubscription}
+                          disabled={portalLoading}
                         >
-                          {reactivateLoading && (
+                          {portalLoading && (
                             <Loader2 className="h-4 w-4 animate-spin mr-2" />
                           )}
                           Reactivate

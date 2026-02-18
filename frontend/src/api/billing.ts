@@ -14,6 +14,8 @@ export interface SubscriptionStatus {
   quick_match_used: number;
   quick_match_unlimited: boolean;
   max_concurrent_projects: number;
+  current_period_end: number | null;
+  cancel_at_period_end: boolean;
 }
 
 export interface PlanInfo {

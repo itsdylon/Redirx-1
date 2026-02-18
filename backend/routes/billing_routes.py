@@ -104,6 +104,72 @@ def stripe_webhook():
         return jsonify({'error': 'Webhook processing failed'}), 500
 
 
+@billing_blueprint.route('/update-subscription', methods=['POST'])
+@require_auth
+def update_subscription():
+    """
+    Switch an existing subscription to a different plan/price.
+
+    Body: { price_id: string }
+    Returns: { plan: string, status: string }
+    """
+    data = request.get_json()
+
+    if not data or not data.get('price_id'):
+        return jsonify({'error': 'price_id is required'}), 400
+
+    try:
+        service = _get_stripe_service()
+        result = service.update_subscription(
+            user_id=request.user.id,
+            price_id=data['price_id'],
+        )
+        return jsonify(result)
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    except Exception as e:
+        logger.error(f"Subscription update failed: {e}")
+        return jsonify({'error': 'Failed to update subscription'}), 500
+
+
+@billing_blueprint.route('/cancel-subscription', methods=['POST'])
+@require_auth
+def cancel_subscription():
+    """
+    Cancel subscription at end of current billing period.
+
+    Returns: { status, cancel_at_period_end, current_period_end }
+    """
+    try:
+        service = _get_stripe_service()
+        result = service.cancel_subscription(user_id=request.user.id)
+        return jsonify(result)
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    except Exception as e:
+        logger.error(f"Subscription cancellation failed: {e}")
+        return jsonify({'error': 'Failed to cancel subscription'}), 500
+
+
+@billing_blueprint.route('/reactivate-subscription', methods=['POST'])
+@require_auth
+def reactivate_subscription():
+    """
+    Undo a pending cancellation, keeping the subscription active.
+
+    Returns: { status, cancel_at_period_end, current_period_end }
+    """
+    try:
+        service = _get_stripe_service()
+        result = service.reactivate_subscription(user_id=request.user.id)
+        return jsonify(result)
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    except Exception as e:
+        logger.error(f"Subscription reactivation failed: {e}")
+        return jsonify({'error': 'Failed to reactivate subscription'}), 500
+
+
 @billing_blueprint.route('/plans', methods=['GET'])
 def get_plans():
     """

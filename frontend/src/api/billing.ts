@@ -16,6 +16,7 @@ export interface SubscriptionStatus {
   max_concurrent_projects: number;
   current_period_end: number | null;
   cancel_at_period_end: boolean;
+  cancel_at: number | null;
 }
 
 export interface PlanInfo {
@@ -23,6 +24,7 @@ export interface PlanInfo {
   name: string;
   description: string;
   monthly_price: number | null;
+  annual_price: number | null;
   credits_limit: number;
   lifetime_credits_total: number;
   quick_match_limit: number | null;
@@ -30,6 +32,7 @@ export interface PlanInfo {
   price_id_monthly?: string;
   price_id_annual?: string;
   price_id?: string; // for one-time plans like founder
+  credits_price_id?: string;
 }
 
 export async function getSubscriptionStatus(): Promise<SubscriptionStatus> {
@@ -59,6 +62,17 @@ export async function createCheckoutSession(priceId: string): Promise<string> {
   }
   const data = await res.json();
   return data.url;
+}
+
+export async function reactivateSubscription(): Promise<void> {
+  const res = await fetch(`${API_BASE_URL}/api/billing/reactivate-subscription`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+  });
+  if (!res.ok) {
+    const data = await res.json();
+    throw new Error(data.error || 'Failed to reactivate subscription');
+  }
 }
 
 export async function createPortalSession(): Promise<string> {

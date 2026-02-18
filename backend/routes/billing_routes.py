@@ -63,7 +63,7 @@ def create_portal_session():
     Body: { return_url?: string }
     Returns: { url: string }
     """
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     origin = request.headers.get('Origin', 'http://localhost:3000')
     return_url = data.get('return_url', f'{origin}/settings?tab=subscription')
 

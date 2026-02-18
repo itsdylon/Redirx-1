@@ -25,6 +25,7 @@ import {
   getPlans,
   createCheckoutSession,
   createPortalSession,
+  reactivateSubscription,
   type SubscriptionStatus,
   type PlanInfo,
 } from '../api/billing';
@@ -59,6 +60,7 @@ export function Settings() {
   const [subscriptionError, setSubscriptionError] = useState<string | null>(null);
   const [checkoutLoading, setCheckoutLoading] = useState<string | null>(null);
   const [portalLoading, setPortalLoading] = useState(false);
+  const [reactivateLoading, setReactivateLoading] = useState(false);
   const [postCheckoutPolling, setPostCheckoutPolling] = useState(false);
 
   const pollingRef = useRef(false);
@@ -101,7 +103,7 @@ export function Settings() {
         for (let i = 0; i < 5; i++) {
           try {
             const sub = await getSubscriptionStatus();
-            if (sub.plan !== 'launch' && sub.has_subscription) {
+            if (sub.plan !== 'launch') {
               setSubscription(sub);
               setPostCheckoutPolling(false);
               toast.success(`You're now on the ${sub.plan.charAt(0).toUpperCase() + sub.plan.slice(1)} plan!`);
@@ -168,8 +170,24 @@ export function Settings() {
     }
   };
 
+  const handleReactivate = async () => {
+    if (reactivateLoading) return;
+    setReactivateLoading(true);
+    try {
+      await reactivateSubscription();
+      toast.success('Subscription reactivated! Your plan will continue.');
+      await fetchBillingData();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to reactivate subscription');
+    } finally {
+      setReactivateLoading(false);
+    }
+  };
+
   const currentPlan = subscription?.plan || 'launch';
   const isPaid = currentPlan !== 'launch';
+  const isCancelling = !!(subscription?.cancel_at_period_end || subscription?.cancel_at);
+  const cancelDate = subscription?.cancel_at || subscription?.current_period_end;
 
   // Get user initials for avatar (same logic as TopBar)
   const getInitials = () => {
@@ -563,13 +581,13 @@ export function Settings() {
                             {currentPlan} Plan
                           </h3>
                           <Badge variant="secondary">Current</Badge>
-                          {subscription?.cancel_at_period_end && (
+                          {isCancelling && (
                             <Badge variant="destructive">Cancelling</Badge>
                           )}
                         </div>
                         <p className="text-xs text-muted-foreground">
-                          {subscription?.cancel_at_period_end && subscription?.current_period_end
-                            ? `Cancels on ${new Date(subscription.current_period_end * 1000).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
+                          {isCancelling && cancelDate
+                            ? `Cancels on ${new Date(cancelDate * 1000).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
                             : subscription?.current_period_end
                               ? `Renews on ${new Date(subscription.current_period_end * 1000).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
                               : isPaid
@@ -595,35 +613,71 @@ export function Settings() {
                     )}
                   </div>
 
+                  {/* Cancellation Warning Banner */}
+                  {isCancelling && cancelDate && (
+                    <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-4 space-y-2">
+                      <div className="flex items-start gap-3">
+                        <AlertTriangle className="h-5 w-5 text-destructive shrink-0 mt-0.5" />
+                        <div className="space-y-1 flex-1">
+                          <p className="text-sm font-semibold text-foreground">
+                            Your {currentPlan.charAt(0).toUpperCase() + currentPlan.slice(1)} plan access ends on{' '}
+                            {new Date(cancelDate * 1000).toLocaleDateString('en-US', {
+                              month: 'long',
+                              day: 'numeric',
+                              year: 'numeric',
+                            })}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            You'll be downgraded to the free plan after this date.
+                          </p>
+                        </div>
+                        <Button
+                          size="sm"
+                          onClick={handleReactivate}
+                          disabled={reactivateLoading}
+                        >
+                          {reactivateLoading && (
+                            <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                          )}
+                          Reactivate
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+
                   {/* Credits & Usage */}
                   {subscription && (
                     <div className="space-y-3">
                       <div className="flex items-center justify-between">
-                        <Label>Monthly Credits</Label>
+                        <Label>Deep Match Credits</Label>
                         <span className="text-sm text-muted-foreground">
-                          {subscription.credits_remaining.toLocaleString()} remaining
+                          {subscription.credits_limit > 0
+                            ? `${subscription.credits_remaining.toLocaleString()} remaining`
+                            : 'Upgrade to unlock'}
                         </span>
                       </div>
                       {subscription.credits_limit > 0 && (
-                        <Progress
-                          value={Math.round(
-                            ((subscription.credits_limit - subscription.credits_used) /
-                              subscription.credits_limit) *
-                              100
-                          )}
-                        />
+                        <>
+                          <Progress
+                            value={Math.round(
+                              ((subscription.credits_limit - subscription.credits_used) /
+                                subscription.credits_limit) *
+                                100
+                            )}
+                          />
+                          <div className="flex items-center justify-between text-xs text-muted-foreground">
+                            <span>
+                              {subscription.credits_used.toLocaleString()} of{' '}
+                              {subscription.credits_limit.toLocaleString()} monthly credits used
+                            </span>
+                            {subscription.is_lifetime && subscription.lifetime_credits_remaining > 0 && (
+                              <span>
+                                + {subscription.lifetime_credits_remaining.toLocaleString()} lifetime credits
+                              </span>
+                            )}
+                          </div>
+                        </>
                       )}
-                      <div className="flex items-center justify-between text-xs text-muted-foreground">
-                        <span>
-                          {subscription.credits_used.toLocaleString()} of{' '}
-                          {subscription.credits_limit.toLocaleString()} monthly credits used
-                        </span>
-                        {subscription.is_lifetime && subscription.lifetime_credits_remaining > 0 && (
-                          <span>
-                            + {subscription.lifetime_credits_remaining.toLocaleString()} lifetime credits
-                          </span>
-                        )}
-                      </div>
                       <div className="flex items-center justify-between mt-2">
                         <Label>Quick Match</Label>
                         <span className="text-sm text-muted-foreground">
@@ -641,177 +695,141 @@ export function Settings() {
                     </div>
                   )}
 
+                  {/* Credit Packs */}
+                  {isPaid && (() => {
+                    const creditsPriceId = plans.find(p => p.credits_price_id)?.credits_price_id;
+                    return creditsPriceId ? (
+                      <div className="rounded-lg border border-border p-4 space-y-3">
+                        <div className="space-y-1">
+                          <h3 className="text-sm font-semibold text-foreground">Credit Packs</h3>
+                          <p className="text-xs text-muted-foreground">
+                            1k Deep Match Credits per unit — $2.00/unit. Select quantity at checkout.
+                          </p>
+                        </div>
+                        <Button
+                          size="sm"
+                          onClick={() => handlePlanSelect(creditsPriceId)}
+                          disabled={!!checkoutLoading}
+                        >
+                          {checkoutLoading === creditsPriceId && (
+                            <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                          )}
+                          Buy Credits
+                        </Button>
+                      </div>
+                    ) : null;
+                  })()}
+
                   <Separator />
 
                   {/* Plan Cards */}
-                  <div className="space-y-4">
-                    <div className="flex items-center justify-between">
-                      <h3 className="text-sm font-semibold text-foreground">
-                        {isPaid ? 'Change Plan' : 'Upgrade Your Plan'}
-                      </h3>
-                      {!isPaid && (
-                        <div className="flex items-center gap-2 text-sm">
-                          <button
-                            className={`px-3 py-1 rounded-md transition-colors ${
-                              billingCycle === 'monthly'
-                                ? 'bg-primary text-primary-foreground'
-                                : 'text-muted-foreground hover:text-foreground'
-                            }`}
-                            onClick={() => setBillingCycle('monthly')}
-                          >
-                            Monthly
-                          </button>
-                          <button
-                            className={`px-3 py-1 rounded-md transition-colors ${
-                              billingCycle === 'annual'
-                                ? 'bg-primary text-primary-foreground'
-                                : 'text-muted-foreground hover:text-foreground'
-                            }`}
-                            onClick={() => setBillingCycle('annual')}
-                          >
-                            Annual
-                            <span className="ml-1 text-xs text-green-500 font-medium">Save 20%</span>
-                          </button>
-                        </div>
-                      )}
-                    </div>
+                  {(() => {
+                    const planTier: Record<string, number> = { launch: 0, starter: 1, growth: 2, scale: 3 };
+                    const currentTier = planTier[currentPlan] ?? 0;
+                    const upgradePlans = plans.filter(
+                      (p) => p.id !== 'launch' && (planTier[p.id] ?? 0) > currentTier
+                    );
 
-                    {isPaid && subscription?.has_subscription ? (
-                      <div className="rounded-md border border-border bg-muted/30 p-4 text-sm text-muted-foreground">
-                        <p>
-                          To change your plan, cancel your subscription, update payment methods, or view invoices, use the{' '}
-                          <button
-                            className="text-primary underline underline-offset-2 hover:text-primary/80"
-                            onClick={handleManageSubscription}
-                            disabled={portalLoading}
-                          >
-                            Stripe Customer Portal
-                          </button>
-                          .
-                        </p>
-                      </div>
-                    ) : (
-                      <>
-                        <div className="grid gap-4 sm:grid-cols-2">
-                          {plans
-                            .filter((p) => p.id !== 'launch' && p.id !== 'founder')
-                            .map((plan) => {
-                              const priceId =
+                    return upgradePlans.length > 0 ? (
+                      <div className="space-y-4">
+                        <div className="flex items-center justify-between">
+                          <h3 className="text-sm font-semibold text-foreground">
+                            Upgrade Your Plan
+                          </h3>
+                          <div className="flex items-center gap-2 text-sm">
+                            <button
+                              className={`px-3 py-1 rounded-md transition-colors ${
+                                billingCycle === 'monthly'
+                                  ? 'bg-primary text-primary-foreground'
+                                  : 'text-muted-foreground hover:text-foreground'
+                              }`}
+                              onClick={() => setBillingCycle('monthly')}
+                            >
+                              Monthly
+                            </button>
+                            <button
+                              className={`px-3 py-1 rounded-md transition-colors ${
                                 billingCycle === 'annual'
-                                  ? plan.price_id_annual
-                                  : plan.price_id_monthly;
-                              const isCurrent = plan.id === currentPlan;
+                                  ? 'bg-primary text-primary-foreground'
+                                  : 'text-muted-foreground hover:text-foreground'
+                              }`}
+                              onClick={() => setBillingCycle('annual')}
+                            >
+                              Annual
+                              <span className="ml-1 text-xs text-green-500 font-medium">Save 20%</span>
+                            </button>
+                          </div>
+                        </div>
 
-                              return (
-                                <div
-                                  key={plan.id}
-                                  className={`rounded-lg border p-4 space-y-3 ${
-                                    isCurrent
-                                      ? 'border-primary bg-primary/5'
-                                      : 'border-border'
-                                  }`}
-                                >
-                                  <div className="flex items-center justify-between">
-                                    <h4 className="font-semibold text-foreground">
-                                      {plan.name}
-                                    </h4>
-                                    {isCurrent && (
-                                      <Badge variant="secondary">Current</Badge>
-                                    )}
-                                  </div>
-                                  <div className="text-2xl font-bold text-foreground">
-                                    ${plan.monthly_price}
-                                    <span className="text-sm font-normal text-muted-foreground">
-                                      /mo
+                        <div className="grid gap-4 sm:grid-cols-2">
+                          {upgradePlans.map((plan) => {
+                            const priceId =
+                              billingCycle === 'annual'
+                                ? plan.price_id_annual
+                                : plan.price_id_monthly;
+
+                            return (
+                              <div
+                                key={plan.id}
+                                className="rounded-lg border border-border p-4 space-y-3"
+                              >
+                                <h4 className="font-semibold text-foreground">
+                                  {plan.name}
+                                </h4>
+                                <div className="text-2xl font-bold text-foreground">
+                                  ${billingCycle === 'annual'
+                                    ? Math.round((plan.annual_price || 0) / 12)
+                                    : plan.monthly_price}
+                                  <span className="text-sm font-normal text-muted-foreground">
+                                    /mo
+                                  </span>
+                                  {billingCycle === 'annual' && (
+                                    <span className="text-xs font-normal text-muted-foreground ml-1">
+                                      (billed ${plan.annual_price}/yr)
                                     </span>
-                                  </div>
-                                  <ul className="space-y-1.5 text-sm text-muted-foreground">
-                                    <li className="flex items-center gap-2">
-                                      <Check className="h-3.5 w-3.5 text-primary shrink-0" />
-                                      {plan.credits_limit.toLocaleString()} credits/mo
-                                    </li>
-                                    <li className="flex items-center gap-2">
-                                      <Check className="h-3.5 w-3.5 text-primary shrink-0" />
-                                      {plan.quick_match_limit === null
-                                        ? 'Unlimited'
-                                        : plan.quick_match_limit.toLocaleString()}{' '}
-                                      quick matches
-                                    </li>
-                                    <li className="flex items-center gap-2">
-                                      <Check className="h-3.5 w-3.5 text-primary shrink-0" />
-                                      {plan.max_concurrent_projects} concurrent project
-                                      {plan.max_concurrent_projects > 1 ? 's' : ''}
-                                    </li>
-                                  </ul>
-                                  {isCurrent ? (
-                                    <Button variant="outline" className="w-full" disabled>
-                                      Current Plan
-                                    </Button>
-                                  ) : priceId ? (
-                                    <Button
-                                      className="w-full"
-                                      onClick={() => handlePlanSelect(priceId)}
-                                      disabled={!!checkoutLoading}
-                                    >
-                                      {checkoutLoading === priceId ? (
-                                        <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                                      ) : null}
-                                      Get Started
-                                    </Button>
-                                  ) : (
-                                    <Button variant="outline" className="w-full" disabled>
-                                      Not Available
-                                    </Button>
                                   )}
                                 </div>
-                              );
-                            })}
-                        </div>
-
-                        {/* Founder plan */}
-                        {plans
-                          .filter((p) => p.id === 'founder')
-                          .map((plan) => (
-                            <div
-                              key={plan.id}
-                              className={`rounded-lg border p-4 ${
-                                currentPlan === 'founder'
-                                  ? 'border-primary bg-primary/5'
-                                  : 'border-border'
-                              }`}
-                            >
-                              <div className="flex items-center justify-between">
-                                <div>
-                                  <h4 className="font-semibold text-foreground">
-                                    {plan.name}
-                                  </h4>
-                                  <p className="text-xs text-muted-foreground mt-1">
-                                    One-time purchase: {plan.lifetime_credits_total.toLocaleString()} lifetime
-                                    credits + {plan.max_concurrent_projects} concurrent projects + unlimited quick match
-                                  </p>
-                                </div>
-                                {currentPlan === 'founder' ? (
-                                  <Badge variant="secondary">Current</Badge>
-                                ) : plan.price_id ? (
+                                <ul className="space-y-1.5 text-sm text-muted-foreground">
+                                  <li className="flex items-center gap-2">
+                                    <Check className="h-3.5 w-3.5 text-primary shrink-0" />
+                                    {(plan.credits_limit / 1000).toLocaleString()}k Deep Match Credits/mo
+                                  </li>
+                                  <li className="flex items-center gap-2">
+                                    <Check className="h-3.5 w-3.5 text-primary shrink-0" />
+                                    {plan.quick_match_limit === null
+                                      ? 'Unlimited'
+                                      : plan.quick_match_limit.toLocaleString()}{' '}
+                                    quick matches
+                                  </li>
+                                  <li className="flex items-center gap-2">
+                                    <Check className="h-3.5 w-3.5 text-primary shrink-0" />
+                                    {plan.max_concurrent_projects} concurrent project
+                                    {plan.max_concurrent_projects > 1 ? 's' : ''}
+                                  </li>
+                                </ul>
+                                {priceId ? (
                                   <Button
-                                    size="sm"
-                                    onClick={() => handlePlanSelect(plan.price_id!)}
+                                    className="w-full"
+                                    onClick={() => handlePlanSelect(priceId)}
                                     disabled={!!checkoutLoading}
                                   >
-                                    {checkoutLoading === plan.price_id ? (
+                                    {checkoutLoading === priceId ? (
                                       <Loader2 className="h-4 w-4 animate-spin mr-2" />
                                     ) : null}
-                                    Buy Founder
+                                    Upgrade
                                   </Button>
                                 ) : (
-                                  <Badge variant="outline">Coming Soon</Badge>
+                                  <Button variant="outline" className="w-full" disabled>
+                                    Not Available
+                                  </Button>
                                 )}
                               </div>
-                            </div>
-                          ))}
-                      </>
-                    )}
-                  </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ) : null;
+                  })()}
                 </div>
               )}
             </Card>

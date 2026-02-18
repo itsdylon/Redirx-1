@@ -4,6 +4,7 @@ Handles checkout sessions, customer portal, and webhook processing.
 """
 import stripe
 import logging
+from datetime import datetime, timezone
 from typing import Dict, Optional
 
 import sys
@@ -22,7 +23,7 @@ logger = logging.getLogger(__name__)
 # Column mapping: credits_limit, quick_match_limit, max_concurrent_projects
 PLAN_CONFIG = {
     'launch': {
-        'credits_limit': 10000,
+        'credits_limit': 0,
         'quick_match_limit': 500,
         'max_concurrent_projects': 1,
     },
@@ -52,11 +53,10 @@ PLAN_CONFIG = {
 
 # Plan display info for the /plans endpoint
 PLAN_DISPLAY = {
-    'launch': {'name': 'Launch', 'monthly_price': 0, 'description': 'Free forever'},
-    'starter': {'name': 'Starter', 'monthly_price': 59, 'description': 'For small migrations'},
-    'growth': {'name': 'Growth', 'monthly_price': 179, 'description': 'For growing teams'},
-    'scale': {'name': 'Scale', 'monthly_price': 449, 'description': 'For large enterprises'},
-    'founder': {'name': 'Founder', 'monthly_price': None, 'description': 'One-time purchase'},
+    'launch': {'name': 'Launch', 'monthly_price': 0, 'annual_price': 0, 'description': 'Free forever'},
+    'starter': {'name': 'Starter', 'monthly_price': 59, 'annual_price': 590, 'description': 'For small migrations'},
+    'growth': {'name': 'Growth', 'monthly_price': 179, 'annual_price': 1790, 'description': 'For growing teams'},
+    'scale': {'name': 'Scale', 'monthly_price': 449, 'annual_price': 4490, 'description': 'For large enterprises'},
 }
 
 # Sentinel for "unlimited" quick match
@@ -147,15 +147,24 @@ class StripeService:
 
         # Determine checkout mode based on price
         plan = self.price_to_plan.get(price_id)
+        is_credits = price_id == Config.STRIPE_PRICE_ID_CREDITS
         is_one_time = (
             price_id == Config.STRIPE_PRICE_ID_FOUNDER
-            or price_id == Config.STRIPE_PRICE_ID_CREDITS
+            or is_credits
         )
         mode = 'payment' if is_one_time else 'subscription'
 
+        line_item = {'price': price_id, 'quantity': 1}
+        if is_credits:
+            line_item['adjustable_quantity'] = {
+                'enabled': True,
+                'minimum': 1,
+                'maximum': 999999,
+            }
+
         session_params = {
             'customer': customer_id,
-            'line_items': [{'price': price_id, 'quantity': 1}],
+            'line_items': [line_item],
             'mode': mode,
             'success_url': success_url,
             'cancel_url': cancel_url,
@@ -213,7 +222,7 @@ class StripeService:
             event = stripe.Webhook.construct_event(
                 payload, sig_header, Config.STRIPE_WEBHOOK_SECRET,
             )
-        except stripe.error.SignatureVerificationError:
+        except stripe.SignatureVerificationError:
             raise ValueError("Invalid webhook signature")
 
         event_type = event['type']
@@ -252,8 +261,14 @@ class StripeService:
             user_id = result.data[0]['id']
 
         if plan == 'credits':
-            # Add-on credit purchase - add to lifetime bonus credits
-            self._add_lifetime_credits(user_id, 50000)
+            # Add-on credit purchase - each unit = 1,000 credits at $2/unit
+            try:
+                line_items = stripe.checkout.Session.list_line_items(session.get('id'))
+                units = line_items.data[0].quantity if line_items.data else 1
+            except Exception:
+                units = 1
+            credits = units * 1000
+            self._add_lifetime_credits(user_id, credits)
             return
 
         if plan not in PLAN_CONFIG:
@@ -264,7 +279,7 @@ class StripeService:
         updates = {
             'plan': plan,
             'max_concurrent_projects': config['max_concurrent_projects'],
-            'plan_started_at': 'now()',
+            'plan_started_at': datetime.now(timezone.utc).isoformat(),
         }
 
         if config.get('quick_match_limit') is not None:
@@ -477,15 +492,18 @@ class StripeService:
 
         subscription_id = result.data[0]['stripe_subscription_id']
 
+        # Clear both cancel_at_period_end and cancel_at (Stripe may use either)
         updated_sub = stripe.Subscription.modify(
             subscription_id,
             cancel_at_period_end=False,
+            cancel_at='',
         )
 
         logger.info(f"User {user_id} reactivated subscription")
         return {
             'status': 'active',
             'cancel_at_period_end': False,
+            'cancel_at': None,
             'current_period_end': updated_sub.get('current_period_end'),
         }
 
@@ -508,9 +526,9 @@ class StripeService:
             return {
                 'plan': 'launch',
                 'has_subscription': False,
-                'credits_limit': 10000,
+                'credits_limit': 0,
                 'credits_used': 0,
-                'credits_remaining': 10000,
+                'credits_remaining': 0,
                 'is_lifetime': False,
                 'lifetime_credits_total': 0,
                 'lifetime_credits_used': 0,
@@ -525,7 +543,7 @@ class StripeService:
 
         profile = result.data[0]
         plan = profile.get('plan') or 'launch'
-        credits_limit = profile.get('credits_limit') or 10000
+        credits_limit = profile.get('credits_limit') or 0
         credits_used = profile.get('credits_used') or 0
         is_lifetime = profile.get('is_lifetime') or False
         lifetime_total = profile.get('lifetime_credits_total') or 0
@@ -536,12 +554,14 @@ class StripeService:
         # Fetch billing period info from Stripe if user has an active subscription
         current_period_end = None
         cancel_at_period_end = False
+        cancel_at = None
         stripe_sub_id = profile.get('stripe_subscription_id')
         if stripe_sub_id:
             try:
                 sub = stripe.Subscription.retrieve(stripe_sub_id)
                 current_period_end = sub.get('current_period_end')
                 cancel_at_period_end = sub.get('cancel_at_period_end', False)
+                cancel_at = sub.get('cancel_at')
             except Exception as e:
                 logger.warning(f"Failed to fetch Stripe subscription {stripe_sub_id}: {e}")
 
@@ -561,6 +581,7 @@ class StripeService:
             'max_concurrent_projects': profile.get('max_concurrent_projects') or 1,
             'current_period_end': current_period_end,
             'cancel_at_period_end': cancel_at_period_end,
+            'cancel_at': cancel_at,
         }
 
     @staticmethod
@@ -574,6 +595,7 @@ class StripeService:
                 'name': display['name'],
                 'description': display['description'],
                 'monthly_price': display['monthly_price'],
+                'annual_price': display.get('annual_price', 0),
                 'credits_limit': config.get('credits_limit', 0),
                 'lifetime_credits_total': config.get('lifetime_credits_total', 0),
                 'quick_match_limit': config.get('quick_match_limit'),
@@ -590,9 +612,13 @@ class StripeService:
             elif plan_key == 'scale':
                 plan_info['price_id_monthly'] = Config.STRIPE_PRICE_ID_SCALE_MONTHLY
                 plan_info['price_id_annual'] = Config.STRIPE_PRICE_ID_SCALE_ANNUAL
-            elif plan_key == 'founder':
-                plan_info['price_id'] = Config.STRIPE_PRICE_ID_FOUNDER
 
             plans.append(plan_info)
+
+        # Include credit pack price ID (available to all plans)
+        credits_price_id = Config.STRIPE_PRICE_ID_CREDITS
+        if credits_price_id:
+            for p in plans:
+                p['credits_price_id'] = credits_price_id
 
         return plans

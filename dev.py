@@ -3,14 +3,16 @@
 Redirx Dev Server - starts all services with one command.
 
 Usage:
-    python dev.py              Start everything (frontend + backend + worker + mock sites)
+    python dev.py              Start everything (frontend + backend + worker + mock sites + stripe)
     python dev.py --no-mocks   Skip mock test sites
+    python dev.py --no-stripe  Skip Stripe CLI webhook forwarding
     python dev.py --backend    Backend + worker only (no frontend, no mocks)
 
 Services started:
     Frontend   http://localhost:3000   Vite dev server (proxies /api to Flask)
     Backend    http://localhost:5001   Flask API server
     Worker     (background)           Polls DB for pending jobs
+    Stripe     (background)           Forwards Stripe webhooks to local backend
     Old Site   http://localhost:8000   Mock old site for testing
     New Site   http://localhost:8001   Mock new site for testing
 
@@ -36,6 +38,7 @@ COLORS = {
     "frontend": "\033[36m",   # cyan
     "backend":  "\033[33m",   # yellow
     "worker":   "\033[35m",   # magenta
+    "stripe":   "\033[34m",   # blue
     "old-site": "\033[32m",   # green
     "new-site": "\033[32m",   # green
     "system":   "\033[90m",   # gray
@@ -88,6 +91,21 @@ def find_npm():
     return "npm"
 
 
+def find_stripe_cli():
+    """Check if the Stripe CLI is installed and available."""
+    for cmd in (["stripe.exe", "stripe"] if sys.platform == "win32" else ["stripe"]):
+        try:
+            result = subprocess.run(
+                [cmd, "--version"],
+                capture_output=True, timeout=5,
+            )
+            if result.returncode == 0:
+                return cmd
+        except (subprocess.SubprocessError, FileNotFoundError):
+            continue
+    return None
+
+
 def kill_existing_processes():
     """Kill any existing dev.py, backend, worker, or http.server processes."""
     import subprocess
@@ -99,7 +117,8 @@ def kill_existing_processes():
         "python.*backend.app",
         "python.*backend.worker",
         "python.*http.server.*800",
-        "node.*vite"
+        "node.*vite",
+        "stripe listen",
     ]
 
     killed_any = False
@@ -127,6 +146,7 @@ def kill_existing_processes():
 def main():
     args = sys.argv[1:]
     skip_mocks = "--no-mocks" in args
+    skip_stripe = "--no-stripe" in args
     backend_only = "--backend" in args
 
     # Enable ANSI colors on Windows
@@ -196,7 +216,21 @@ def main():
         # 3. Worker
         start("worker", [PYTHON, "-m", "backend.worker"])
 
-        # 4. Frontend (unless backend-only)
+        # 4. Stripe CLI webhook forwarding (unless skipped)
+        if not skip_stripe:
+            stripe_cmd = find_stripe_cli()
+            if stripe_cmd:
+                start("stripe", [
+                    stripe_cmd, "listen",
+                    "--forward-to", "http://localhost:5001/api/billing/webhook",
+                ])
+            else:
+                print(f"{COLORS['error']}[  error]{COLORS['reset']} Stripe CLI not found. Webhooks won't be forwarded locally.")
+                print(f"{COLORS['system']}         Install: https://docs.stripe.com/stripe-cli")
+                print(f"         Or use --no-stripe to skip.{COLORS['reset']}")
+                print()
+
+        # 5. Frontend (unless backend-only)
         if not backend_only:
             npm = find_npm()
             start("frontend", f"{npm} run dev", cwd=FRONTEND_DIR, shell=True)
@@ -206,6 +240,8 @@ def main():
         if not backend_only:
             print("  Frontend   http://localhost:3000")
         print("  Backend    http://localhost:5001")
+        if not skip_stripe and find_stripe_cli():
+            print("  Stripe     Webhooks → http://localhost:5001/api/billing/webhook")
         if not skip_mocks and not backend_only:
             print("  Old Site   http://localhost:8000")
             print("  New Site   http://localhost:8001")

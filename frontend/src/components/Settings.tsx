@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { User, Settings2, Bell, CreditCard, Check, Loader2 } from 'lucide-react';
+import { User, Settings2, Bell, CreditCard, Check, Loader2, AlertTriangle, RefreshCw, ExternalLink } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '../contexts/AuthContext';
 import { DashboardLayout } from './DashboardLayout';
@@ -56,38 +56,79 @@ export function Settings() {
   const [plans, setPlans] = useState<PlanInfo[]>([]);
   const [billingCycle, setBillingCycle] = useState<'monthly' | 'annual'>('monthly');
   const [loadingSubscription, setLoadingSubscription] = useState(true);
+  const [subscriptionError, setSubscriptionError] = useState<string | null>(null);
   const [checkoutLoading, setCheckoutLoading] = useState<string | null>(null);
   const [portalLoading, setPortalLoading] = useState(false);
+  const [postCheckoutPolling, setPostCheckoutPolling] = useState(false);
+
+  const pollingRef = useRef(false);
+
+  const fetchBillingData = useCallback(async () => {
+    setLoadingSubscription(true);
+    setSubscriptionError(null);
+    try {
+      const [sub, planList] = await Promise.all([
+        getSubscriptionStatus(),
+        getPlans(),
+      ]);
+      setSubscription(sub);
+      setPlans(planList);
+    } catch (err) {
+      setSubscriptionError(
+        err instanceof Error ? err.message : 'Failed to load subscription data'
+      );
+    } finally {
+      setLoadingSubscription(false);
+    }
+  }, []);
 
   // Fetch subscription status and plans on mount
   useEffect(() => {
-    async function fetchBillingData() {
-      setLoadingSubscription(true);
-      try {
-        const [sub, planList] = await Promise.all([
-          getSubscriptionStatus(),
-          getPlans(),
-        ]);
-        setSubscription(sub);
-        setPlans(planList);
-      } catch {
-        // Silently fail - show free tier defaults
-      } finally {
-        setLoadingSubscription(false);
-      }
-    }
     fetchBillingData();
-  }, []);
+  }, [fetchBillingData]);
 
-  // Handle return from Stripe checkout
+  // Handle return from Stripe checkout with polling for webhook processing
   useEffect(() => {
     const status = searchParams.get('status');
-    if (status === 'success') {
-      toast.success('Subscription activated! Your plan has been upgraded.');
+    if (status === 'success' && !pollingRef.current) {
+      pollingRef.current = true;
       searchParams.delete('status');
       setSearchParams(searchParams, { replace: true });
-      // Refresh subscription status
-      getSubscriptionStatus().then(setSubscription).catch(() => {});
+      setPostCheckoutPolling(true);
+
+      // Poll for subscription activation (webhook may not have processed yet)
+      const pollSubscription = async () => {
+        for (let i = 0; i < 5; i++) {
+          try {
+            const sub = await getSubscriptionStatus();
+            if (sub.plan !== 'launch' && sub.has_subscription) {
+              setSubscription(sub);
+              setPostCheckoutPolling(false);
+              toast.success(`You're now on the ${sub.plan.charAt(0).toUpperCase() + sub.plan.slice(1)} plan!`);
+              pollingRef.current = false;
+              return;
+            }
+          } catch {
+            // Keep polling
+          }
+          await new Promise((r) => setTimeout(r, 2000));
+        }
+        // Final attempt — accept whatever state we get
+        try {
+          const sub = await getSubscriptionStatus();
+          setSubscription(sub);
+          if (sub.plan !== 'launch') {
+            toast.success(`You're now on the ${sub.plan.charAt(0).toUpperCase() + sub.plan.slice(1)} plan!`);
+          } else {
+            toast.info('Your payment was received. Plan activation may take a moment — please refresh.');
+          }
+        } catch {
+          toast.info('Payment received. Please refresh to see your updated plan.');
+        }
+        setPostCheckoutPolling(false);
+        pollingRef.current = false;
+      };
+      pollSubscription();
     } else if (status === 'cancelled') {
       toast.info('Checkout cancelled. No changes were made.');
       searchParams.delete('status');
@@ -95,24 +136,34 @@ export function Settings() {
     }
   }, [searchParams, setSearchParams]);
 
-  const handleCheckout = async (priceId: string) => {
+  // New subscribers: redirect to Stripe Checkout
+  const handlePlanSelect = async (priceId: string) => {
+    if (checkoutLoading) return;
     setCheckoutLoading(priceId);
     try {
       const url = await createCheckoutSession(priceId);
       window.location.href = url;
+      return; // Don't clear loading — page is navigating away
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to start checkout');
-      setCheckoutLoading(null);
     }
+    setCheckoutLoading(null);
   };
 
+  // Existing subscribers: redirect to Stripe Customer Portal for all management
   const handleManageSubscription = async () => {
+    if (portalLoading) return;
     setPortalLoading(true);
     try {
       const url = await createPortalSession();
       window.location.href = url;
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to open billing portal');
+      const message = err instanceof Error ? err.message : 'Failed to open billing portal';
+      if (message.includes('No Stripe customer')) {
+        toast.error('No billing account found. Please contact support if you believe this is an error.');
+      } else {
+        toast.error(message);
+      }
       setPortalLoading(false);
     }
   };
@@ -481,27 +532,51 @@ export function Settings() {
 
               <Separator />
 
-              {loadingSubscription ? (
+              {/* Post-checkout polling state */}
+              {postCheckoutPolling ? (
+                <div className="flex items-center justify-center py-12 text-muted-foreground">
+                  <Loader2 className="h-5 w-5 animate-spin mr-2" />
+                  Activating your plan...
+                </div>
+              ) : loadingSubscription ? (
                 <div className="flex items-center justify-center py-12 text-muted-foreground">
                   <Loader2 className="h-5 w-5 animate-spin mr-2" />
                   Loading subscription...
                 </div>
+              ) : subscriptionError ? (
+                <div className="flex flex-col items-center justify-center py-12 text-muted-foreground gap-3">
+                  <AlertTriangle className="h-8 w-8 text-destructive" />
+                  <p className="text-sm text-foreground">{subscriptionError}</p>
+                  <Button variant="outline" size="sm" onClick={fetchBillingData}>
+                    <RefreshCw className="h-4 w-4 mr-2" />
+                    Retry
+                  </Button>
+                </div>
               ) : (
                 <div className="space-y-6 mt-6">
                   {/* Current Plan */}
-                  <div className="flex items-center justify-between rounded-lg border border-border p-4">
-                    <div className="space-y-1">
-                      <div className="flex items-center gap-2">
-                        <h3 className="text-sm font-semibold text-foreground capitalize">
-                          {currentPlan} Plan
-                        </h3>
-                        <Badge variant="secondary">Current</Badge>
+                  <div className="rounded-lg border border-border p-4 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          <h3 className="text-sm font-semibold text-foreground capitalize">
+                            {currentPlan} Plan
+                          </h3>
+                          <Badge variant="secondary">Current</Badge>
+                          {subscription?.cancel_at_period_end && (
+                            <Badge variant="destructive">Cancelling</Badge>
+                          )}
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          {subscription?.cancel_at_period_end && subscription?.current_period_end
+                            ? `Cancels on ${new Date(subscription.current_period_end * 1000).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
+                            : subscription?.current_period_end
+                              ? `Renews on ${new Date(subscription.current_period_end * 1000).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
+                              : isPaid
+                                ? `You are on the ${currentPlan} plan.`
+                                : 'You are on the free tier.'}
+                        </p>
                       </div>
-                      <p className="text-xs text-muted-foreground">
-                        {isPaid
-                          ? `You are on the ${currentPlan} plan.`
-                          : 'You are on the free tier.'}
-                      </p>
                     </div>
                     {isPaid && subscription?.has_subscription && (
                       <Button
@@ -512,7 +587,9 @@ export function Settings() {
                       >
                         {portalLoading ? (
                           <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                        ) : null}
+                        ) : (
+                          <ExternalLink className="h-4 w-4 mr-2" />
+                        )}
                         Manage Subscription
                       </Button>
                     )}
@@ -572,145 +649,168 @@ export function Settings() {
                       <h3 className="text-sm font-semibold text-foreground">
                         {isPaid ? 'Change Plan' : 'Upgrade Your Plan'}
                       </h3>
-                      <div className="flex items-center gap-2 text-sm">
-                        <button
-                          className={`px-3 py-1 rounded-md transition-colors ${
-                            billingCycle === 'monthly'
-                              ? 'bg-primary text-primary-foreground'
-                              : 'text-muted-foreground hover:text-foreground'
-                          }`}
-                          onClick={() => setBillingCycle('monthly')}
-                        >
-                          Monthly
-                        </button>
-                        <button
-                          className={`px-3 py-1 rounded-md transition-colors ${
-                            billingCycle === 'annual'
-                              ? 'bg-primary text-primary-foreground'
-                              : 'text-muted-foreground hover:text-foreground'
-                          }`}
-                          onClick={() => setBillingCycle('annual')}
-                        >
-                          Annual
-                        </button>
-                      </div>
+                      {!isPaid && (
+                        <div className="flex items-center gap-2 text-sm">
+                          <button
+                            className={`px-3 py-1 rounded-md transition-colors ${
+                              billingCycle === 'monthly'
+                                ? 'bg-primary text-primary-foreground'
+                                : 'text-muted-foreground hover:text-foreground'
+                            }`}
+                            onClick={() => setBillingCycle('monthly')}
+                          >
+                            Monthly
+                          </button>
+                          <button
+                            className={`px-3 py-1 rounded-md transition-colors ${
+                              billingCycle === 'annual'
+                                ? 'bg-primary text-primary-foreground'
+                                : 'text-muted-foreground hover:text-foreground'
+                            }`}
+                            onClick={() => setBillingCycle('annual')}
+                          >
+                            Annual
+                            <span className="ml-1 text-xs text-green-500 font-medium">Save 20%</span>
+                          </button>
+                        </div>
+                      )}
                     </div>
 
-                    <div className="grid gap-4 sm:grid-cols-2">
-                      {plans
-                        .filter((p) => p.id !== 'launch' && p.id !== 'founder')
-                        .map((plan) => {
-                          const priceId =
-                            billingCycle === 'annual'
-                              ? plan.price_id_annual
-                              : plan.price_id_monthly;
-                          const isCurrent = plan.id === currentPlan;
+                    {isPaid && subscription?.has_subscription ? (
+                      <div className="rounded-md border border-border bg-muted/30 p-4 text-sm text-muted-foreground">
+                        <p>
+                          To change your plan, cancel your subscription, update payment methods, or view invoices, use the{' '}
+                          <button
+                            className="text-primary underline underline-offset-2 hover:text-primary/80"
+                            onClick={handleManageSubscription}
+                            disabled={portalLoading}
+                          >
+                            Stripe Customer Portal
+                          </button>
+                          .
+                        </p>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="grid gap-4 sm:grid-cols-2">
+                          {plans
+                            .filter((p) => p.id !== 'launch' && p.id !== 'founder')
+                            .map((plan) => {
+                              const priceId =
+                                billingCycle === 'annual'
+                                  ? plan.price_id_annual
+                                  : plan.price_id_monthly;
+                              const isCurrent = plan.id === currentPlan;
 
-                          return (
+                              return (
+                                <div
+                                  key={plan.id}
+                                  className={`rounded-lg border p-4 space-y-3 ${
+                                    isCurrent
+                                      ? 'border-primary bg-primary/5'
+                                      : 'border-border'
+                                  }`}
+                                >
+                                  <div className="flex items-center justify-between">
+                                    <h4 className="font-semibold text-foreground">
+                                      {plan.name}
+                                    </h4>
+                                    {isCurrent && (
+                                      <Badge variant="secondary">Current</Badge>
+                                    )}
+                                  </div>
+                                  <div className="text-2xl font-bold text-foreground">
+                                    ${plan.monthly_price}
+                                    <span className="text-sm font-normal text-muted-foreground">
+                                      /mo
+                                    </span>
+                                  </div>
+                                  <ul className="space-y-1.5 text-sm text-muted-foreground">
+                                    <li className="flex items-center gap-2">
+                                      <Check className="h-3.5 w-3.5 text-primary shrink-0" />
+                                      {plan.credits_limit.toLocaleString()} credits/mo
+                                    </li>
+                                    <li className="flex items-center gap-2">
+                                      <Check className="h-3.5 w-3.5 text-primary shrink-0" />
+                                      {plan.quick_match_limit === null
+                                        ? 'Unlimited'
+                                        : plan.quick_match_limit.toLocaleString()}{' '}
+                                      quick matches
+                                    </li>
+                                    <li className="flex items-center gap-2">
+                                      <Check className="h-3.5 w-3.5 text-primary shrink-0" />
+                                      {plan.max_concurrent_projects} concurrent project
+                                      {plan.max_concurrent_projects > 1 ? 's' : ''}
+                                    </li>
+                                  </ul>
+                                  {isCurrent ? (
+                                    <Button variant="outline" className="w-full" disabled>
+                                      Current Plan
+                                    </Button>
+                                  ) : priceId ? (
+                                    <Button
+                                      className="w-full"
+                                      onClick={() => handlePlanSelect(priceId)}
+                                      disabled={!!checkoutLoading}
+                                    >
+                                      {checkoutLoading === priceId ? (
+                                        <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                                      ) : null}
+                                      Get Started
+                                    </Button>
+                                  ) : (
+                                    <Button variant="outline" className="w-full" disabled>
+                                      Not Available
+                                    </Button>
+                                  )}
+                                </div>
+                              );
+                            })}
+                        </div>
+
+                        {/* Founder plan */}
+                        {plans
+                          .filter((p) => p.id === 'founder')
+                          .map((plan) => (
                             <div
                               key={plan.id}
-                              className={`rounded-lg border p-4 space-y-3 ${
-                                isCurrent
+                              className={`rounded-lg border p-4 ${
+                                currentPlan === 'founder'
                                   ? 'border-primary bg-primary/5'
                                   : 'border-border'
                               }`}
                             >
                               <div className="flex items-center justify-between">
-                                <h4 className="font-semibold text-foreground">
-                                  {plan.name}
-                                </h4>
-                                {isCurrent && (
+                                <div>
+                                  <h4 className="font-semibold text-foreground">
+                                    {plan.name}
+                                  </h4>
+                                  <p className="text-xs text-muted-foreground mt-1">
+                                    One-time purchase: {plan.lifetime_credits_total.toLocaleString()} lifetime
+                                    credits + {plan.max_concurrent_projects} concurrent projects + unlimited quick match
+                                  </p>
+                                </div>
+                                {currentPlan === 'founder' ? (
                                   <Badge variant="secondary">Current</Badge>
+                                ) : plan.price_id ? (
+                                  <Button
+                                    size="sm"
+                                    onClick={() => handlePlanSelect(plan.price_id!)}
+                                    disabled={!!checkoutLoading}
+                                  >
+                                    {checkoutLoading === plan.price_id ? (
+                                      <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                                    ) : null}
+                                    Buy Founder
+                                  </Button>
+                                ) : (
+                                  <Badge variant="outline">Coming Soon</Badge>
                                 )}
                               </div>
-                              <div className="text-2xl font-bold text-foreground">
-                                ${plan.monthly_price}
-                                <span className="text-sm font-normal text-muted-foreground">
-                                  /mo
-                                </span>
-                              </div>
-                              <ul className="space-y-1.5 text-sm text-muted-foreground">
-                                <li className="flex items-center gap-2">
-                                  <Check className="h-3.5 w-3.5 text-primary shrink-0" />
-                                  {plan.credits_limit.toLocaleString()} credits/mo
-                                </li>
-                                <li className="flex items-center gap-2">
-                                  <Check className="h-3.5 w-3.5 text-primary shrink-0" />
-                                  {plan.quick_match_limit === null
-                                    ? 'Unlimited'
-                                    : plan.quick_match_limit.toLocaleString()}{' '}
-                                  quick matches
-                                </li>
-                                <li className="flex items-center gap-2">
-                                  <Check className="h-3.5 w-3.5 text-primary shrink-0" />
-                                  {plan.max_concurrent_projects} concurrent project
-                                  {plan.max_concurrent_projects > 1 ? 's' : ''}
-                                </li>
-                              </ul>
-                              {isCurrent ? (
-                                <Button variant="outline" className="w-full" disabled>
-                                  Current Plan
-                                </Button>
-                              ) : priceId ? (
-                                <Button
-                                  className="w-full"
-                                  onClick={() => handleCheckout(priceId)}
-                                  disabled={checkoutLoading === priceId}
-                                >
-                                  {checkoutLoading === priceId ? (
-                                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                                  ) : null}
-                                  {isPaid ? 'Switch Plan' : 'Get Started'}
-                                </Button>
-                              ) : (
-                                <Button variant="outline" className="w-full" disabled>
-                                  Not Available
-                                </Button>
-                              )}
                             </div>
-                          );
-                        })}
-                    </div>
-
-                    {/* Founder plan */}
-                    {plans
-                      .filter((p) => p.id === 'founder')
-                      .map((plan) => (
-                        <div
-                          key={plan.id}
-                          className={`rounded-lg border p-4 ${
-                            currentPlan === 'founder'
-                              ? 'border-primary bg-primary/5'
-                              : 'border-border'
-                          }`}
-                        >
-                          <div className="flex items-center justify-between">
-                            <div>
-                              <h4 className="font-semibold text-foreground">
-                                {plan.name}
-                              </h4>
-                              <p className="text-xs text-muted-foreground mt-1">
-                                One-time purchase: {plan.lifetime_credits_total.toLocaleString()} lifetime
-                                credits + {plan.max_concurrent_projects} concurrent projects + unlimited quick match
-                              </p>
-                            </div>
-                            {currentPlan === 'founder' ? (
-                              <Badge variant="secondary">Current</Badge>
-                            ) : plan.price_id ? (
-                              <Button
-                                size="sm"
-                                onClick={() => handleCheckout(plan.price_id!)}
-                                disabled={checkoutLoading === plan.price_id}
-                              >
-                                {checkoutLoading === plan.price_id ? (
-                                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                                ) : null}
-                                Buy Founder
-                              </Button>
-                            ) : null}
-                          </div>
-                        </div>
-                      ))}
+                          ))}
+                      </>
+                    )}
                   </div>
                 </div>
               )}

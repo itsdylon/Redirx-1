@@ -374,6 +374,121 @@ class StripeService:
 
         logger.info(f"Added {amount} lifetime credits to user {user_id}")
 
+    def update_subscription(self, user_id: str, price_id: str) -> Dict:
+        """
+        Change an existing subscription to a different price (plan swap with proration).
+
+        Args:
+            user_id: Supabase user UUID.
+            price_id: New Stripe price ID to switch to.
+
+        Returns:
+            Dict with updated plan info.
+        """
+        result = self.client.table('user_profiles').select(
+            'stripe_subscription_id'
+        ).eq('id', user_id).execute()
+
+        if not result.data or not result.data[0].get('stripe_subscription_id'):
+            raise ValueError("No active subscription found for this user")
+
+        subscription_id = result.data[0]['stripe_subscription_id']
+
+        # Retrieve the subscription to get the current item ID
+        sub = stripe.Subscription.retrieve(subscription_id)
+        if not sub['items']['data']:
+            raise ValueError("Subscription has no items")
+
+        item_id = sub['items']['data'][0]['id']
+
+        # Modify subscription: swap price with proration
+        updated_sub = stripe.Subscription.modify(
+            subscription_id,
+            items=[{'id': item_id, 'price': price_id}],
+            proration_behavior='create_prorations',
+        )
+
+        # Determine the new plan from the price ID
+        plan = self.price_to_plan.get(price_id)
+        if plan and plan in PLAN_CONFIG:
+            config = PLAN_CONFIG[plan]
+            updates = {
+                'plan': plan,
+                'credits_limit': config['credits_limit'],
+                'max_concurrent_projects': config['max_concurrent_projects'],
+            }
+            if config.get('quick_match_limit') is not None:
+                updates['quick_match_limit'] = config['quick_match_limit']
+            else:
+                updates['quick_match_limit'] = UNLIMITED_QUICK_MATCH
+
+            self.client.table('user_profiles').update(updates).eq('id', user_id).execute()
+
+        logger.info(f"User {user_id} switched subscription to {plan}")
+        return {'plan': plan, 'status': 'updated'}
+
+    def cancel_subscription(self, user_id: str) -> Dict:
+        """
+        Cancel a subscription at the end of the current billing period.
+
+        Args:
+            user_id: Supabase user UUID.
+
+        Returns:
+            Dict with cancellation info.
+        """
+        result = self.client.table('user_profiles').select(
+            'stripe_subscription_id'
+        ).eq('id', user_id).execute()
+
+        if not result.data or not result.data[0].get('stripe_subscription_id'):
+            raise ValueError("No active subscription found for this user")
+
+        subscription_id = result.data[0]['stripe_subscription_id']
+
+        updated_sub = stripe.Subscription.modify(
+            subscription_id,
+            cancel_at_period_end=True,
+        )
+
+        logger.info(f"User {user_id} scheduled subscription cancellation")
+        return {
+            'status': 'cancelling',
+            'cancel_at_period_end': True,
+            'current_period_end': updated_sub.get('current_period_end'),
+        }
+
+    def reactivate_subscription(self, user_id: str) -> Dict:
+        """
+        Undo a pending cancellation by setting cancel_at_period_end back to False.
+
+        Args:
+            user_id: Supabase user UUID.
+
+        Returns:
+            Dict with reactivation info.
+        """
+        result = self.client.table('user_profiles').select(
+            'stripe_subscription_id'
+        ).eq('id', user_id).execute()
+
+        if not result.data or not result.data[0].get('stripe_subscription_id'):
+            raise ValueError("No active subscription found for this user")
+
+        subscription_id = result.data[0]['stripe_subscription_id']
+
+        updated_sub = stripe.Subscription.modify(
+            subscription_id,
+            cancel_at_period_end=False,
+        )
+
+        logger.info(f"User {user_id} reactivated subscription")
+        return {
+            'status': 'active',
+            'cancel_at_period_end': False,
+            'current_period_end': updated_sub.get('current_period_end'),
+        }
+
     def get_subscription_status(self, user_id: str) -> Dict:
         """
         Get the current subscription status for a user.
@@ -404,6 +519,8 @@ class StripeService:
                 'quick_match_used': 0,
                 'quick_match_unlimited': False,
                 'max_concurrent_projects': 1,
+                'current_period_end': None,
+                'cancel_at_period_end': False,
             }
 
         profile = result.data[0]
@@ -416,9 +533,21 @@ class StripeService:
         quick_limit = profile.get('quick_match_limit') or 500
         quick_used = profile.get('quick_match_used') or 0
 
+        # Fetch billing period info from Stripe if user has an active subscription
+        current_period_end = None
+        cancel_at_period_end = False
+        stripe_sub_id = profile.get('stripe_subscription_id')
+        if stripe_sub_id:
+            try:
+                sub = stripe.Subscription.retrieve(stripe_sub_id)
+                current_period_end = sub.get('current_period_end')
+                cancel_at_period_end = sub.get('cancel_at_period_end', False)
+            except Exception as e:
+                logger.warning(f"Failed to fetch Stripe subscription {stripe_sub_id}: {e}")
+
         return {
             'plan': plan,
-            'has_subscription': bool(profile.get('stripe_subscription_id')),
+            'has_subscription': bool(stripe_sub_id),
             'credits_limit': credits_limit,
             'credits_used': credits_used,
             'credits_remaining': max(0, credits_limit - credits_used),
@@ -430,6 +559,8 @@ class StripeService:
             'quick_match_used': quick_used,
             'quick_match_unlimited': quick_limit >= UNLIMITED_QUICK_MATCH,
             'max_concurrent_projects': profile.get('max_concurrent_projects') or 1,
+            'current_period_end': current_period_end,
+            'cancel_at_period_end': cancel_at_period_end,
         }
 
     @staticmethod

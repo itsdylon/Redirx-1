@@ -6,9 +6,10 @@ import { Card, CardHeader, CardTitle, CardContent } from './ui/card';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Separator } from './ui/separator';
-import { ArrowLeft, User, Building, Mail, CreditCard, BarChart3, Clock } from 'lucide-react';
+import { ArrowLeft, User, Building, Mail, CreditCard, BarChart3, Clock, Zap } from 'lucide-react';
 import { API_BASE_URL, getAuthHeaders } from '../api/config';
 import { formatDate } from '../utils/date';
+import { getSubscriptionStatus, type SubscriptionStatus } from '../api/billing';
 
 interface UserProfile {
   id: string;
@@ -42,6 +43,7 @@ export function AccountPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
+  const [subscription, setSubscription] = useState<SubscriptionStatus | null>(null);
 
   // Form state for editing
   const [editMode, setEditMode] = useState(false);
@@ -85,6 +87,14 @@ export function AccountPage() {
       if (sessionsRes.ok) {
         const sessionsData = await sessionsRes.json();
         setSessions(sessionsData.sessions || []);
+      }
+
+      // Fetch subscription status
+      try {
+        const sub = await getSubscriptionStatus();
+        setSubscription(sub);
+      } catch {
+        // Non-critical - leave subscription as null
       }
     } catch (err) {
       setError('Failed to load profile data');
@@ -286,6 +296,54 @@ export function AccountPage() {
                 </div>
               </CardContent>
             </Card>
+
+            {/* Credits Card */}
+            {subscription && (
+              <Card>
+                <CardHeader className="border-b border-border">
+                  <CardTitle className="flex items-center gap-2">
+                    <Zap className="h-5 w-5" />
+                    Credits
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="pt-6">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="text-2xl font-semibold text-foreground">
+                        {subscription.credits_remaining.toLocaleString()}
+                      </div>
+                      <div className="text-sm text-muted-foreground">
+                        monthly credits remaining
+                      </div>
+                    </div>
+                    <div className="text-right space-y-1">
+                      <div className="text-sm text-muted-foreground">
+                        {subscription.credits_used.toLocaleString()} of{' '}
+                        {subscription.credits_limit.toLocaleString()} used
+                      </div>
+                      {subscription.is_lifetime && subscription.lifetime_credits_remaining > 0 && (
+                        <div className="text-sm text-muted-foreground">
+                          + {subscription.lifetime_credits_remaining.toLocaleString()} lifetime
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  <Separator className="my-4" />
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-muted-foreground capitalize">
+                      Plan: {subscription.plan}
+                    </span>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => navigate('/settings?tab=subscription')}
+                    >
+                      Manage Subscription
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
 
             {/* Recent Sessions Card */}
             <Card>

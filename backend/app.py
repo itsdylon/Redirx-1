@@ -19,6 +19,7 @@ from backend.routes.auth_routes import auth_blueprint
 from backend.routes.user_routes import user_blueprint
 from backend.routes.demo_routes import demo_blueprint
 from backend.routes.url_match_routes import url_match_blueprint
+from backend.routes.billing_routes import billing_blueprint
 
 def create_app():
     app = Flask(__name__)
@@ -36,6 +37,7 @@ def create_app():
     app.register_blueprint(user_blueprint, url_prefix="/api/user")
     app.register_blueprint(demo_blueprint, url_prefix="/api/demo")
     app.register_blueprint(url_match_blueprint, url_prefix="/api")
+    app.register_blueprint(billing_blueprint, url_prefix="/api/billing")
 
     @app.route("/")
     def home():

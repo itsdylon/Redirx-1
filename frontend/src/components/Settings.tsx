@@ -99,20 +99,39 @@ export function Settings() {
       setSearchParams(searchParams, { replace: true });
       setPostCheckoutPolling(true);
 
-      // Poll for subscription activation (webhook may not have processed yet)
+      // Read what was purchased so we poll for the right change
       const previousPlan = sessionStorage.getItem('pre_checkout_plan') || 'launch';
+      const purchaseType = sessionStorage.getItem('checkout_purchase_type') || 'plan';
+      const previousLifetimeCredits = parseInt(sessionStorage.getItem('pre_checkout_lifetime_credits') || '0', 10);
       sessionStorage.removeItem('pre_checkout_plan');
+      sessionStorage.removeItem('checkout_purchase_type');
+      sessionStorage.removeItem('pre_checkout_lifetime_credits');
+
+      const isCredits = purchaseType === 'credits';
 
       const pollSubscription = async () => {
         for (let i = 0; i < 10; i++) {
           try {
             const sub = await getSubscriptionStatus();
-            if (sub.plan !== previousPlan) {
-              setSubscription(sub);
-              setPostCheckoutPolling(false);
-              toast.success(`You're now on the ${sub.plan.charAt(0).toUpperCase() + sub.plan.slice(1)} plan!`);
-              pollingRef.current = false;
-              return;
+            if (isCredits) {
+              // For credit purchases, check if lifetime_credits_total increased
+              if (sub.lifetime_credits_total > previousLifetimeCredits) {
+                setSubscription(sub);
+                setPostCheckoutPolling(false);
+                const added = sub.lifetime_credits_total - previousLifetimeCredits;
+                toast.success(`${added.toLocaleString()} credits added to your account!`);
+                pollingRef.current = false;
+                return;
+              }
+            } else {
+              // For plan upgrades, check if plan changed
+              if (sub.plan !== previousPlan) {
+                setSubscription(sub);
+                setPostCheckoutPolling(false);
+                toast.success(`You're now on the ${sub.plan.charAt(0).toUpperCase() + sub.plan.slice(1)} plan!`);
+                pollingRef.current = false;
+                return;
+              }
             }
           } catch {
             // Keep polling
@@ -123,7 +142,14 @@ export function Settings() {
         try {
           const sub = await getSubscriptionStatus();
           setSubscription(sub);
-          if (sub.plan !== previousPlan) {
+          if (isCredits) {
+            if (sub.lifetime_credits_total > previousLifetimeCredits) {
+              const added = sub.lifetime_credits_total - previousLifetimeCredits;
+              toast.success(`${added.toLocaleString()} credits added to your account!`);
+            } else {
+              toast.info('Your payment was received. Credits may take a moment to appear — please refresh.');
+            }
+          } else if (sub.plan !== previousPlan) {
             toast.success(`You're now on the ${sub.plan.charAt(0).toUpperCase() + sub.plan.slice(1)} plan!`);
           } else {
             toast.info('Your payment was received. Plan activation may take a moment — please refresh.');
@@ -147,8 +173,16 @@ export function Settings() {
     if (checkoutLoading) return;
     setCheckoutLoading(priceId);
     try {
-      // Store current plan so post-checkout polling can detect the change
+      // Detect credit pack purchases by comparing with the credits price ID
+      const creditsPriceId = plans.find(p => p.credits_price_id)?.credits_price_id;
+      const isCredits = priceId === creditsPriceId;
+
+      // Store current state so post-checkout polling can detect the change
       sessionStorage.setItem('pre_checkout_plan', currentPlan);
+      sessionStorage.setItem('checkout_purchase_type', isCredits ? 'credits' : 'plan');
+      if (isCredits && subscription) {
+        sessionStorage.setItem('pre_checkout_lifetime_credits', String(subscription.lifetime_credits_total || 0));
+      }
       const url = await createCheckoutSession(priceId);
       window.location.href = url;
       return; // Don't clear loading — page is navigating away
@@ -754,54 +788,77 @@ export function Settings() {
                   )}
 
                   {/* Credits & Usage */}
-                  {subscription && (
-                    <div className="space-y-3">
-                      <div className="flex items-center justify-between">
-                        <Label>Deep Match Credits</Label>
-                        <span className="text-sm text-muted-foreground">
-                          {subscription.credits_limit > 0
-                            ? `${subscription.credits_remaining.toLocaleString()} remaining`
-                            : 'Upgrade to unlock'}
-                        </span>
-                      </div>
-                      {subscription.credits_limit > 0 && (
-                        <>
-                          <Progress
-                            value={Math.round(
-                              ((subscription.credits_limit - subscription.credits_used) /
-                                subscription.credits_limit) *
-                                100
-                            )}
-                          />
-                          <div className="flex items-center justify-between text-xs text-muted-foreground">
-                            <span>
-                              {subscription.credits_used.toLocaleString()} of{' '}
-                              {subscription.credits_limit.toLocaleString()} monthly credits used
-                            </span>
-                            {subscription.is_lifetime && subscription.lifetime_credits_remaining > 0 && (
+                  {subscription && (() => {
+                    const hasMonthlyCredits = subscription.credits_limit > 0;
+                    const hasLifetimeCredits = subscription.is_lifetime && subscription.lifetime_credits_remaining > 0;
+                    const hasAnyCredits = hasMonthlyCredits || hasLifetimeCredits;
+
+                    return (
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between">
+                          <Label>Deep Match Credits</Label>
+                          <span className="text-sm text-muted-foreground">
+                            {hasAnyCredits
+                              ? hasMonthlyCredits
+                                ? `${subscription.credits_remaining.toLocaleString()} remaining`
+                                : `${subscription.lifetime_credits_remaining.toLocaleString()} lifetime credits`
+                              : 'Upgrade to unlock'}
+                          </span>
+                        </div>
+                        {hasMonthlyCredits && (
+                          <>
+                            <Progress
+                              value={Math.round(
+                                ((subscription.credits_limit - subscription.credits_used) /
+                                  subscription.credits_limit) *
+                                  100
+                              )}
+                            />
+                            <div className="flex items-center justify-between text-xs text-muted-foreground">
                               <span>
-                                + {subscription.lifetime_credits_remaining.toLocaleString()} lifetime credits
+                                {subscription.credits_used.toLocaleString()} of{' '}
+                                {subscription.credits_limit.toLocaleString()} monthly credits used
                               </span>
-                            )}
-                          </div>
-                        </>
-                      )}
-                      <div className="flex items-center justify-between mt-2">
-                        <Label>Quick Match</Label>
-                        <span className="text-sm text-muted-foreground">
-                          {subscription.quick_match_unlimited
-                            ? 'Unlimited'
-                            : `${(subscription.quick_match_limit - subscription.quick_match_used).toLocaleString()} of ${subscription.quick_match_limit.toLocaleString()}/mo`}
-                        </span>
+                              {hasLifetimeCredits && (
+                                <span>
+                                  + {subscription.lifetime_credits_remaining.toLocaleString()} lifetime credits
+                                </span>
+                              )}
+                            </div>
+                          </>
+                        )}
+                        {!hasMonthlyCredits && hasLifetimeCredits && (
+                          <>
+                            <Progress
+                              value={Math.round(
+                                (subscription.lifetime_credits_remaining /
+                                  subscription.lifetime_credits_total) *
+                                  100
+                              )}
+                            />
+                            <div className="text-xs text-muted-foreground">
+                              {subscription.lifetime_credits_used.toLocaleString()} of{' '}
+                              {subscription.lifetime_credits_total.toLocaleString()} lifetime credits used
+                            </div>
+                          </>
+                        )}
+                        <div className="flex items-center justify-between mt-2">
+                          <Label>Quick Match</Label>
+                          <span className="text-sm text-muted-foreground">
+                            {subscription.quick_match_unlimited
+                              ? 'Unlimited'
+                              : `${(subscription.quick_match_limit - subscription.quick_match_used).toLocaleString()} of ${subscription.quick_match_limit.toLocaleString()}/mo`}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <Label>Concurrent Projects</Label>
+                          <span className="text-sm text-muted-foreground">
+                            {subscription.max_concurrent_projects}
+                          </span>
+                        </div>
                       </div>
-                      <div className="flex items-center justify-between">
-                        <Label>Concurrent Projects</Label>
-                        <span className="text-sm text-muted-foreground">
-                          {subscription.max_concurrent_projects}
-                        </span>
-                      </div>
-                    </div>
-                  )}
+                    );
+                  })()}
 
                   {/* Credit Packs */}
                   {isPaid && (() => {

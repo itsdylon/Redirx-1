@@ -251,25 +251,35 @@ class StripeService:
 
         logger.info(f"Processing Stripe webhook: {event_type} (event {event_id})")
 
-        # Idempotency check: skip if we already processed this event
+        # Idempotency check: skip if we already processed this event.
+        # Wrapped in try/except so webhooks still work if migration 016
+        # (stripe_webhook_events table) hasn't been applied yet.
         if event_id:
-            existing = self.client.table('stripe_webhook_events').select('stripe_event_id').eq(
-                'stripe_event_id', event_id
-            ).execute()
-            if existing.data:
-                logger.info(f"Skipping duplicate webhook event {event_id}")
-                return {'status': 'ok', 'event_type': event_type, 'duplicate': True}
+            try:
+                existing = self.client.table('stripe_webhook_events').select('stripe_event_id').eq(
+                    'stripe_event_id', event_id
+                ).execute()
+                if existing.data:
+                    logger.info(f"Skipping duplicate webhook event {event_id}")
+                    return {'status': 'ok', 'event_type': event_type, 'duplicate': True}
+            except Exception as e:
+                logger.warning(f"Idempotency check failed (stripe_webhook_events table may not exist): {e}. "
+                             f"Proceeding with webhook processing.")
 
-        if event_type == 'checkout.session.completed':
-            self._handle_checkout_completed(data)
-        elif event_type == 'customer.subscription.updated':
-            self._handle_subscription_updated(data)
-        elif event_type == 'customer.subscription.deleted':
-            self._handle_subscription_deleted(data)
-        elif event_type == 'invoice.payment_failed':
-            logger.warning(f"Payment failed for customer {data.get('customer')}")
-        else:
-            logger.info(f"Unhandled webhook event type: {event_type}")
+        try:
+            if event_type == 'checkout.session.completed':
+                self._handle_checkout_completed(data)
+            elif event_type == 'customer.subscription.updated':
+                self._handle_subscription_updated(data)
+            elif event_type == 'customer.subscription.deleted':
+                self._handle_subscription_deleted(data)
+            elif event_type == 'invoice.payment_failed':
+                logger.warning(f"Payment failed for customer {data.get('customer')}")
+            else:
+                logger.info(f"Unhandled webhook event type: {event_type}")
+        except Exception as e:
+            logger.error(f"WEBHOOK HANDLER FAILED for {event_type} (event {event_id}): {e}", exc_info=True)
+            raise
 
         # Record processed event for idempotency
         if event_id:
@@ -290,6 +300,8 @@ class StripeService:
         user_id = session.get('metadata', {}).get('supabase_user_id')
         plan = session.get('metadata', {}).get('plan')
         mode = session.get('mode')
+
+        logger.info(f"Checkout completed: user_id={user_id}, plan={plan}, mode={mode}, customer={customer_id}")
 
         if not user_id:
             # Fallback: look up user by stripe_customer_id

@@ -55,11 +55,13 @@ class TrialService:
     # ========================================================================
 
     def create_campaign(self, name: str, slug: str, channel: str = None,
-                        template_version: str = None, owner_user_id: str = None) -> dict:
+                        template_version: str = None, owner_user_id: str = None,
+                        invite_type: str = 'trial') -> dict:
         """Create a new trial campaign."""
         data = {
             'name': name,
             'slug': slug,
+            'invite_type': invite_type,
         }
         if channel:
             data['channel'] = channel
@@ -84,7 +86,7 @@ class TrialService:
             'status'
         ).eq('campaign_id', campaign_id).execute()
 
-        stats = {'created': 0, 'sent': 0, 'redeemed': 0, 'expired': 0, 'revoked': 0}
+        stats = {'created': 0, 'sent': 0, 'pending_payment': 0, 'redeemed': 0, 'expired': 0, 'revoked': 0}
         for row in (result.data or []):
             status = row.get('status', '')
             if status in stats:
@@ -101,7 +103,8 @@ class TrialService:
                          expires_days: int = 90,
                          credits_granted: int = 50000,
                          trial_days: int = 14,
-                         created_by_user_id: str = None) -> list[dict]:
+                         created_by_user_id: str = None,
+                         invite_type: str = 'trial') -> list[dict]:
         """
         Generate invite codes for a campaign.
 
@@ -135,6 +138,7 @@ class TrialService:
                 'max_redemptions': 1,
                 'redemptions': 0,
                 'expires_at': expires_at,
+                'invite_type': invite_type,
             }
             if email:
                 invite_data['recipient_email'] = email
@@ -236,10 +240,11 @@ class TrialService:
         code_hash = self._hash_code(raw_code)
 
         # Look up candidates by prefix (indexed)
+        # Also accept 'pending_payment' so users can retry abandoned checkouts
         result = self.client.table('trial_invites').select(
-            '*, trial_campaigns(name, slug)'
+            '*, trial_campaigns(name, slug, invite_type)'
         ).eq('code_prefix', prefix).in_(
-            'status', ['created', 'sent']
+            'status', ['created', 'sent', 'pending_payment']
         ).execute()
 
         candidates = result.data or []
@@ -346,6 +351,66 @@ class TrialService:
             'trial_expires_at': trial_expires,
             'campaign_name': invite.get('trial_campaigns', {}).get('name', ''),
         }
+
+    # ========================================================================
+    # Founder checkout operations
+    # ========================================================================
+
+    def initiate_founder_checkout(self, invite_id: str, stripe_session_id: str,
+                                  user_id: str) -> None:
+        """Set invite to pending_payment and store the Stripe session ID."""
+        now = datetime.now(timezone.utc).isoformat()
+        self.client.table('trial_invites').update({
+            'status': 'pending_payment',
+            'stripe_checkout_session_id': stripe_session_id,
+            'updated_at': now,
+        }).eq('id', invite_id).execute()
+
+        self.client.table('invite_events').insert({
+            'invite_id': invite_id,
+            'event': 'pending_payment',
+            'actor_id': user_id,
+            'meta': {'stripe_session_id': stripe_session_id},
+        }).execute()
+
+    def redeem_founder_invite(self, invite_id: str, user_id: str,
+                              email: str) -> None:
+        """Mark a founder invite as redeemed after Stripe payment completes."""
+        now = datetime.now(timezone.utc).isoformat()
+
+        # Update invite status
+        self.client.table('trial_invites').update({
+            'status': 'redeemed',
+            'redeemed_at': now,
+            'redeemed_by_user_id': user_id,
+            'redemptions': 1,
+            'updated_at': now,
+        }).eq('id', invite_id).execute()
+
+        # Get invite to find campaign_id for acquisition tracking
+        invite_result = self.client.table('trial_invites').select(
+            'campaign_id'
+        ).eq('id', invite_id).execute()
+
+        campaign_id = None
+        if invite_result.data:
+            campaign_id = invite_result.data[0].get('campaign_id')
+
+        # Set acquisition tracking on user_profiles
+        self.client.table('user_profiles').update({
+            'acquisition_campaign_id': campaign_id,
+            'acquisition_invite_id': invite_id,
+        }).eq('id', user_id).execute()
+
+        # Log redemption event
+        self.client.table('invite_events').insert({
+            'invite_id': invite_id,
+            'event': 'redeemed',
+            'actor_id': user_id,
+            'meta': {'user_email': email, 'type': 'founder'},
+        }).execute()
+
+        logger.info(f"Founder invite {invite_id} redeemed by user {user_id}")
 
     # ========================================================================
     # Admin operations

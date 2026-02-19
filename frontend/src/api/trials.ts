@@ -10,6 +10,7 @@ export interface Campaign {
   slug: string;
   channel?: string;
   template_version?: string;
+  invite_type?: 'trial' | 'founder';
   owner_user_id?: string;
   created_at: string;
   stats?: CampaignStats;
@@ -31,6 +32,7 @@ export interface Invite {
   recipient_email?: string;
   campaign_id: string;
   status: string;
+  invite_type?: 'trial' | 'founder';
   credits_granted: number;
   trial_days: number;
   max_redemptions: number;
@@ -43,7 +45,7 @@ export interface Invite {
   notes?: string;
   created_at: string;
   updated_at: string;
-  trial_campaigns?: { name: string; slug: string };
+  trial_campaigns?: { name: string; slug: string; invite_type?: string };
 }
 
 export interface GeneratedInvite {
@@ -57,6 +59,7 @@ export interface GeneratedInvite {
 export interface ValidationResult {
   valid: boolean;
   error?: string;
+  invite_type?: 'trial' | 'founder';
   campaign_name?: string;
   campaign_slug?: string;
   trial_days?: number;
@@ -82,6 +85,7 @@ export async function createCampaign(data: {
   slug: string;
   channel?: string;
   template_version?: string;
+  invite_type?: 'trial' | 'founder';
 }): Promise<Campaign> {
   const res = await fetch(`${API_BASE_URL}/api/admin/trials/campaigns`, {
     method: 'POST',
@@ -122,6 +126,7 @@ export async function generateInvites(data: {
   expires_days?: number;
   credits_granted?: number;
   trial_days?: number;
+  invite_type?: 'trial' | 'founder';
 }): Promise<GeneratedInvite[]> {
   const res = await fetch(`${API_BASE_URL}/api/admin/trials/invites`, {
     method: 'POST',
@@ -234,6 +239,23 @@ export async function redeemTrialCode(code: string): Promise<RedemptionResult> {
   if (!res.ok) {
     const err = await res.json();
     throw new Error(err.error || 'Redemption failed');
+  }
+  return res.json();
+}
+
+// ============================================================================
+// Founder: Checkout
+// ============================================================================
+
+export async function createFounderCheckout(code: string): Promise<{ url: string }> {
+  const res = await fetch(`${API_BASE_URL}/api/founder/checkout`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+    body: JSON.stringify({ code }),
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.error || 'Checkout failed');
   }
   return res.json();
 }

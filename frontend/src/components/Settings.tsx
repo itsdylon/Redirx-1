@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { useSearchParams } from 'react-router-dom';
-import { User, Settings2, Bell, CreditCard, Check, Loader2, AlertTriangle, RefreshCw, ExternalLink } from 'lucide-react';
+import { useSearchParams, useNavigate } from 'react-router-dom';
+import { User, Settings2, Bell, CreditCard, Check, Loader2, AlertTriangle, RefreshCw, ExternalLink, Crown, ArrowRight } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '../contexts/AuthContext';
 import { DashboardLayout } from './DashboardLayout';
@@ -60,6 +60,7 @@ export function Settings() {
   const [subscriptionError, setSubscriptionError] = useState<string | null>(null);
   const [checkoutLoading, setCheckoutLoading] = useState<string | null>(null);
   const [portalLoading, setPortalLoading] = useState(false);
+  const [founderCheckoutLoading, setFounderCheckoutLoading] = useState(false);
 
   const [postCheckoutPolling, setPostCheckoutPolling] = useState(false);
 
@@ -168,6 +169,24 @@ export function Settings() {
       }
       setPortalLoading(false);
     }
+  };
+
+  const handleFounderCheckout = async () => {
+    const founderPriceId = plans.find(p => p.founder_price_id)?.founder_price_id;
+    if (!founderPriceId || founderCheckoutLoading) return;
+    setFounderCheckoutLoading(true);
+    try {
+      const origin = window.location.origin;
+      const url = await createCheckoutSession(founderPriceId, {
+        success_url: `${origin}/founder/success`,
+        cancel_url: `${origin}/settings?tab=subscription&status=cancelled`,
+      });
+      window.location.href = url;
+      return;
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to start checkout');
+    }
+    setFounderCheckoutLoading(false);
   };
 
   const currentPlan = subscription?.plan || 'launch';
@@ -603,6 +622,99 @@ export function Settings() {
                       </Button>
                     )}
                   </div>
+
+                  {/* Founder Package CTA */}
+                  {currentPlan !== 'founder' && (
+                    <div className="relative overflow-hidden rounded-lg border-2 border-yellow-500 bg-gray-900 p-6">
+                      {/* Decorative corner accent */}
+                      <div className="absolute top-0 right-0 w-24 h-24 bg-yellow-500/10 rounded-bl-full" />
+
+                      <div className="flex items-start gap-4 relative">
+                        <div className="w-12 h-12 rounded-full bg-yellow-500 flex items-center justify-center shrink-0">
+                          <Crown className="h-6 w-6 text-gray-900" />
+                        </div>
+                        <div className="flex-1 space-y-3">
+                          <div>
+                            <div className="flex items-center gap-2 mb-1">
+                              <h3 className="text-base font-semibold text-white">
+                                Founder Package
+                              </h3>
+                              <Badge className="bg-yellow-500/20 text-yellow-300 border-yellow-500/40">
+                                Limited Time
+                              </Badge>
+                            </div>
+                            {currentPlan === 'premium_trial' ? (
+                              <p className="text-sm text-gray-400">
+                                All premium trial members are eligible for the Founder package — lock in lifetime access before your trial ends. This offer is only available for a limited time. One payment, no recurring fees.
+                              </p>
+                            ) : (
+                              <p className="text-sm text-gray-400">
+                                An exclusive, limited-time offer for early partners shaping the future of redirect automation. One payment, lifetime access — no recurring fees.
+                              </p>
+                            )}
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-x-6 gap-y-1.5 text-sm">
+                            <div className="flex items-center gap-2 text-gray-300">
+                              <Check className="h-3.5 w-3.5 text-yellow-500 shrink-0" />
+                              500,000 lifetime credits
+                            </div>
+                            <div className="flex items-center gap-2 text-gray-300">
+                              <Check className="h-3.5 w-3.5 text-yellow-500 shrink-0" />
+                              Unlimited Quick Match
+                            </div>
+                            <div className="flex items-center gap-2 text-gray-300">
+                              <Check className="h-3.5 w-3.5 text-yellow-500 shrink-0" />
+                              3 concurrent projects
+                            </div>
+                            <div className="flex items-center gap-2 text-gray-300">
+                              <Check className="h-3.5 w-3.5 text-yellow-500 shrink-0" />
+                              Lifetime access — forever
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-4 pt-1">
+                            <div className="text-white">
+                              <span className="text-2xl font-bold">$999</span>
+                              <span className="text-sm text-gray-400 ml-1">one-time</span>
+                            </div>
+                            {currentPlan === 'premium_trial' ? (
+                              <Button
+                                size="sm"
+                                className="bg-yellow-500 text-gray-900 hover:bg-yellow-400"
+                                onClick={handleFounderCheckout}
+                                disabled={founderCheckoutLoading}
+                              >
+                                {founderCheckoutLoading ? (
+                                  <>
+                                    <Loader2 className="h-4 w-4 animate-spin mr-1" />
+                                    Redirecting...
+                                  </>
+                                ) : (
+                                  <>
+                                    Get Founder Access
+                                    <ArrowRight className="h-4 w-4 ml-1" />
+                                  </>
+                                )}
+                              </Button>
+                            ) : (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="border-yellow-500/50 text-yellow-300 hover:bg-yellow-500/10"
+                                onClick={() => {
+                                  window.open('https://forms.gle/placeholder', '_blank');
+                                }}
+                              >
+                                Request Invite
+                                <ArrowRight className="h-4 w-4 ml-1" />
+                              </Button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
 
                   {/* Cancellation Warning Banner */}
                   {isCancelling && cancelDate && (

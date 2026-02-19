@@ -48,16 +48,12 @@ export function Sidebar({ onLogout }: SidebarProps) {
       <div className="flex items-center justify-between p-4 border-b border-border">
         {!isCollapsed && (
           <div className="flex items-center gap-2">
-            <div className="w-8 h-8 bg-primary rounded flex items-center justify-center">
-              <span className="text-primary-foreground font-bold text-sm">RX</span>
-            </div>
+            <img src="/favicon.png" alt="RedirX" className="w-8 h-8 rounded object-contain" />
             <span className="font-semibold text-foreground">RedirX</span>
           </div>
         )}
         {isCollapsed && (
-          <div className="w-8 h-8 bg-primary rounded flex items-center justify-center mx-auto">
-            <span className="text-primary-foreground font-bold text-sm">RX</span>
-          </div>
+          <img src="/favicon.png" alt="RedirX" className="w-8 h-8 rounded object-contain mx-auto" />
         )}
       </div>
 

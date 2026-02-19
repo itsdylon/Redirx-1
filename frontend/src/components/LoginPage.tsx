@@ -66,7 +66,7 @@ export function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4">
+    <div className="min-h-screen flex flex-col items-center justify-center p-4">
       <Card className="w-full max-w-md p-8">
         <div className="mb-6">
           <h1 className="text-2xl font-bold text-foreground">Login to Redirx</h1>
@@ -132,6 +132,18 @@ export function LoginPage() {
           </Link>
         </p>
       </Card>
+
+      <div className="mt-8 max-w-md text-center px-4">
+        <p className="text-xs text-muted-foreground leading-relaxed">
+          Limited early partner program for agencies shaping the next generation of redirect automation.{' '}
+          <a
+            href="#"
+            className="text-primary hover:underline font-medium"
+          >
+            Apply for access &rarr;
+          </a>
+        </p>
+      </div>
     </div>
   );
 }

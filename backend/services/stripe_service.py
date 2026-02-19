@@ -129,9 +129,10 @@ class StripeService:
         price_id: str,
         success_url: str,
         cancel_url: str,
-    ) -> str:
+        extra_metadata: dict = None,
+    ) -> tuple[str, str]:
         """
-        Create a Stripe Checkout session and return the URL.
+        Create a Stripe Checkout session and return the URL and session ID.
 
         Args:
             user_id: Supabase user UUID.
@@ -139,9 +140,10 @@ class StripeService:
             price_id: Stripe price ID for the plan.
             success_url: URL to redirect to after successful payment.
             cancel_url: URL to redirect to if checkout is cancelled.
+            extra_metadata: Additional metadata to merge into session metadata.
 
         Returns:
-            Stripe Checkout session URL.
+            Tuple of (Stripe Checkout session URL, session ID).
         """
         customer_id = self._get_or_create_customer(user_id, email)
 
@@ -162,24 +164,42 @@ class StripeService:
                 'maximum': 999999,
             }
 
+        metadata = {
+            'supabase_user_id': user_id,
+            'plan': plan or 'credits',
+        }
+        if extra_metadata:
+            metadata.update(extra_metadata)
+
         session_params = {
             'customer': customer_id,
             'line_items': [line_item],
             'mode': mode,
             'success_url': success_url,
             'cancel_url': cancel_url,
-            'metadata': {
-                'supabase_user_id': user_id,
-                'plan': plan or 'credits',
-            },
+            'metadata': metadata,
         }
 
         # For subscriptions, allow promotion codes
         if mode == 'subscription':
             session_params['allow_promotion_codes'] = True
 
+        # Add package details to checkout page for founder plan
+        if plan == 'founder':
+            session_params['custom_text'] = {
+                'submit': {
+                    'message': (
+                        'Founder Package includes:\n'
+                        '- 500,000 lifetime mapping credits\n'
+                        '- Unlimited Quick Match\n'
+                        '- Up to 3 concurrent projects\n'
+                        '- Lifetime access — no recurring fees'
+                    ),
+                },
+            }
+
         session = stripe.checkout.Session.create(**session_params)
-        return session.url
+        return session.url, session.id
 
     def create_portal_session(self, user_id: str, return_url: str) -> str:
         """
@@ -301,6 +321,19 @@ class StripeService:
 
         self.client.table('user_profiles').update(updates).eq('id', user_id).execute()
         logger.info(f"User {user_id} upgraded to {plan}")
+
+        # If this checkout was initiated via a founder invite, mark the invite as redeemed
+        invite_id = session.get('metadata', {}).get('invite_id')
+        if invite_id and plan == 'founder':
+            try:
+                from backend.services.trial_service import TrialService
+                trial_service = TrialService()
+                # Look up user email for the redemption record
+                user_result = self.client.table('user_profiles').select('id').eq('id', user_id).execute()
+                email = session.get('customer_details', {}).get('email', '')
+                trial_service.redeem_founder_invite(invite_id, user_id, email)
+            except Exception as e:
+                logger.error(f"Failed to redeem founder invite {invite_id}: {e}")
 
     def _handle_subscription_updated(self, subscription: Dict) -> None:
         """Handle subscription plan change (upgrade/downgrade)."""
@@ -621,5 +654,11 @@ class StripeService:
         if credits_price_id:
             for p in plans:
                 p['credits_price_id'] = credits_price_id
+
+        # Include founder price ID as a top-level field on the response
+        founder_price_id = Config.STRIPE_PRICE_ID_FOUNDER
+        if founder_price_id:
+            for p in plans:
+                p['founder_price_id'] = founder_price_id
 
         return plans

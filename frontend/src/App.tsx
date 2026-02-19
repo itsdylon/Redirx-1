@@ -11,6 +11,8 @@ import { AccountPage } from './components/AccountPage';
 import { Settings } from './components/Settings';
 import { DemoPage } from './components/DemoPage';
 import { TrialLandingPage } from './components/TrialLandingPage';
+import { FounderLandingPage } from './components/FounderLandingPage';
+import { FounderSuccessPage } from './components/FounderSuccessPage';
 import { AdminTrials } from './components/AdminTrials';
 import { Toaster } from './components/ui/sonner';
 
@@ -49,6 +51,10 @@ export default function App() {
         path="/trial"
         element={<TrialLandingPage />}
       />
+      <Route
+        path="/founder"
+        element={<FounderLandingPage />}
+      />
 
       {/* Protected routes */}
       <Route
@@ -78,6 +84,10 @@ export default function App() {
       <Route
         path="/account"
         element={user ? <AccountPage /> : <Navigate to="/login" replace />}
+      />
+      <Route
+        path="/founder/success"
+        element={user ? <FounderSuccessPage /> : <Navigate to="/login" replace />}
       />
       <Route
         path="/admin/trials"

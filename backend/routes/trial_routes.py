@@ -6,6 +6,7 @@ import logging
 
 from backend.services.auth_service import require_auth, require_admin
 from backend.services.trial_service import TrialService
+from backend.services.stripe_service import StripeService
 from backend.services.demo_rate_limiter import DemoRateLimiter
 
 logger = logging.getLogger(__name__)
@@ -50,6 +51,7 @@ def create_campaign():
             channel=data.get('channel'),
             template_version=data.get('template_version'),
             owner_user_id=request.user.id,
+            invite_type=data.get('invite_type', 'trial'),
         )
         return jsonify({'campaign': campaign}), 201
     except Exception as e:
@@ -115,6 +117,7 @@ def generate_invites():
                 credits_granted=int(request.form.get('credits_granted', 50000)),
                 trial_days=int(request.form.get('trial_days', 14)),
                 created_by_user_id=request.user.id,
+                invite_type=request.form.get('invite_type', 'trial'),
             )
         else:
             data = request.get_json()
@@ -129,6 +132,7 @@ def generate_invites():
                 credits_granted=data.get('credits_granted', 50000),
                 trial_days=data.get('trial_days', 14),
                 created_by_user_id=request.user.id,
+                invite_type=data.get('invite_type', 'trial'),
             )
 
         return jsonify({'invites': invites}), 201
@@ -240,8 +244,10 @@ def validate_code():
             return jsonify({'valid': False, 'error': error_msg})
 
         campaign = invite.get('trial_campaigns', {})
+        invite_type = invite.get('invite_type') or campaign.get('invite_type') or 'trial'
         return jsonify({
             'valid': True,
+            'invite_type': invite_type,
             'campaign_name': campaign.get('name', ''),
             'campaign_slug': campaign.get('slug', ''),
             'trial_days': invite.get('trial_days', 14),
@@ -251,6 +257,72 @@ def validate_code():
     except Exception as e:
         logger.error(f"Code validation failed: {e}")
         return jsonify({'error': 'Validation failed'}), 500
+
+
+@trial_blueprint.route('/founder/checkout', methods=['POST'])
+@require_auth
+def founder_checkout():
+    """
+    Create a Stripe Checkout session for Founder package purchase via invite code.
+    Requires a valid founder invite code.
+    """
+    data = request.get_json()
+    if not data or not data.get('code'):
+        return jsonify({'error': 'code is required'}), 400
+
+    try:
+        service = _get_trial_service()
+        is_valid, error_msg, invite = service.validate_code(data['code'])
+
+        if not is_valid:
+            return jsonify({'error': error_msg}), 400
+
+        # Verify this is a founder invite
+        campaign = invite.get('trial_campaigns', {})
+        invite_type = invite.get('invite_type') or campaign.get('invite_type') or 'trial'
+        if invite_type != 'founder':
+            return jsonify({'error': 'This invite code is not for the Founder package'}), 400
+
+        # Check recipient email restriction
+        if invite.get('recipient_email'):
+            if invite['recipient_email'].lower() != request.user.email.lower():
+                return jsonify({'error': 'This invite code was issued to a different email address'}), 400
+
+        # Check user is not already on founder plan
+        from redirx.database import SupabaseClient
+        client = SupabaseClient.get_client()
+        profile_result = client.table('user_profiles').select(
+            'plan, is_lifetime'
+        ).eq('id', request.user.id).single().execute()
+
+        if profile_result.data:
+            current_plan = profile_result.data.get('plan', 'launch')
+            if current_plan == 'founder':
+                return jsonify({'error': 'You are already on the Founder plan'}), 400
+
+        # Create Stripe Checkout session
+        from redirx.config import Config
+        if not Config.STRIPE_PRICE_ID_FOUNDER:
+            return jsonify({'error': 'Founder pricing not configured'}), 500
+
+        origin = request.headers.get('Origin', 'http://localhost:3000')
+        stripe_service = StripeService()
+        url, session_id = stripe_service.create_checkout_session(
+            user_id=request.user.id,
+            email=request.user.email,
+            price_id=Config.STRIPE_PRICE_ID_FOUNDER,
+            success_url=f'{origin}/founder/success',
+            cancel_url=f'{origin}/founder?code={data["code"]}',
+            extra_metadata={'invite_id': invite['id']},
+        )
+
+        # Mark invite as pending_payment
+        service.initiate_founder_checkout(invite['id'], session_id, request.user.id)
+
+        return jsonify({'url': url})
+    except Exception as e:
+        logger.error(f"Founder checkout failed: {e}")
+        return jsonify({'error': 'Failed to create checkout session'}), 500
 
 
 @trial_blueprint.route('/trials/redeem', methods=['POST'])

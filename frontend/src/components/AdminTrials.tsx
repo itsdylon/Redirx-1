@@ -60,6 +60,7 @@ import { toast } from 'sonner';
 const STATUS_COLORS: Record<string, string> = {
   created: 'bg-blue-500/10 text-blue-600 border-blue-500/30',
   sent: 'bg-yellow-500/10 text-yellow-600 border-yellow-500/30',
+  pending_payment: 'bg-orange-500/10 text-orange-600 border-orange-500/30',
   redeemed: 'bg-green-500/10 text-green-600 border-green-500/30',
   expired: 'bg-gray-500/10 text-gray-500 border-gray-500/30',
   revoked: 'bg-red-500/10 text-red-600 border-red-500/30',
@@ -73,7 +74,7 @@ export function AdminTrials() {
   // Campaigns
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [showCreateCampaign, setShowCreateCampaign] = useState(false);
-  const [campaignForm, setCampaignForm] = useState({ name: '', slug: '', channel: '', template_version: '' });
+  const [campaignForm, setCampaignForm] = useState({ name: '', slug: '', channel: '', template_version: '', invite_type: 'trial' as 'trial' | 'founder' });
   const [creatingCampaign, setCreatingCampaign] = useState(false);
 
   // Invites
@@ -95,6 +96,7 @@ export function AdminTrials() {
   // Generated codes display
   const [generatedCodes, setGeneratedCodes] = useState<GeneratedInvite[]>([]);
   const [generatedCampaignSlug, setGeneratedCampaignSlug] = useState('');
+  const [generatedCampaignType, setGeneratedCampaignType] = useState<'trial' | 'founder'>('trial');
   const [showCodes, setShowCodes] = useState(false);
 
   // Revoke confirmation
@@ -175,9 +177,10 @@ export function AdminTrials() {
         slug: campaignForm.slug,
         channel: campaignForm.channel || undefined,
         template_version: campaignForm.template_version || undefined,
+        invite_type: campaignForm.invite_type,
       });
       setShowCreateCampaign(false);
-      setCampaignForm({ name: '', slug: '', channel: '', template_version: '' });
+      setCampaignForm({ name: '', slug: '', channel: '', template_version: '', invite_type: 'trial' });
       await loadCampaigns();
       toast.success('Campaign created');
     } catch (err: any) {
@@ -191,6 +194,8 @@ export function AdminTrials() {
     if (!genCampaignId) return;
     setGenerating(true);
     try {
+      const campaign = campaigns.find((c) => c.id === genCampaignId);
+      const campType = (campaign?.invite_type || 'trial') as 'trial' | 'founder';
       let codes: GeneratedInvite[];
       if (generateMode === 'csv' && genCsvFile) {
         codes = await generateInvitesWithCsv(genCampaignId, genCsvFile, {
@@ -205,10 +210,11 @@ export function AdminTrials() {
           credits_granted: genCredits,
           trial_days: genTrialDays,
           expires_days: genExpiresDays,
+          invite_type: campType,
         });
       }
-      const campaign = campaigns.find((c) => c.id === genCampaignId);
       setGeneratedCampaignSlug(campaign?.slug || '');
+      setGeneratedCampaignType(campType);
       setGeneratedCodes(codes);
       setShowGenerate(false);
       setShowCodes(true);
@@ -236,28 +242,32 @@ export function AdminTrials() {
     }
   }
 
-  function handleCopyAll() {
+  function _buildInviteUrl(rawCode: string, slug: string, type: 'trial' | 'founder') {
     const origin = window.location.origin;
+    const path = type === 'founder' ? '/founder' : '/trial';
+    return `${origin}${path}?code=${encodeURIComponent(rawCode)}&cid=${encodeURIComponent(slug)}`;
+  }
+
+  function handleCopyAll() {
     const text = generatedCodes
-      .map((c) => `${origin}/trial?code=${encodeURIComponent(c.raw_code)}&cid=${encodeURIComponent(generatedCampaignSlug)}`)
+      .map((c) => _buildInviteUrl(c.raw_code, generatedCampaignSlug, generatedCampaignType))
       .join('\n');
     navigator.clipboard.writeText(text);
     toast.success(`${generatedCodes.length} invite links copied to clipboard`);
   }
 
   function handleCopyInviteLink(code: string) {
-    const url = `${window.location.origin}/trial?code=${encodeURIComponent(code)}&cid=${encodeURIComponent(generatedCampaignSlug)}`;
+    const url = _buildInviteUrl(code, generatedCampaignSlug, generatedCampaignType);
     navigator.clipboard.writeText(url);
     toast.success('Invite link copied');
   }
 
   function handleExportCsv() {
     const slug = generatedCampaignSlug;
-    const origin = window.location.origin;
 
     const header = 'code,recipient_email,redeem_url,campaign_slug,created_at';
     const rows = generatedCodes.map((c) => {
-      const redeemUrl = `${origin}/trial?code=${encodeURIComponent(c.raw_code)}&cid=${encodeURIComponent(slug)}`;
+      const redeemUrl = _buildInviteUrl(c.raw_code, slug, generatedCampaignType);
       return `${c.raw_code},${c.recipient_email || ''},${redeemUrl},${slug},${c.created_at}`;
     });
 
@@ -379,6 +389,7 @@ export function AdminTrials() {
               <TableHeader>
                 <TableRow>
                   <TableHead>Name</TableHead>
+                  <TableHead>Type</TableHead>
                   <TableHead>Slug</TableHead>
                   <TableHead>Channel</TableHead>
                   <TableHead className="text-center">Created</TableHead>
@@ -392,6 +403,16 @@ export function AdminTrials() {
                 {campaigns.map((c) => (
                   <TableRow key={c.id}>
                     <TableCell className="font-medium">{c.name}</TableCell>
+                    <TableCell>
+                      <Badge
+                        variant="outline"
+                        className={c.invite_type === 'founder'
+                          ? 'bg-yellow-100 text-yellow-800 border-yellow-300'
+                          : 'bg-blue-50 text-blue-500 border-blue-500'}
+                      >
+                        {c.invite_type === 'founder' ? 'Founder' : 'Trial'}
+                      </Badge>
+                    </TableCell>
                     <TableCell>
                       <code className="text-xs bg-muted px-1.5 py-0.5 rounded">{c.slug}</code>
                     </TableCell>
@@ -495,6 +516,7 @@ export function AdminTrials() {
               <TableHeader>
                 <TableRow>
                   <TableHead>Code Prefix</TableHead>
+                  <TableHead>Type</TableHead>
                   <TableHead>Recipient</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Campaign</TableHead>
@@ -506,12 +528,24 @@ export function AdminTrials() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {invites.map((inv) => (
+                {invites.map((inv) => {
+                  const invType = inv.invite_type || inv.trial_campaigns?.invite_type || 'trial';
+                  return (
                   <TableRow key={inv.id}>
                     <TableCell>
                       <code className="text-xs bg-muted px-1.5 py-0.5 rounded">
                         rx_{inv.code_prefix}...
                       </code>
+                    </TableCell>
+                    <TableCell>
+                      <Badge
+                        variant="outline"
+                        className={invType === 'founder'
+                          ? 'bg-yellow-100 text-yellow-800 border-yellow-300'
+                          : 'bg-blue-50 text-blue-500 border-blue-500'}
+                      >
+                        {invType === 'founder' ? 'Founder' : 'Trial'}
+                      </Badge>
                     </TableCell>
                     <TableCell className="text-sm">{inv.recipient_email || '-'}</TableCell>
                     <TableCell>
@@ -539,13 +573,14 @@ export function AdminTrials() {
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center gap-1">
-                        {inv.code && ['created', 'sent'].includes(inv.status) && (
+                        {inv.code && ['created', 'sent', 'pending_payment'].includes(inv.status) && (
                           <Button
                             variant="outline"
                             size="sm"
                             onClick={() => {
                               const slug = inv.trial_campaigns?.slug || '';
-                              const url = `${window.location.origin}/trial?code=${encodeURIComponent(inv.code!)}&cid=${encodeURIComponent(slug)}`;
+                              const path = invType === 'founder' ? '/founder' : '/trial';
+                              const url = `${window.location.origin}${path}?code=${encodeURIComponent(inv.code!)}&cid=${encodeURIComponent(slug)}`;
                               navigator.clipboard.writeText(url);
                               toast.success('Invite link copied');
                             }}
@@ -585,7 +620,8 @@ export function AdminTrials() {
                       </div>
                     </TableCell>
                   </TableRow>
-                ))}
+                  );
+                })}
               </TableBody>
             </Table>
           )}
@@ -638,6 +674,21 @@ export function AdminTrials() {
                 onChange={(e) => setCampaignForm((f) => ({ ...f, template_version: e.target.value }))}
                 placeholder="e.g. v1"
               />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-foreground mb-1">Invite Type</label>
+              <Select
+                value={campaignForm.invite_type}
+                onValueChange={(v) => setCampaignForm((f) => ({ ...f, invite_type: v as 'trial' | 'founder' }))}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="trial">Trial (free activation)</SelectItem>
+                  <SelectItem value="founder">Founder ($999 purchase)</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
           </div>
           <DialogFooter>
@@ -723,32 +774,43 @@ export function AdminTrials() {
 
             <Separator />
 
-            <div className="grid grid-cols-3 gap-3">
-              <div>
-                <label className="block text-xs font-medium text-muted-foreground mb-1">Credits</label>
-                <Input
-                  type="number"
-                  value={genCredits}
-                  onChange={(e) => setGenCredits(parseInt(e.target.value) || 50000)}
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-muted-foreground mb-1">Trial days</label>
-                <Input
-                  type="number"
-                  value={genTrialDays}
-                  onChange={(e) => setGenTrialDays(parseInt(e.target.value) || 14)}
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-muted-foreground mb-1">Code expiry (days)</label>
-                <Input
-                  type="number"
-                  value={genExpiresDays}
-                  onChange={(e) => setGenExpiresDays(parseInt(e.target.value) || 90)}
-                />
-              </div>
-            </div>
+            {(() => {
+              const selectedCampaign = campaigns.find((c) => c.id === genCampaignId);
+              const isFounder = selectedCampaign?.invite_type === 'founder';
+              return isFounder ? (
+                <div className="rounded bg-yellow-50 border border-yellow-300 p-3 text-sm text-yellow-800">
+                  Founder invites redirect users to Stripe Checkout ($999 one-time).
+                  Credits, trial days, and plan limits are set automatically after payment.
+                </div>
+              ) : (
+                <div className="grid grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-muted-foreground mb-1">Credits</label>
+                    <Input
+                      type="number"
+                      value={genCredits}
+                      onChange={(e) => setGenCredits(parseInt(e.target.value) || 50000)}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-muted-foreground mb-1">Trial days</label>
+                    <Input
+                      type="number"
+                      value={genTrialDays}
+                      onChange={(e) => setGenTrialDays(parseInt(e.target.value) || 14)}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-muted-foreground mb-1">Code expiry (days)</label>
+                    <Input
+                      type="number"
+                      value={genExpiresDays}
+                      onChange={(e) => setGenExpiresDays(parseInt(e.target.value) || 90)}
+                    />
+                  </div>
+                </div>
+              );
+            })()}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowGenerate(false)}>Cancel</Button>
@@ -789,7 +851,7 @@ export function AdminTrials() {
               </thead>
               <tbody>
                 {generatedCodes.map((c, i) => {
-                  const link = `${window.location.origin}/trial?code=${encodeURIComponent(c.raw_code)}&cid=${encodeURIComponent(generatedCampaignSlug)}`;
+                  const link = _buildInviteUrl(c.raw_code, generatedCampaignSlug, generatedCampaignType);
                   return (
                     <tr key={i} className="border-b border-border/50">
                       <td className="p-2 max-w-[320px] truncate" title={link}>{link}</td>

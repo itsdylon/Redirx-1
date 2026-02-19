@@ -39,7 +39,7 @@ def create_checkout_session():
 
     try:
         service = _get_stripe_service()
-        url = service.create_checkout_session(
+        url, _ = service.create_checkout_session(
             user_id=request.user.id,
             email=request.user.email,
             price_id=price_id,

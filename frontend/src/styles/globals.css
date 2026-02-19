@@ -197,3 +197,19 @@ html {
 .dark [data-slot="table-row"]:hover {
   background-color: #000000cc;
 }
+
+/* Founder success page raining images */
+@keyframes founder-fall {
+  0% {
+    transform: translateY(0) rotate(0deg);
+    opacity: var(--rain-opacity, 0.2);
+  }
+  100% {
+    transform: translateY(calc(100vh + 100px)) rotate(360deg);
+    opacity: 0;
+  }
+}
+
+.founder-rain-item {
+  animation: founder-fall linear infinite;
+}

@@ -34,6 +34,7 @@ export interface PlanInfo {
   price_id_annual?: string;
   price_id?: string; // for one-time plans like founder
   credits_price_id?: string;
+  founder_price_id?: string;
 }
 
 export async function getSubscriptionStatus(): Promise<SubscriptionStatus> {
@@ -51,11 +52,18 @@ export async function getPlans(): Promise<PlanInfo[]> {
   return data.plans;
 }
 
-export async function createCheckoutSession(priceId: string): Promise<string> {
+export async function createCheckoutSession(
+  priceId: string,
+  options?: { success_url?: string; cancel_url?: string },
+): Promise<string> {
+  const body: Record<string, string> = { price_id: priceId };
+  if (options?.success_url) body.success_url = options.success_url;
+  if (options?.cancel_url) body.cancel_url = options.cancel_url;
+
   const res = await fetch(`${API_BASE_URL}/api/billing/create-checkout-session`, {
     method: 'POST',
     headers: getAuthHeaders(),
-    body: JSON.stringify({ price_id: priceId }),
+    body: JSON.stringify(body),
   });
   if (!res.ok) {
     const data = await res.json();

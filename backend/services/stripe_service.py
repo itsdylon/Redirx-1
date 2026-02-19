@@ -347,10 +347,14 @@ class StripeService:
             updates['credits_used'] = 0
             updates['quick_match_used'] = 0
         elif plan == 'founder':
-            # One-time founder plan: set lifetime flags
+            # One-time founder plan: set lifetime flags and clear trial monthly credits
             updates['is_lifetime'] = True
             updates['lifetime_credits_total'] = config.get('lifetime_credits_total', 500000)
             updates['lifetime_credits_used'] = 0
+            updates['credits_limit'] = 0
+            updates['credits_used'] = 0
+            updates['quick_match_used'] = 0
+            updates['trial_expires_at'] = None
 
         result = self.client.table('user_profiles').update(updates).eq('id', user_id).execute()
         if not result.data:

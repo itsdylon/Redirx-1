@@ -51,7 +51,13 @@ export function LoginPage() {
 
     try {
       await login(email, password);
-      navigate('/');
+      const redirect = localStorage.getItem('auth_redirect');
+      if (redirect) {
+        localStorage.removeItem('auth_redirect');
+        navigate(redirect);
+      } else {
+        navigate('/');
+      }
     } catch (err: any) {
       setError(err.message);
     } finally {

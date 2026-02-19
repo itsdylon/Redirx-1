@@ -14,6 +14,8 @@ interface User {
   quick_match_limit?: number | null;
   quick_match_used?: number;
   max_concurrent_projects?: number;
+  trial_expires_at?: string;
+  is_admin?: boolean;
 }
 
 interface RegisterResult {

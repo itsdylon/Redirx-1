@@ -38,6 +38,10 @@ class Config:
     STRIPE_PRICE_ID_FOUNDER: Optional[str] = os.getenv('STRIPE_PRICE_ID_FOUNDER')
     STRIPE_PRICE_ID_CREDITS: Optional[str] = os.getenv('STRIPE_PRICE_ID_CREDITS')
 
+    # Trial Invite System
+    TRIAL_INVITE_PEPPER: Optional[str] = os.getenv('TRIAL_INVITE_PEPPER')
+    CRON_SECRET: Optional[str] = os.getenv('CRON_SECRET')
+
     # Matching Thresholds
     # HIGH = 0.9+, MEDIUM = 0.85-0.9, LOW = 0.7-0.85, < 0.7 = rejected (orphaned)
     HIGH_CONFIDENCE_THRESHOLD: float = float(os.getenv('HIGH_CONFIDENCE_THRESHOLD', '0.85'))

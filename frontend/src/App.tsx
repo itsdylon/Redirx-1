@@ -10,6 +10,8 @@ import { ReviewInterface } from './components/ReviewInterface';
 import { AccountPage } from './components/AccountPage';
 import { Settings } from './components/Settings';
 import { DemoPage } from './components/DemoPage';
+import { TrialLandingPage } from './components/TrialLandingPage';
+import { AdminTrials } from './components/AdminTrials';
 import { Toaster } from './components/ui/sonner';
 
 export default function App() {
@@ -43,6 +45,10 @@ export default function App() {
         path="/demo"
         element={<DemoPage />}
       />
+      <Route
+        path="/trial"
+        element={<TrialLandingPage />}
+      />
 
       {/* Protected routes */}
       <Route
@@ -72,6 +78,10 @@ export default function App() {
       <Route
         path="/account"
         element={user ? <AccountPage /> : <Navigate to="/login" replace />}
+      />
+      <Route
+        path="/admin/trials"
+        element={user ? <AdminTrials /> : <Navigate to="/login" replace />}
       />
     </Routes>
   );

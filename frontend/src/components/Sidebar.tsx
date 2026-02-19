@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { LayoutDashboard, FolderOpen, Settings, ChevronLeft, ChevronRight, LogOut, Moon, Sun } from 'lucide-react';
+import { LayoutDashboard, FolderOpen, Settings, ChevronLeft, ChevronRight, LogOut, Moon, Sun, Shield } from 'lucide-react';
 import { useTheme } from 'next-themes';
+import { useAuth } from '../contexts/AuthContext';
 import { Button } from './ui/button';
 
 interface SidebarProps {
@@ -12,6 +13,7 @@ export function Sidebar({ onLogout }: SidebarProps) {
   const navigate = useNavigate();
   const location = useLocation();
   const { theme, setTheme } = useTheme();
+  const { user } = useAuth();
   const [isCollapsed, setIsCollapsed] = useState(false);
 
   // Load collapsed state from localStorage
@@ -33,6 +35,7 @@ export function Sidebar({ onLogout }: SidebarProps) {
     { icon: LayoutDashboard, label: 'Dashboard', path: '/dashboard' },
     { icon: FolderOpen, label: 'All Projects', path: '/projects' },
     { icon: Settings, label: 'Settings', path: '/settings' },
+    ...(user?.is_admin ? [{ icon: Shield, label: 'Admin', path: '/admin/trials' }] : []),
   ];
 
   return (

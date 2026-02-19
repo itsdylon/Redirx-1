@@ -224,3 +224,35 @@ def require_auth(f):
         return f(*args, **kwargs)
 
     return decorated_function
+
+
+def require_admin(f):
+    """
+    Decorator to protect admin-only Flask routes.
+    Must be stacked AFTER @require_auth so request.user is available.
+
+    Usage:
+        @app.route('/admin/something')
+        @require_auth
+        @require_admin
+        def admin_endpoint():
+            ...
+
+    Returns 403 if the user is not an admin.
+    """
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        client = SupabaseClient.get_client()
+        result = client.table('user_profiles').select('is_admin').eq(
+            'id', request.user.id
+        ).single().execute()
+
+        if not result.data or not result.data.get('is_admin'):
+            return jsonify({
+                "success": False,
+                "error": "Admin access required"
+            }), 403
+
+        return f(*args, **kwargs)
+
+    return decorated_function

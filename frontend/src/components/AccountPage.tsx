@@ -73,7 +73,7 @@ export function AccountPage() {
           full_name: user?.full_name || '',
           company: '',
           plan: user?.plan || 'launch',
-          credits_limit: user?.credits_limit || 10000,
+          credits_limit: user?.credits_limit || 0,
           credits_used: user?.credits_used || 0,
         });
         setFullName(user?.full_name || '');
@@ -279,7 +279,7 @@ export function AccountPage() {
                     <div className="text-sm text-muted-foreground">
                       of {(profile?.is_lifetime
                         ? (profile?.lifetime_credits_total || 0)
-                        : (profile?.credits_limit || 10000)
+                        : (profile?.credits_limit || 0)
                       ).toLocaleString()} Deep Match credits used
                       {profile?.is_lifetime ? ' (lifetime)' : ''}
                     </div>
@@ -289,7 +289,7 @@ export function AccountPage() {
                     <div className="text-lg font-medium text-foreground">
                       {(profile?.is_lifetime
                         ? (profile?.lifetime_credits_total || 0) - (profile?.lifetime_credits_used || 0)
-                        : (profile?.credits_limit || 10000) - (profile?.credits_used || 0)
+                        : (profile?.credits_limit || 0) - (profile?.credits_used || 0)
                       ).toLocaleString()}
                     </div>
                   </div>

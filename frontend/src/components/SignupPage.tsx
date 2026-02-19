@@ -102,8 +102,14 @@ export function SignupPage() {
         setEmailSent(true);
         setSentToEmail(result.email || email);
       } else {
-        // Immediate login - navigate to dashboard
-        navigate('/');
+        // Immediate login - check for pending redirect
+        const redirect = localStorage.getItem('auth_redirect');
+        if (redirect) {
+          localStorage.removeItem('auth_redirect');
+          navigate(redirect);
+        } else {
+          navigate('/');
+        }
       }
     } catch (err: any) {
       setError(err.message);

@@ -33,8 +33,14 @@ export function AuthCallback() {
             localStorage.setItem('access_token', data.session.access_token);
             localStorage.setItem('refresh_token', data.session.refresh_token);
 
-            // Redirect to dashboard
-            navigate('/', { replace: true });
+            // Check for pending redirect (e.g. trial invite flow)
+            const redirect = localStorage.getItem('auth_redirect');
+            if (redirect) {
+              localStorage.removeItem('auth_redirect');
+              navigate(redirect, { replace: true });
+            } else {
+              navigate('/', { replace: true });
+            }
             return;
           }
         }
@@ -49,7 +55,14 @@ export function AuthCallback() {
         if (session) {
           localStorage.setItem('access_token', session.access_token);
           localStorage.setItem('refresh_token', session.refresh_token);
-          navigate('/', { replace: true });
+
+          const redirect = localStorage.getItem('auth_redirect');
+          if (redirect) {
+            localStorage.removeItem('auth_redirect');
+            navigate(redirect, { replace: true });
+          } else {
+            navigate('/', { replace: true });
+          }
           return;
         }
 

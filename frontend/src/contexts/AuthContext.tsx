@@ -1,5 +1,7 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { API_BASE_URL } from '../api/config';
+import { supabase } from '../lib/supabase';
 
 interface User {
   id: string;
@@ -37,10 +39,62 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const navigate = useNavigate();
 
   // Initialize auth state from localStorage on mount
   useEffect(() => {
     const initAuth = async () => {
+      // Check for Supabase auth tokens in URL hash (email confirmation redirect)
+      const hash = window.location.hash;
+      if (hash && hash.includes('access_token')) {
+        try {
+          const hashParams = new URLSearchParams(hash.substring(1));
+          const hashAccessToken = hashParams.get('access_token');
+          const hashRefreshToken = hashParams.get('refresh_token');
+
+          if (hashAccessToken && hashRefreshToken) {
+            // Validate session via Supabase client
+            const { data, error } = await supabase.auth.setSession({
+              access_token: hashAccessToken,
+              refresh_token: hashRefreshToken,
+            });
+
+            if (!error && data.session) {
+              localStorage.setItem('access_token', data.session.access_token);
+              localStorage.setItem('refresh_token', data.session.refresh_token);
+
+              // Clear hash from URL
+              window.history.replaceState(null, '', window.location.pathname + window.location.search);
+
+              // Fetch user profile
+              const meResponse = await fetch(`${API_BASE_URL}/api/auth/me`, {
+                headers: { 'Authorization': `Bearer ${data.session.access_token}` },
+              });
+              if (meResponse.ok) {
+                const meData = await meResponse.json();
+                setUser(meData.user);
+              }
+
+              // Check for pending redirect (trial invite flow)
+              const redirect = localStorage.getItem('auth_redirect');
+              if (redirect) {
+                localStorage.removeItem('auth_redirect');
+                setLoading(false);
+                navigate(redirect, { replace: true });
+                return;
+              }
+
+              setLoading(false);
+              return;
+            }
+          }
+        } catch (error) {
+          console.error('Hash token auth error:', error);
+        }
+        // Clear hash even on failure
+        window.history.replaceState(null, '', window.location.pathname + window.location.search);
+      }
+
       const accessToken = localStorage.getItem('access_token');
 
       if (accessToken) {

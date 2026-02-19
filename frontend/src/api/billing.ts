@@ -17,6 +17,7 @@ export interface SubscriptionStatus {
   current_period_end: number | null;
   cancel_at_period_end: boolean;
   cancel_at: number | null;
+  trial_expires_at: string | null;
 }
 
 export interface PlanInfo {

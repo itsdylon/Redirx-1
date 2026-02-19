@@ -24,6 +24,7 @@ interface UserProfile {
   lifetime_credits_used?: number;
   quick_match_limit?: number | null;
   quick_match_used?: number;
+  trial_expires_at?: string;
 }
 
 interface MigrationSession {
@@ -247,7 +248,14 @@ export function AccountPage() {
                           <CreditCard className="h-4 w-4" />
                           Subscription
                         </div>
-                        <div className="text-foreground capitalize">{profile?.plan || 'Launch'}</div>
+                        <div className="text-foreground capitalize">
+                          {profile?.plan || 'Launch'}
+                          {profile?.plan === 'premium_trial' && profile?.trial_expires_at && (
+                            <span className="text-xs text-muted-foreground ml-2">
+                              (expires {new Date(profile.trial_expires_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })})
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </div>
                     <Separator />

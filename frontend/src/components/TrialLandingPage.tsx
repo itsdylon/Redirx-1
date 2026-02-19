@@ -47,7 +47,12 @@ export function TrialLandingPage() {
       .then((result) => {
         setValidation(result);
         if (result.valid) {
-          setPageState('preview');
+          // Auto-redeem if user is logged in and came from auth redirect
+          if (user && pendingCode) {
+            autoRedeem();
+          } else {
+            setPageState('preview');
+          }
         } else {
           setPageState('invalid');
           setErrorMessage(result.error || 'Invalid invite code');
@@ -57,7 +62,31 @@ export function TrialLandingPage() {
         setPageState('invalid');
         setErrorMessage('Failed to validate invite code');
       });
-  }, [code]);
+  }, [code, user]);
+
+  const autoRedeem = async () => {
+    setPageState('redeeming');
+    try {
+      const result = await redeemTrialCode(code);
+      if (result.success) {
+        localStorage.removeItem('pending_trial_code');
+        setSuccessData({
+          trial_days: result.trial_days!,
+          credits_granted: result.credits_granted!,
+          campaign_name: result.campaign_name || '',
+        });
+        setPageState('success');
+        setTimeout(() => navigate('/dashboard'), 3000);
+      } else {
+        // If auto-redeem fails (e.g. already on a plan), show preview with error
+        setPageState('error');
+        setErrorMessage(result.error || 'Redemption failed');
+      }
+    } catch (err: any) {
+      setPageState('error');
+      setErrorMessage(err.message || 'Redemption failed');
+    }
+  };
 
   const handleRedeem = async () => {
     if (!code) return;

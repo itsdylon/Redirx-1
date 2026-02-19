@@ -567,18 +567,23 @@ export function Settings() {
                             {currentPlan} Plan
                           </h3>
                           <Badge variant="secondary">Current</Badge>
+                          {currentPlan === 'premium_trial' && (
+                            <Badge variant="outline" className="bg-purple-500/10 text-purple-600 border-purple-500/30">Trial</Badge>
+                          )}
                           {isCancelling && (
                             <Badge variant="destructive">Cancelling</Badge>
                           )}
                         </div>
                         <p className="text-xs text-muted-foreground">
-                          {isCancelling && cancelDate
-                            ? `Cancels on ${new Date(cancelDate * 1000).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
-                            : subscription?.current_period_end
-                              ? `Renews on ${new Date(subscription.current_period_end * 1000).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
-                              : isPaid
-                                ? `You are on the ${currentPlan} plan.`
-                                : 'You are on the free tier.'}
+                          {currentPlan === 'premium_trial' && subscription?.trial_expires_at
+                            ? `Trial expires on ${new Date(subscription.trial_expires_at).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}`
+                            : isCancelling && cancelDate
+                              ? `Cancels on ${new Date(cancelDate * 1000).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
+                              : subscription?.current_period_end
+                                ? `Renews on ${new Date(subscription.current_period_end * 1000).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
+                                : isPaid
+                                  ? `You are on the ${currentPlan} plan.`
+                                  : 'You are on the free tier.'}
                         </p>
                       </div>
                     </div>

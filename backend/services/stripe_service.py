@@ -519,7 +519,7 @@ class StripeService:
             'credits_limit, credits_used, '
             'is_lifetime, lifetime_credits_total, lifetime_credits_used, '
             'quick_match_limit, quick_match_used, '
-            'max_concurrent_projects'
+            'max_concurrent_projects, trial_expires_at'
         ).eq('id', user_id).execute()
 
         if not result.data:
@@ -582,6 +582,7 @@ class StripeService:
             'current_period_end': current_period_end,
             'cancel_at_period_end': cancel_at_period_end,
             'cancel_at': cancel_at,
+            'trial_expires_at': profile.get('trial_expires_at'),
         }
 
     @staticmethod

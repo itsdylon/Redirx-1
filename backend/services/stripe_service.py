@@ -88,7 +88,7 @@ class StripeService:
         if not Config.STRIPE_SECRET_KEY:
             raise ValueError("STRIPE_SECRET_KEY is not configured")
         stripe.api_key = Config.STRIPE_SECRET_KEY
-        self.client = SupabaseClient.get_client()
+        self.client = SupabaseClient.get_admin_client()
         self.price_to_plan = _build_price_to_plan_map()
 
     def _get_or_create_customer(self, user_id: str, email: str) -> str:
@@ -246,9 +246,19 @@ class StripeService:
             raise ValueError("Invalid webhook signature")
 
         event_type = event['type']
+        event_id = event.get('id')
         data = event['data']['object']
 
-        logger.info(f"Processing Stripe webhook: {event_type}")
+        logger.info(f"Processing Stripe webhook: {event_type} (event {event_id})")
+
+        # Idempotency check: skip if we already processed this event
+        if event_id:
+            existing = self.client.table('stripe_webhook_events').select('stripe_event_id').eq(
+                'stripe_event_id', event_id
+            ).execute()
+            if existing.data:
+                logger.info(f"Skipping duplicate webhook event {event_id}")
+                return {'status': 'ok', 'event_type': event_type, 'duplicate': True}
 
         if event_type == 'checkout.session.completed':
             self._handle_checkout_completed(data)
@@ -260,6 +270,17 @@ class StripeService:
             logger.warning(f"Payment failed for customer {data.get('customer')}")
         else:
             logger.info(f"Unhandled webhook event type: {event_type}")
+
+        # Record processed event for idempotency
+        if event_id:
+            try:
+                self.client.table('stripe_webhook_events').insert({
+                    'stripe_event_id': event_id,
+                    'event_type': event_type,
+                }).execute()
+            except Exception as e:
+                # If insert fails (e.g. race condition duplicate), that's fine
+                logger.warning(f"Failed to record webhook event {event_id}: {e}")
 
         return {'status': 'ok', 'event_type': event_type}
 
@@ -319,8 +340,12 @@ class StripeService:
             updates['lifetime_credits_total'] = config.get('lifetime_credits_total', 500000)
             updates['lifetime_credits_used'] = 0
 
-        self.client.table('user_profiles').update(updates).eq('id', user_id).execute()
-        logger.info(f"User {user_id} upgraded to {plan}")
+        result = self.client.table('user_profiles').update(updates).eq('id', user_id).execute()
+        if not result.data:
+            logger.critical(f"PLAN UPDATE FAILED: 0 rows matched for user {user_id} upgrading to {plan}. "
+                          f"This likely means auth contamination or missing user_profiles row.")
+        else:
+            logger.info(f"User {user_id} upgraded to {plan}")
 
         # If this checkout was initiated via a founder invite, mark the invite as redeemed
         invite_id = session.get('metadata', {}).get('invite_id')
@@ -375,8 +400,11 @@ class StripeService:
         else:
             updates['quick_match_limit'] = UNLIMITED_QUICK_MATCH
 
-        self.client.table('user_profiles').update(updates).eq('id', user_id).execute()
-        logger.info(f"User {user_id} subscription updated to {plan}")
+        result = self.client.table('user_profiles').update(updates).eq('id', user_id).execute()
+        if not result.data:
+            logger.critical(f"SUBSCRIPTION UPDATE FAILED: 0 rows matched for user {user_id} updating to {plan}")
+        else:
+            logger.info(f"User {user_id} subscription updated to {plan}")
 
     def _handle_subscription_deleted(self, subscription: Dict) -> None:
         """Handle subscription cancellation - downgrade to launch."""
@@ -393,7 +421,7 @@ class StripeService:
         user_id = result.data[0]['id']
         launch_config = PLAN_CONFIG['launch']
 
-        self.client.table('user_profiles').update({
+        result = self.client.table('user_profiles').update({
             'plan': 'launch',
             'stripe_subscription_id': None,
             'credits_limit': launch_config['credits_limit'],
@@ -403,7 +431,10 @@ class StripeService:
             'max_concurrent_projects': launch_config['max_concurrent_projects'],
         }).eq('id', user_id).execute()
 
-        logger.info(f"User {user_id} downgraded to launch (subscription cancelled)")
+        if not result.data:
+            logger.critical(f"DOWNGRADE FAILED: 0 rows matched for user {user_id} downgrading to launch")
+        else:
+            logger.info(f"User {user_id} downgraded to launch (subscription cancelled)")
 
     def _add_lifetime_credits(self, user_id: str, amount: int) -> None:
         """Add lifetime credits to a user (from credit pack purchase)."""
@@ -415,12 +446,15 @@ class StripeService:
         if result.data:
             current_total = result.data[0].get('lifetime_credits_total') or 0
 
-        self.client.table('user_profiles').update({
+        result = self.client.table('user_profiles').update({
             'is_lifetime': True,
             'lifetime_credits_total': current_total + amount,
         }).eq('id', user_id).execute()
 
-        logger.info(f"Added {amount} lifetime credits to user {user_id}")
+        if not result.data:
+            logger.critical(f"CREDIT ADD FAILED: 0 rows matched for user {user_id} adding {amount} credits")
+        else:
+            logger.info(f"Added {amount} lifetime credits to user {user_id}")
 
     def update_subscription(self, user_id: str, price_id: str) -> Dict:
         """
@@ -662,3 +696,69 @@ class StripeService:
                 p['founder_price_id'] = founder_price_id
 
         return plans
+
+    def reconcile_recent_checkouts(self, lookback_hours: int = 24) -> Dict:
+        """
+        Compare recent Stripe checkout sessions against user_profiles and fix mismatches.
+        Intended to be called by a nightly cron as a safety net.
+
+        Returns:
+            Dict with reconciliation results.
+        """
+        import time
+
+        created_after = int(time.time()) - (lookback_hours * 3600)
+        fixed = []
+        errors = []
+
+        try:
+            sessions = stripe.checkout.Session.list(
+                limit=100,
+                created={'gte': created_after},
+            )
+        except Exception as e:
+            logger.error(f"Reconciliation: failed to list Stripe sessions: {e}")
+            return {'fixed': [], 'errors': [str(e)]}
+
+        for session in sessions.auto_paging_iter():
+            if session.get('payment_status') != 'paid':
+                continue
+
+            user_id = session.get('metadata', {}).get('supabase_user_id')
+            expected_plan = session.get('metadata', {}).get('plan')
+
+            if not user_id or not expected_plan or expected_plan not in PLAN_CONFIG:
+                continue
+
+            # Skip credit purchases — they add credits, not change plan
+            if expected_plan == 'credits':
+                continue
+
+            try:
+                result = self.client.table('user_profiles').select('plan').eq(
+                    'id', user_id
+                ).execute()
+
+                if not result.data:
+                    errors.append(f"User {user_id} not found in user_profiles")
+                    continue
+
+                actual_plan = result.data[0].get('plan')
+                if actual_plan != expected_plan:
+                    logger.warning(
+                        f"Reconciliation: user {user_id} has plan '{actual_plan}' "
+                        f"but Stripe shows '{expected_plan}'. Fixing."
+                    )
+                    # Re-run the checkout handler to apply the correct plan
+                    self._handle_checkout_completed(session)
+                    fixed.append({
+                        'user_id': user_id,
+                        'was': actual_plan,
+                        'now': expected_plan,
+                        'session_id': session.get('id'),
+                    })
+            except Exception as e:
+                errors.append(f"Error checking user {user_id}: {str(e)}")
+
+        logger.info(f"Reconciliation complete: {len(fixed)} fixed, {len(errors)} errors")
+        return {'fixed': fixed, 'errors': errors}

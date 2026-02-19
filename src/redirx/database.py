@@ -34,6 +34,19 @@ class SupabaseClient:
         return cls._instance
 
     @classmethod
+    def get_admin_client(cls) -> Client:
+        """
+        Create a fresh Supabase client with service_role privileges.
+
+        Unlike get_client(), this always returns a NEW client that is never
+        contaminated by user auth calls (sign_in_with_password mutates the
+        singleton's auth state). Use this for webhook handlers and other
+        server-side operations that must bypass RLS reliably.
+        """
+        Config.validate()
+        return create_client(Config.SUPABASE_URL, Config.SUPABASE_KEY)
+
+    @classmethod
     def reset(cls) -> None:
         """
         Reset the client instance. Useful for testing.

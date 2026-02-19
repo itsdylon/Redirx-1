@@ -6,6 +6,7 @@ import logging
 
 from backend.services.auth_service import require_auth
 from backend.services.stripe_service import StripeService
+from redirx.config import Config
 
 logger = logging.getLogger(__name__)
 
@@ -193,3 +194,25 @@ def get_subscription():
     except Exception as e:
         logger.error(f"Failed to get subscription status: {e}")
         return jsonify({'error': 'Failed to get subscription status'}), 500
+
+
+@billing_blueprint.route('/admin/reconcile', methods=['POST'])
+def reconcile_plans():
+    """
+    Reconcile recent Stripe checkouts against user_profiles.
+    Authenticated via X-Cron-Secret header (same pattern as trial expiry).
+    Run nightly as a safety net to catch missed/failed webhooks.
+    """
+    cron_secret = Config.CRON_SECRET
+    provided = request.headers.get('X-Cron-Secret', '')
+
+    if not cron_secret or provided != cron_secret:
+        return jsonify({'error': 'Unauthorized'}), 401
+
+    try:
+        service = _get_stripe_service()
+        result = service.reconcile_recent_checkouts()
+        return jsonify(result)
+    except Exception as e:
+        logger.error(f"Reconciliation failed: {e}")
+        return jsonify({'error': 'Reconciliation failed'}), 500

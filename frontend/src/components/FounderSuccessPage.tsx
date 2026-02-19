@@ -1,5 +1,8 @@
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from './ui/button';
+import { Loader2 } from 'lucide-react';
+import { getSubscriptionStatus } from '../api/billing';
 
 const RAIN_COUNT = 30;
 
@@ -33,6 +36,30 @@ function RainingImages() {
 
 export function FounderSuccessPage() {
   const navigate = useNavigate();
+  const [status, setStatus] = useState<'polling' | 'confirmed' | 'timeout'>('polling');
+  const pollingRef = useRef(false);
+
+  useEffect(() => {
+    if (pollingRef.current) return;
+    pollingRef.current = true;
+
+    const poll = async () => {
+      for (let i = 0; i < 10; i++) {
+        try {
+          const sub = await getSubscriptionStatus();
+          if (sub.plan === 'founder') {
+            setStatus('confirmed');
+            return;
+          }
+        } catch {
+          // Keep polling
+        }
+        await new Promise((r) => setTimeout(r, 2000));
+      }
+      setStatus('timeout');
+    };
+    poll();
+  }, []);
 
   return (
     <div className="min-h-screen flex items-center justify-center p-4 relative">
@@ -41,12 +68,43 @@ export function FounderSuccessPage() {
         <h1 className="text-5xl font-bold text-foreground mb-4 tracking-tight">
           THANK YOU
         </h1>
-        <p className="text-lg text-muted-foreground mb-8 max-w-md mx-auto">
-          Welcome to the Founder circle. Your lifetime access is now active.
-        </p>
-        <Button size="lg" onClick={() => navigate('/dashboard')}>
-          Go to Dashboard
-        </Button>
+
+        {status === 'polling' && (
+          <>
+            <div className="flex items-center justify-center gap-2 text-muted-foreground mb-8">
+              <Loader2 className="h-5 w-5 animate-spin" />
+              <p className="text-lg">Activating your Founder access...</p>
+            </div>
+            <Button size="lg" disabled>
+              Go to Dashboard
+            </Button>
+          </>
+        )}
+
+        {status === 'confirmed' && (
+          <>
+            <p className="text-lg text-muted-foreground mb-8 max-w-md mx-auto">
+              Welcome to the Founder circle. Your lifetime access is now active.
+            </p>
+            <Button size="lg" onClick={() => navigate('/dashboard')}>
+              Go to Dashboard
+            </Button>
+          </>
+        )}
+
+        {status === 'timeout' && (
+          <>
+            <p className="text-lg text-muted-foreground mb-4 max-w-md mx-auto">
+              Welcome to the Founder circle. Your payment was received.
+            </p>
+            <p className="text-sm text-muted-foreground mb-8 max-w-md mx-auto">
+              Plan activation may take a moment. If your plan hasn't updated yet, please refresh from the dashboard.
+            </p>
+            <Button size="lg" onClick={() => navigate('/dashboard')}>
+              Go to Dashboard
+            </Button>
+          </>
+        )}
       </div>
     </div>
   );

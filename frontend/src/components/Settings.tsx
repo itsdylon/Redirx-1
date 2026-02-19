@@ -100,11 +100,14 @@ export function Settings() {
       setPostCheckoutPolling(true);
 
       // Poll for subscription activation (webhook may not have processed yet)
+      const previousPlan = sessionStorage.getItem('pre_checkout_plan') || 'launch';
+      sessionStorage.removeItem('pre_checkout_plan');
+
       const pollSubscription = async () => {
-        for (let i = 0; i < 5; i++) {
+        for (let i = 0; i < 10; i++) {
           try {
             const sub = await getSubscriptionStatus();
-            if (sub.plan !== 'launch') {
+            if (sub.plan !== previousPlan) {
               setSubscription(sub);
               setPostCheckoutPolling(false);
               toast.success(`You're now on the ${sub.plan.charAt(0).toUpperCase() + sub.plan.slice(1)} plan!`);
@@ -120,7 +123,7 @@ export function Settings() {
         try {
           const sub = await getSubscriptionStatus();
           setSubscription(sub);
-          if (sub.plan !== 'launch') {
+          if (sub.plan !== previousPlan) {
             toast.success(`You're now on the ${sub.plan.charAt(0).toUpperCase() + sub.plan.slice(1)} plan!`);
           } else {
             toast.info('Your payment was received. Plan activation may take a moment — please refresh.');
@@ -144,6 +147,8 @@ export function Settings() {
     if (checkoutLoading) return;
     setCheckoutLoading(priceId);
     try {
+      // Store current plan so post-checkout polling can detect the change
+      sessionStorage.setItem('pre_checkout_plan', currentPlan);
       const url = await createCheckoutSession(priceId);
       window.location.href = url;
       return; // Don't clear loading — page is navigating away

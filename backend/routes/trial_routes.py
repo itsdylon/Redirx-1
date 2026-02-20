@@ -16,6 +16,9 @@ trial_blueprint = Blueprint('trials', __name__)
 # Rate limiter: 5 redeem attempts per 10 minutes per IP
 _redeem_limiter = DemoRateLimiter(max_requests=5, window_seconds=600)
 
+# Rate limiter: 3 waitlist submissions per 10 minutes per IP
+_waitlist_limiter = DemoRateLimiter(max_requests=3, window_seconds=600)
+
 
 def _get_trial_service() -> TrialService:
     """Lazily create TrialService."""
@@ -364,3 +367,114 @@ def redeem_code():
     except Exception as e:
         logger.error(f"Code redemption failed: {e}")
         return jsonify({'error': 'Redemption failed'}), 500
+
+
+# ============================================================================
+# Public: Founder waitlist
+# ============================================================================
+
+@trial_blueprint.route('/founder/waitlist', methods=['POST'])
+def submit_waitlist():
+    """Submit a founder waitlist request (no auth, rate-limited)."""
+    ip = _get_client_ip()
+    allowed, retry_after = _waitlist_limiter.check(ip)
+    if not allowed:
+        return jsonify({
+            'error': 'Too many requests. Please try again later.',
+            'retry_after_seconds': retry_after,
+        }), 429
+
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'Request body is required'}), 400
+
+    name = (data.get('name') or '').strip()
+    email = (data.get('email') or '').strip()
+    company = (data.get('company') or '').strip() or None
+
+    if not name:
+        return jsonify({'error': 'Name is required'}), 400
+    if not email or '@' not in email or '.' not in email:
+        return jsonify({'error': 'A valid email address is required'}), 400
+
+    try:
+        service = _get_trial_service()
+        entry = service.submit_waitlist_request(
+            name=name,
+            email=email,
+            company=company,
+            ip_address=ip,
+        )
+        return jsonify({'success': True, 'entry': entry}), 201
+    except Exception as e:
+        error_str = str(e).lower()
+        if 'duplicate' in error_str or 'unique' in error_str:
+            return jsonify({'error': 'A request with this email is already pending'}), 409
+        logger.error(f"Waitlist submission failed: {e}")
+        return jsonify({'error': 'Failed to submit request'}), 500
+
+
+# ============================================================================
+# Admin: Founder waitlist management
+# ============================================================================
+
+@trial_blueprint.route('/admin/trials/waitlist', methods=['GET'])
+@require_auth
+@require_admin
+def list_waitlist():
+    """List waitlist entries with optional status filter."""
+    try:
+        service = _get_trial_service()
+        entries = service.list_waitlist(status=request.args.get('status'))
+        return jsonify({'entries': entries})
+    except Exception as e:
+        logger.error(f"Waitlist listing failed: {e}")
+        return jsonify({'error': 'Failed to list waitlist'}), 500
+
+
+@trial_blueprint.route('/admin/trials/waitlist/approve', methods=['POST'])
+@require_auth
+@require_admin
+def approve_waitlist():
+    """Approve a waitlist entry and generate a founder invite code."""
+    data = request.get_json()
+    if not data or not data.get('waitlist_id') or not data.get('campaign_id'):
+        return jsonify({'error': 'waitlist_id and campaign_id are required'}), 400
+
+    try:
+        service = _get_trial_service()
+        raw_code = service.approve_waitlist_request(
+            waitlist_id=data['waitlist_id'],
+            admin_user_id=request.user.id,
+            campaign_id=data['campaign_id'],
+        )
+        return jsonify({'success': True, 'raw_code': raw_code})
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 404
+    except Exception as e:
+        logger.error(f"Waitlist approval failed: {e}")
+        return jsonify({'error': 'Failed to approve request'}), 500
+
+
+@trial_blueprint.route('/admin/trials/waitlist/reject', methods=['POST'])
+@require_auth
+@require_admin
+def reject_waitlist():
+    """Reject a waitlist entry with optional admin notes."""
+    data = request.get_json()
+    if not data or not data.get('waitlist_id'):
+        return jsonify({'error': 'waitlist_id is required'}), 400
+
+    try:
+        service = _get_trial_service()
+        rejected = service.reject_waitlist_request(
+            waitlist_id=data['waitlist_id'],
+            admin_user_id=request.user.id,
+            admin_notes=data.get('admin_notes'),
+        )
+        if rejected:
+            return jsonify({'success': True})
+        return jsonify({'error': 'Entry not found or already processed'}), 404
+    except Exception as e:
+        logger.error(f"Waitlist rejection failed: {e}")
+        return jsonify({'error': 'Failed to reject request'}), 500

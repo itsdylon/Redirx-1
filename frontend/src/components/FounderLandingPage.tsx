@@ -4,11 +4,12 @@ import { useAuth } from '../contexts/AuthContext';
 import { Card, CardContent } from './ui/card';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
+import { Input } from './ui/input';
 import { Separator } from './ui/separator';
-import { Crown, Check, AlertTriangle, ArrowRight, Loader2 } from 'lucide-react';
-import { validateTrialCode, createFounderCheckout, type ValidationResult } from '../api/trials';
+import { Crown, Check, AlertTriangle, ArrowRight, Loader2, CheckCircle2 } from 'lucide-react';
+import { validateTrialCode, createFounderCheckout, submitWaitlistRequest, type ValidationResult } from '../api/trials';
 
-type PageState = 'loading' | 'invalid' | 'preview' | 'processing' | 'error';
+type PageState = 'loading' | 'invalid' | 'request_invite' | 'submitted' | 'preview' | 'processing' | 'error';
 
 export function FounderLandingPage() {
   const { user } = useAuth();
@@ -19,14 +20,18 @@ export function FounderLandingPage() {
   const [validation, setValidation] = useState<ValidationResult | null>(null);
   const [errorMessage, setErrorMessage] = useState('');
 
+  // Waitlist form state
+  const [waitlistForm, setWaitlistForm] = useState({ name: '', email: '', company: '' });
+  const [waitlistSubmitting, setWaitlistSubmitting] = useState(false);
+  const [waitlistError, setWaitlistError] = useState('');
+
   const codeFromUrl = searchParams.get('code');
   const pendingCode = localStorage.getItem('pending_founder_code');
   const code = codeFromUrl || pendingCode || '';
 
   useEffect(() => {
     if (!code) {
-      setPageState('invalid');
-      setErrorMessage('No invite code provided');
+      setPageState('request_invite');
       return;
     }
 
@@ -92,6 +97,33 @@ export function FounderLandingPage() {
     navigate('/login');
   };
 
+  const handleWaitlistSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setWaitlistError('');
+
+    const name = waitlistForm.name.trim();
+    const email = waitlistForm.email.trim();
+    if (!name) { setWaitlistError('Name is required'); return; }
+    if (!email || !email.includes('@') || !email.includes('.')) {
+      setWaitlistError('Please enter a valid email address');
+      return;
+    }
+
+    setWaitlistSubmitting(true);
+    try {
+      await submitWaitlistRequest({
+        name,
+        email,
+        company: waitlistForm.company.trim() || undefined,
+      });
+      setPageState('submitted');
+    } catch (err: any) {
+      setWaitlistError(err.message || 'Failed to submit request');
+    } finally {
+      setWaitlistSubmitting(false);
+    }
+  };
+
   if (pageState === 'loading') {
     return (
       <div className="min-h-screen flex items-center justify-center p-4">
@@ -113,6 +145,145 @@ export function FounderLandingPage() {
           <Button variant="outline" onClick={() => navigate('/')}>
             Go to Homepage
           </Button>
+        </Card>
+      </div>
+    );
+  }
+
+  if (pageState === 'submitted') {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-4">
+        <Card className="w-full max-w-md overflow-hidden">
+          <div className="bg-gray-900 px-8 py-6 text-center">
+            <div className="w-16 h-16 bg-green-500 rounded-full flex items-center justify-center mx-auto mb-4">
+              <CheckCircle2 className="h-8 w-8 text-white" />
+            </div>
+            <h1 className="text-2xl font-bold text-white mb-1">
+              Request Received
+            </h1>
+          </div>
+          <CardContent className="p-8 text-center">
+            <p className="text-foreground mb-2">
+              Thanks for your interest in the Founder Package!
+            </p>
+            <p className="text-sm text-muted-foreground mb-6">
+              We'll review your request and send you an invite link if approved.
+              Keep an eye on your inbox.
+            </p>
+            <Button variant="outline" onClick={() => navigate('/')}>
+              Go to Homepage
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  if (pageState === 'request_invite') {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-4">
+        <Card className="w-full max-w-md overflow-hidden">
+          {/* Premium header */}
+          <div className="bg-gray-900 px-8 py-6 text-center">
+            <div className="w-16 h-16 bg-yellow-500 rounded-full flex items-center justify-center mx-auto mb-4">
+              <Crown className="h-8 w-8 text-gray-900" />
+            </div>
+            <h1 className="text-2xl font-bold text-white mb-1">
+              Founder Package
+            </h1>
+            <p className="text-gray-400 text-sm">Invite-only early access</p>
+          </div>
+
+          <CardContent className="p-8">
+            {/* Plan details */}
+            <div className="text-center mb-6">
+              <Badge className="bg-yellow-100 text-yellow-800 border-yellow-300 mb-3">
+                Founder Package
+              </Badge>
+              <div className="text-3xl font-bold text-foreground">
+                $999
+              </div>
+              <p className="text-sm text-muted-foreground">one-time payment</p>
+            </div>
+
+            {/* Benefits */}
+            <div className="space-y-3 mb-6">
+              {[
+                '500,000 lifetime mapping credits',
+                'Unlimited Quick Match',
+                'Up to 3 concurrent projects',
+                'Lifetime access - no recurring fees',
+              ].map((benefit) => (
+                <div key={benefit} className="flex items-start gap-3">
+                  <div className="w-5 h-5 rounded-full bg-green-100 flex items-center justify-center flex-shrink-0 mt-0.5">
+                    <Check className="h-3 w-3 text-green-700" />
+                  </div>
+                  <span className="text-sm text-foreground">{benefit}</span>
+                </div>
+              ))}
+            </div>
+
+            <Separator className="mb-6" />
+
+            {/* Request form */}
+            <form onSubmit={handleWaitlistSubmit} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-foreground mb-1">
+                  Name <span className="text-destructive">*</span>
+                </label>
+                <Input
+                  value={waitlistForm.name}
+                  onChange={(e) => setWaitlistForm((f) => ({ ...f, name: e.target.value }))}
+                  placeholder="Your name"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-foreground mb-1">
+                  Email <span className="text-destructive">*</span>
+                </label>
+                <Input
+                  type="email"
+                  value={waitlistForm.email}
+                  onChange={(e) => setWaitlistForm((f) => ({ ...f, email: e.target.value }))}
+                  placeholder="you@company.com"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-foreground mb-1">
+                  Company <span className="text-muted-foreground text-xs">(optional)</span>
+                </label>
+                <Input
+                  value={waitlistForm.company}
+                  onChange={(e) => setWaitlistForm((f) => ({ ...f, company: e.target.value }))}
+                  placeholder="Your company"
+                />
+              </div>
+
+              {waitlistError && (
+                <p className="text-sm text-destructive">{waitlistError}</p>
+              )}
+
+              <Button
+                type="submit"
+                className="w-full"
+                disabled={waitlistSubmitting}
+              >
+                {waitlistSubmitting ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Submitting...
+                  </>
+                ) : (
+                  <>
+                    Request Invite
+                    <ArrowRight className="h-4 w-4 ml-2" />
+                  </>
+                )}
+              </Button>
+            </form>
+          </CardContent>
         </Card>
       </div>
     );

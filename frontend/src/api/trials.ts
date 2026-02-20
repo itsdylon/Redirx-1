@@ -244,6 +244,93 @@ export async function redeemTrialCode(code: string): Promise<RedemptionResult> {
 }
 
 // ============================================================================
+// Founder: Waitlist
+// ============================================================================
+
+export interface WaitlistEntry {
+  id: string;
+  name: string;
+  email: string;
+  company?: string;
+  status: 'pending' | 'approved' | 'rejected';
+  admin_notes?: string;
+  approved_by_user_id?: string;
+  generated_invite_id?: string;
+  trial_invites?: { code?: string };
+  ip_address?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export async function submitWaitlistRequest(data: {
+  name: string;
+  email: string;
+  company?: string;
+}): Promise<{ success: boolean; entry: WaitlistEntry }> {
+  const res = await fetch(`${API_BASE_URL}/api/founder/waitlist`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.error || 'Failed to submit request');
+  }
+  return res.json();
+}
+
+export async function listWaitlist(params?: {
+  status?: string;
+}): Promise<WaitlistEntry[]> {
+  const searchParams = new URLSearchParams();
+  if (params?.status) searchParams.set('status', params.status);
+
+  const qs = searchParams.toString();
+  const url = `${API_BASE_URL}/api/admin/trials/waitlist${qs ? '?' + qs : ''}`;
+
+  const res = await fetch(url, {
+    headers: getAuthHeaders(),
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.error || 'Failed to list waitlist');
+  }
+  const json = await res.json();
+  return json.entries;
+}
+
+export async function approveWaitlistEntry(data: {
+  waitlist_id: string;
+  campaign_id: string;
+}): Promise<{ success: boolean; raw_code: string }> {
+  const res = await fetch(`${API_BASE_URL}/api/admin/trials/waitlist/approve`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.error || 'Failed to approve request');
+  }
+  return res.json();
+}
+
+export async function rejectWaitlistEntry(data: {
+  waitlist_id: string;
+  admin_notes?: string;
+}): Promise<void> {
+  const res = await fetch(`${API_BASE_URL}/api/admin/trials/waitlist/reject`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.error || 'Failed to reject request');
+  }
+}
+
+// ============================================================================
 // Founder: Checkout
 // ============================================================================
 

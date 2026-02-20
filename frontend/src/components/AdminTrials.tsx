@@ -42,6 +42,9 @@ import {
   CheckCircle2,
   Send,
   Megaphone,
+  ClipboardList,
+  Check,
+  XCircle,
 } from 'lucide-react';
 import {
   listCampaigns,
@@ -51,9 +54,13 @@ import {
   listInvites,
   revokeInvite,
   markSent,
+  listWaitlist,
+  approveWaitlistEntry,
+  rejectWaitlistEntry,
   type Campaign,
   type Invite,
   type GeneratedInvite,
+  type WaitlistEntry,
 } from '../api/trials';
 import { toast } from 'sonner';
 
@@ -103,6 +110,22 @@ export function AdminTrials() {
   const [revokeTarget, setRevokeTarget] = useState<string | null>(null);
   const [revoking, setRevoking] = useState(false);
 
+  // Waitlist
+  const [waitlistEntries, setWaitlistEntries] = useState<WaitlistEntry[]>([]);
+  const [waitlistFilter, setWaitlistFilter] = useState<string>('pending');
+  const [loadingWaitlist, setLoadingWaitlist] = useState(false);
+
+  // Approve dialog
+  const [approveTarget, setApproveTarget] = useState<WaitlistEntry | null>(null);
+  const [approveCampaignId, setApproveCampaignId] = useState('');
+  const [approving, setApproving] = useState(false);
+  const [approvedCode, setApprovedCode] = useState('');
+
+  // Reject dialog
+  const [rejectTarget, setRejectTarget] = useState<WaitlistEntry | null>(null);
+  const [rejectNotes, setRejectNotes] = useState('');
+  const [rejecting, setRejecting] = useState(false);
+
   const csvInputRef = useRef<HTMLInputElement>(null);
 
   // ======================================================================
@@ -124,11 +147,16 @@ export function AdminTrials() {
   // ======================================================================
   useEffect(() => {
     loadCampaigns();
+    loadWaitlist();
   }, []);
 
   useEffect(() => {
     loadInvites();
   }, [inviteFilter]);
+
+  useEffect(() => {
+    loadWaitlist();
+  }, [waitlistFilter]);
 
   async function loadCampaigns() {
     setLoading(true);
@@ -160,8 +188,21 @@ export function AdminTrials() {
     }
   }
 
+  async function loadWaitlist() {
+    setLoadingWaitlist(true);
+    try {
+      const status = waitlistFilter === 'all' ? undefined : waitlistFilter;
+      const data = await listWaitlist({ status });
+      setWaitlistEntries(data);
+    } catch {
+      // Silently fail if access denied
+    } finally {
+      setLoadingWaitlist(false);
+    }
+  }
+
   async function refreshAll() {
-    await Promise.all([loadCampaigns(), loadInvites()]);
+    await Promise.all([loadCampaigns(), loadInvites(), loadWaitlist()]);
     toast.success('Data refreshed');
   }
 
@@ -239,6 +280,43 @@ export function AdminTrials() {
       toast.error(err.message);
     } finally {
       setRevoking(false);
+    }
+  }
+
+  async function handleApproveWaitlist() {
+    if (!approveTarget || !approveCampaignId) return;
+    setApproving(true);
+    try {
+      const result = await approveWaitlistEntry({
+        waitlist_id: approveTarget.id,
+        campaign_id: approveCampaignId,
+      });
+      setApprovedCode(result.raw_code);
+      toast.success('Request approved — invite code generated');
+      await loadWaitlist();
+    } catch (err: any) {
+      toast.error(err.message);
+    } finally {
+      setApproving(false);
+    }
+  }
+
+  async function handleRejectWaitlist() {
+    if (!rejectTarget) return;
+    setRejecting(true);
+    try {
+      await rejectWaitlistEntry({
+        waitlist_id: rejectTarget.id,
+        admin_notes: rejectNotes || undefined,
+      });
+      setRejectTarget(null);
+      setRejectNotes('');
+      toast.success('Request rejected');
+      await loadWaitlist();
+    } catch (err: any) {
+      toast.error(err.message);
+    } finally {
+      setRejecting(false);
     }
   }
 
@@ -627,6 +705,259 @@ export function AdminTrials() {
           )}
         </CardContent>
       </Card>
+
+      {/* Founder Waitlist Section */}
+      <Card className="mt-6">
+        <CardHeader className="border-b border-border">
+          <CardTitle className="flex items-center gap-2">
+            <ClipboardList className="h-5 w-5" />
+            Founder Waitlist
+          </CardTitle>
+          <CardAction>
+            <Button variant="outline" size="sm" onClick={loadWaitlist}>
+              <RefreshCw className="h-4 w-4" />
+            </Button>
+          </CardAction>
+        </CardHeader>
+        <CardContent className="pt-0">
+          {/* Status filter tabs */}
+          <div className="py-3">
+            <Tabs
+              value={waitlistFilter}
+              onValueChange={setWaitlistFilter}
+            >
+              <TabsList>
+                <TabsTrigger value="pending">Pending</TabsTrigger>
+                <TabsTrigger value="approved">Approved</TabsTrigger>
+                <TabsTrigger value="rejected">Rejected</TabsTrigger>
+                <TabsTrigger value="all">All</TabsTrigger>
+              </TabsList>
+            </Tabs>
+          </div>
+
+          {loadingWaitlist ? (
+            <div className="py-8 text-center">
+              <Loader2 className="h-6 w-6 animate-spin mx-auto text-muted-foreground" />
+            </div>
+          ) : waitlistEntries.length === 0 ? (
+            <div className="py-8 text-center text-muted-foreground">
+              No waitlist entries found.
+            </div>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Name</TableHead>
+                  <TableHead>Email</TableHead>
+                  <TableHead>Company</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Requested</TableHead>
+                  <TableHead>Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {waitlistEntries.map((entry) => (
+                  <TableRow key={entry.id}>
+                    <TableCell className="font-medium">{entry.name}</TableCell>
+                    <TableCell className="text-sm">{entry.email}</TableCell>
+                    <TableCell className="text-sm text-muted-foreground">
+                      {entry.company || '-'}
+                    </TableCell>
+                    <TableCell>
+                      <Badge
+                        variant="outline"
+                        className={
+                          entry.status === 'pending'
+                            ? 'bg-yellow-500/10 text-yellow-600 border-yellow-500/30'
+                            : entry.status === 'approved'
+                            ? 'bg-green-500/10 text-green-600 border-green-500/30'
+                            : 'bg-red-500/10 text-red-600 border-red-500/30'
+                        }
+                      >
+                        {entry.status}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-xs text-muted-foreground">
+                      {new Date(entry.created_at).toLocaleDateString()}
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-1">
+                        {entry.status === 'pending' && (
+                          <>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                setApproveTarget(entry);
+                                setApproveCampaignId('');
+                                setApprovedCode('');
+                              }}
+                            >
+                              <Check className="h-3.5 w-3.5 mr-1" />
+                              Approve
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="text-destructive"
+                              onClick={() => {
+                                setRejectTarget(entry);
+                                setRejectNotes('');
+                              }}
+                            >
+                              <XCircle className="h-3.5 w-3.5 mr-1" />
+                              Reject
+                            </Button>
+                          </>
+                        )}
+                        {entry.status === 'approved' && entry.trial_invites?.code && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              const url = `${window.location.origin}/founder?code=${encodeURIComponent(entry.trial_invites!.code!)}`;
+                              navigator.clipboard.writeText(url);
+                              toast.success('Invite link copied');
+                            }}
+                          >
+                            <Copy className="h-3.5 w-3.5 mr-1" />
+                            Copy Link
+                          </Button>
+                        )}
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* ================================================================ */}
+      {/* Approve Waitlist Dialog */}
+      {/* ================================================================ */}
+      <Dialog
+        open={!!approveTarget}
+        onOpenChange={(open) => {
+          if (!open) {
+            setApproveTarget(null);
+            setApprovedCode('');
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Approve Waitlist Request</DialogTitle>
+          </DialogHeader>
+          {approvedCode ? (
+            <div className="space-y-4 py-2">
+              <div className="rounded bg-green-50 border border-green-300 p-4 text-center">
+                <CheckCircle2 className="h-8 w-8 text-green-600 mx-auto mb-2" />
+                <p className="text-sm font-medium text-green-800 mb-3">
+                  Invite code generated for {approveTarget?.email}
+                </p>
+                <div className="flex items-center gap-2 justify-center">
+                  <code className="text-xs bg-white px-3 py-1.5 rounded border break-all">
+                    {`${window.location.origin}/founder?code=${encodeURIComponent(approvedCode)}`}
+                  </code>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      const url = `${window.location.origin}/founder?code=${encodeURIComponent(approvedCode)}`;
+                      navigator.clipboard.writeText(url);
+                      toast.success('Invite link copied');
+                    }}
+                  >
+                    <Copy className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              </div>
+              <DialogFooter>
+                <Button onClick={() => { setApproveTarget(null); setApprovedCode(''); }}>
+                  Done
+                </Button>
+              </DialogFooter>
+            </div>
+          ) : (
+            <div className="space-y-4 py-2">
+              <p className="text-sm text-muted-foreground">
+                Approving <span className="font-medium text-foreground">{approveTarget?.name}</span> ({approveTarget?.email}).
+                Select a founder campaign to generate an invite code.
+              </p>
+              <div>
+                <label className="block text-sm font-medium text-foreground mb-1">
+                  Founder Campaign
+                </label>
+                <Select value={approveCampaignId} onValueChange={setApproveCampaignId}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select campaign" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {campaigns
+                      .filter((c) => c.invite_type === 'founder')
+                      .map((c) => (
+                        <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
+                {campaigns.filter((c) => c.invite_type === 'founder').length === 0 && (
+                  <p className="text-xs text-destructive mt-1">
+                    No founder campaigns exist. Create one first.
+                  </p>
+                )}
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setApproveTarget(null)}>Cancel</Button>
+                <Button
+                  onClick={handleApproveWaitlist}
+                  disabled={approving || !approveCampaignId}
+                >
+                  {approving ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Generating...
+                    </>
+                  ) : 'Approve & Generate Code'}
+                </Button>
+              </DialogFooter>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* ================================================================ */}
+      {/* Reject Waitlist Dialog */}
+      {/* ================================================================ */}
+      <Dialog open={!!rejectTarget} onOpenChange={() => setRejectTarget(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Reject Waitlist Request</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <p className="text-sm text-muted-foreground">
+              Rejecting request from <span className="font-medium text-foreground">{rejectTarget?.name}</span> ({rejectTarget?.email}).
+            </p>
+            <div>
+              <label className="block text-sm font-medium text-foreground mb-1">
+                Internal Notes <span className="text-muted-foreground text-xs">(optional)</span>
+              </label>
+              <Input
+                value={rejectNotes}
+                onChange={(e) => setRejectNotes(e.target.value)}
+                placeholder="Reason for rejection (internal only)"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRejectTarget(null)}>Cancel</Button>
+            <Button variant="destructive" onClick={handleRejectWaitlist} disabled={rejecting}>
+              {rejecting ? 'Rejecting...' : 'Reject'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* ================================================================ */}
       {/* Create Campaign Dialog */}

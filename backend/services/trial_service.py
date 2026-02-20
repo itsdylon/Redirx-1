@@ -442,3 +442,95 @@ class TrialService:
         count = result.data if isinstance(result.data, int) else 0
         logger.info(f"Expired {count} premium trials")
         return count
+
+    # ========================================================================
+    # Founder waitlist
+    # ========================================================================
+
+    def submit_waitlist_request(self, name: str, email: str,
+                                company: str = None,
+                                ip_address: str = None) -> dict:
+        """Insert a founder waitlist request. Returns the created row."""
+        data = {
+            'name': name,
+            'email': email.strip().lower(),
+            'status': 'pending',
+        }
+        if company:
+            data['company'] = company
+        if ip_address:
+            data['ip_address'] = ip_address
+
+        result = self.client.table('founder_waitlist').insert(data).execute()
+        return result.data[0] if result.data else {}
+
+    def list_waitlist(self, status: str = None) -> list:
+        """List waitlist entries with optional status filter."""
+        query = self.client.table('founder_waitlist').select(
+            '*, trial_invites:generated_invite_id(code)'
+        ).order('created_at', desc=True)
+
+        if status:
+            query = query.eq('status', status)
+
+        result = query.execute()
+        return result.data or []
+
+    def approve_waitlist_request(self, waitlist_id: str, admin_user_id: str,
+                                 campaign_id: str) -> str:
+        """
+        Approve a waitlist request: generate a founder invite and link it.
+
+        Returns the raw invite code for the admin to share.
+        """
+        # Fetch the pending entry
+        entry_result = self.client.table('founder_waitlist').select('*').eq(
+            'id', waitlist_id
+        ).eq('status', 'pending').execute()
+
+        if not entry_result.data:
+            raise ValueError('Waitlist entry not found or already processed')
+
+        entry = entry_result.data[0]
+
+        # Generate a founder invite code for this email
+        invites = self.generate_invites(
+            campaign_id=campaign_id,
+            recipient_emails=[entry['email']],
+            invite_type='founder',
+            created_by_user_id=admin_user_id,
+        )
+
+        if not invites:
+            raise RuntimeError('Failed to generate invite code')
+
+        invite = invites[0]
+        now = datetime.now(timezone.utc).isoformat()
+
+        # Update waitlist entry to approved
+        self.client.table('founder_waitlist').update({
+            'status': 'approved',
+            'approved_by_user_id': admin_user_id,
+            'generated_invite_id': invite['id'],
+            'updated_at': now,
+        }).eq('id', waitlist_id).execute()
+
+        return invite['raw_code']
+
+    def reject_waitlist_request(self, waitlist_id: str, admin_user_id: str,
+                                admin_notes: str = None) -> bool:
+        """Reject a waitlist request. Returns True if updated."""
+        now = datetime.now(timezone.utc).isoformat()
+        update_data = {
+            'status': 'rejected',
+            'approved_by_user_id': admin_user_id,
+            'updated_at': now,
+        }
+        if admin_notes:
+            update_data['admin_notes'] = admin_notes
+
+        result = self.client.table('founder_waitlist').update(
+            update_data
+        ).eq('id', waitlist_id).eq('status', 'pending').execute()
+
+        return bool(result.data)

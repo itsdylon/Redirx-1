@@ -28,7 +28,8 @@ export function FileUploadZone({ label, onFileUpload, file, validationError }: F
     setIsDragging(false);
 
     const droppedFile = e.dataTransfer.files[0];
-    if (droppedFile && droppedFile.name.endsWith('.csv')) {
+    const name = droppedFile?.name.toLowerCase() || '';
+    if (droppedFile && (name.endsWith('.csv') || name.endsWith('.txt'))) {
       onFileUpload(droppedFile);
     }
   };
@@ -79,7 +80,7 @@ export function FileUploadZone({ label, onFileUpload, file, validationError }: F
         <input
           ref={fileInputRef}
           type="file"
-          accept=".csv"
+          accept=".csv,.txt"
           onChange={handleFileSelect}
           className="hidden"
         />
@@ -88,14 +89,14 @@ export function FileUploadZone({ label, onFileUpload, file, validationError }: F
           <>
             <Upload className="h-12 w-12 text-muted-foreground mb-4" />
             <p className="text-foreground mb-1">
-              Drag and drop CSV file here
+              Drag and drop file here
             </p>
             <p className="text-muted-foreground text-sm mb-4">or</p>
             <Button variant="outline" type="button">
               Browse Files
             </Button>
             <p className="text-muted-foreground text-xs mt-4">
-              Accepted format: .csv
+              Accepted formats: .csv, .txt
             </p>
           </>
         ) : (

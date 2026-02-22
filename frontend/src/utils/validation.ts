@@ -241,9 +241,10 @@ export async function validateCSV(file: File): Promise<CSVValidationResult> {
   };
 
   // Check file extension
-  if (!file.name.toLowerCase().endsWith('.csv')) {
+  const fileName = file.name.toLowerCase();
+  if (!fileName.endsWith('.csv') && !fileName.endsWith('.txt')) {
     result.valid = false;
-    result.errors.push('File must have a .csv extension');
+    result.errors.push('File must have a .csv or .txt extension');
     return result;
   }
 
@@ -286,19 +287,12 @@ export async function validateCSV(file: File): Promise<CSVValidationResult> {
       return result;
     }
 
-    // Row count is lines minus header
-    result.rowCount = Math.max(0, lines.length - 1);
+    // Row count is total non-empty lines (no header assumption)
+    result.rowCount = lines.length;
 
-    // Check if file has at least a header
-    if (lines.length < 1) {
-      result.valid = false;
-      result.errors.push('File must contain at least a header row');
-      return result;
-    }
-
-    // Warn if no data rows (only header)
+    // Warn if only 1 URL
     if (lines.length === 1) {
-      result.warnings.push('File contains only a header row with no data');
+      result.warnings.push('File contains only 1 URL');
     }
 
     // Warn if row count is very large
@@ -310,7 +304,6 @@ export async function validateCSV(file: File): Promise<CSVValidationResult> {
     const firstLine = lines[0];
     if (firstLine.includes(',')) {
       const columnCounts = lines.slice(0, Math.min(10, lines.length)).map(line => {
-        // Simple CSV column count (doesn't handle quoted commas, but good enough for basic validation)
         return line.split(',').length;
       });
 
@@ -320,6 +313,29 @@ export async function validateCSV(file: File): Promise<CSVValidationResult> {
       if (hasInconsistentColumns) {
         result.warnings.push('File may have inconsistent column counts across rows. This could indicate formatting issues.');
       }
+    }
+
+    // Validate that content looks like URLs
+    // For multi-column CSVs, check the first column; for single-column, check the whole line
+    const sampleSize = Math.min(20, lines.length);
+    let nonUrlCount = 0;
+    for (let i = 0; i < sampleSize; i++) {
+      const value = lines[i].includes(',') ? lines[i].split(',')[0].trim() : lines[i].trim();
+      // Skip if it looks like a header (common header names)
+      if (i === 0 && /^(url|address|link|page|path|location|source|destination)s?$/i.test(value)) {
+        continue;
+      }
+      if (!looksLikeUrl(value)) {
+        nonUrlCount++;
+      }
+    }
+
+    if (nonUrlCount === sampleSize) {
+      result.valid = false;
+      result.errors.push('File does not appear to contain URLs. Each row should contain a URL (e.g., https://example.com/page or /page).');
+      return result;
+    } else if (nonUrlCount > 0) {
+      result.warnings.push(`${nonUrlCount} of the first ${sampleSize} rows don't appear to be valid URLs.`);
     }
 
     // Check for common encoding issues (non-ASCII characters that might indicate wrong encoding)
@@ -365,6 +381,14 @@ function readFileAsText(file: File): Promise<string> {
 
     reader.readAsText(file, 'UTF-8');
   });
+}
+
+/**
+ * Checks if a string looks like a URL (absolute or relative path)
+ */
+function looksLikeUrl(value: string): boolean {
+  if (!value) return false;
+  return /^https?:\/\//i.test(value) || value.startsWith('/');
 }
 
 /**

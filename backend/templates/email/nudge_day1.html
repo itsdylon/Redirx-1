@@ -1,0 +1,76 @@
+{% extends "_base.html" %}
+
+{% block title %}Quick tip: upload your first CSV{% endblock %}
+
+{% block content %}
+<!-- Quick-start indicator -->
+<table role="presentation" cellpadding="0" cellspacing="0" style="margin-bottom:24px;">
+  <tr>
+    <td width="48" height="48" style="width:48px;height:48px;border-radius:24px;background-color:#ecfdf5;text-align:center;vertical-align:middle;font-size:22px;line-height:48px;color:#2DD4A4;">&#9889;</td>
+  </tr>
+</table>
+
+<!-- Heading -->
+<h2 style="margin:0 0 8px;font-size:22px;font-weight:700;color:#18181b;letter-spacing:-0.3px;">Your first migration is two files away</h2>
+<p style="margin:0 0 28px;font-size:15px;color:#52525b;line-height:1.6;">
+  Getting started with Redirx takes under a minute. All you need are two CSV files.
+</p>
+
+<!-- Divider -->
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:24px;">
+  <tr><td style="border-top:1px solid #e4e4e7;font-size:0;line-height:0;height:1px;">&nbsp;</td></tr>
+</table>
+
+<!-- What you need -->
+<p style="margin:0 0 16px;font-size:14px;font-weight:600;color:#18181b;">What you need</p>
+
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:28px;">
+  <!-- File 1 -->
+  <tr>
+    <td style="padding:12px 16px;background-color:#f9fafb;border-radius:6px;border-left:3px solid #2DD4A4;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+        <tr>
+          <td style="font-size:14px;color:#3f3f46;line-height:1.5;">
+            <strong style="color:#18181b;">Old site URLs</strong>
+            <span style="font-size:12px;color:#a1a1aa;font-family:'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace;padding-left:8px;">.csv</span><br>
+            <span style="font-size:13px;color:#71717a;">The pages from the site you're migrating away from.</span>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+  <tr><td style="height:6px;font-size:0;line-height:0;">&nbsp;</td></tr>
+  <!-- File 2 -->
+  <tr>
+    <td style="padding:12px 16px;background-color:#f9fafb;border-radius:6px;border-left:3px solid #2DD4A4;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+        <tr>
+          <td style="font-size:14px;color:#3f3f46;line-height:1.5;">
+            <strong style="color:#18181b;">New site URLs</strong>
+            <span style="font-size:12px;color:#a1a1aa;font-family:'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace;padding-left:8px;">.csv</span><br>
+            <span style="font-size:13px;color:#71717a;">The pages on the new site you're migrating to.</span>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>
+
+<p style="margin:0 0 28px;font-size:14px;color:#52525b;line-height:1.6;">
+  Upload both, hit run, and Redirx matches your old pages to their new equivalents automatically.
+</p>
+
+<!-- CTA Button -->
+<table role="presentation" cellpadding="0" cellspacing="0" style="margin-bottom:28px;">
+  <tr>
+    <td style="border-radius:8px;background-color:#2DD4A4;">
+      <a href="{{ app_url }}/dashboard" style="display:inline-block;padding:14px 32px;color:#ffffff;font-size:15px;font-weight:600;text-decoration:none;">Upload Your First CSV &rarr;</a>
+    </td>
+  </tr>
+</table>
+
+<!-- Closing note -->
+<p style="margin:0;font-size:13px;color:#a1a1aa;line-height:1.5;">
+  Need help getting your URL lists? Reach out at <a href="mailto:support@redirx.dev" style="color:#2DD4A4;text-decoration:none;font-weight:500;">support@redirx.dev</a>
+</p>
+{% endblock %}

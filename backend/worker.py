@@ -247,6 +247,43 @@ class RedirxWorker:
             await self.release_lease(session_id, 'completed')
             print(f"[Worker] Job {session_id} completed successfully")
 
+            # Send completion email (fire-and-forget)
+            try:
+                from backend.services.email_service import EmailService
+                if user_id:
+                    client = SupabaseClient.get_client()
+                    profile = client.table('user_profiles').select(
+                        'email'
+                    ).eq('id', user_id).maybe_single().execute()
+                    if profile.data and profile.data.get('email'):
+                        project_name = job.get('project_name', 'Migration')
+                        old_domain = ""
+                        new_domain = ""
+                        if old_urls:
+                            try:
+                                from urllib.parse import urlparse
+                                old_domain = urlparse(old_urls[0]).netloc
+                            except Exception:
+                                pass
+                        if new_urls:
+                            try:
+                                from urllib.parse import urlparse
+                                new_domain = urlparse(new_urls[0]).netloc
+                            except Exception:
+                                pass
+                        email_svc = EmailService()
+                        email_svc.send_mapping_complete(
+                            user_id=user_id,
+                            to_email=profile.data['email'],
+                            project_name=project_name,
+                            total_mappings=mapping_count,
+                            session_id=str(session_id),
+                            old_site_domain=old_domain,
+                            new_site_domain=new_domain,
+                        )
+            except Exception:
+                print(f"[Worker] Completion email failed (non-blocking)")
+
             self.jobs_processed += 1
             return True
 
@@ -259,6 +296,28 @@ class RedirxWorker:
             if attempt_count >= WORKER_MAX_ATTEMPTS:
                 print(f"[Worker] Job {session_id} exceeded max attempts, marking as permanently failed")
                 await self.release_lease(session_id, 'permanently_failed', error_msg)
+
+                # Send failure email (fire-and-forget)
+                try:
+                    from backend.services.email_service import EmailService
+                    user_id = job.get('user_id')
+                    if user_id:
+                        client = SupabaseClient.get_client()
+                        profile = client.table('user_profiles').select(
+                            'email'
+                        ).eq('id', user_id).maybe_single().execute()
+                        if profile.data and profile.data.get('email'):
+                            project_name = job.get('project_name', 'Migration')
+                            email_svc = EmailService()
+                            email_svc.send_mapping_failed(
+                                user_id=user_id,
+                                to_email=profile.data['email'],
+                                project_name=project_name,
+                                error_summary=str(e),
+                                session_id=str(session_id),
+                            )
+                except Exception:
+                    print(f"[Worker] Failure email failed (non-blocking)")
             else:
                 print(f"[Worker] Job {session_id} will be retried")
                 await self.release_lease(session_id, 'pending', error_msg)

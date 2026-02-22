@@ -188,6 +188,48 @@ python -m unittest tests.stage_tests.html_prune_test  # Specific test
 - **Worker**: Background worker, start command `python -m backend.worker`
 - Set `VITE_API_BASE_URL` to the backend URL in the frontend's Render env vars
 
+## Email System
+
+**Powered by [Resend](https://resend.com/)** — transactional and drip emails sent from `noreply@redirx.dev`.
+
+### Architecture
+
+- **`backend/services/email_service.py`** — Core `EmailService` class. All sends are fire-and-forget (errors caught & logged, never raised). Central `send_email()` method checks user preferences, renders Jinja2 templates, calls Resend API, and logs to `email_log` table.
+- **`backend/templates/email/`** — Jinja2 HTML templates with inline CSS for email client compatibility. `_base.html` is the shared layout; all others extend it.
+- **`backend/routes/email_routes.py`** — Flask blueprint (`/api/email/`): unsubscribe, preferences CRUD, nudge cron trigger, admin test sends.
+- **`backend/services/email_nudge_cron.py`** — Onboarding drip emails (day 1, 3, 7). Runnable as `python -m backend.services.email_nudge_cron` or via `POST /api/email/admin/nudge-cron` with `X-Cron-Secret`.
+
+### Email Types
+
+| Type | Trigger | Template |
+|------|---------|----------|
+| `welcome` | First login (in `auth_routes.py`) | `welcome.html` |
+| `mapping_complete` | Job completes successfully (in `worker.py`) | `mapping_complete.html` |
+| `mapping_failed` | Job permanently fails (in `worker.py`) | `mapping_failed.html` |
+| `onboard_nudge` | Cron job (day 1, 3, 7 after signup) | `nudge_day1/3/7.html` |
+
+### Environment Variables
+
+| Variable | Required By | Description |
+|----------|-------------|-------------|
+| `RESEND_API_KEY` | API + Worker | Resend API key |
+| `EMAIL_FROM_ADDRESS` | API + Worker | Sender address (default: `Redirx <noreply@redirx.dev>`) |
+| `APP_BASE_URL` | API + Worker | Base URL for links in emails (default: `http://localhost:3000`) |
+
+### Adding a New Email Type
+
+1. Create a template in `backend/templates/email/` extending `_base.html`
+2. Add a constant to `EmailType` in `email_service.py`
+3. Add a convenience method to `EmailService` (e.g., `send_my_new_email()`)
+4. Call it from the appropriate trigger point (route, worker, cron, etc.)
+5. Add a test case to the admin test endpoint in `email_routes.py`
+
+### Database Tables
+
+- **`email_preferences`** — Per-user opt-out by email type (`user_id + email_type` unique)
+- **`email_log`** — Records every send attempt with Resend message ID, status, error
+- **`user_profiles.welcome_email_sent`** — Boolean flag to ensure welcome email is sent only once
+
 ## File Structure
 
 - `src/redirx/lib.py` - Pipeline orchestration

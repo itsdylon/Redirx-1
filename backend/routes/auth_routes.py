@@ -130,6 +130,30 @@ def login():
         auth_service = AuthService()
         result = auth_service.login(email, password)
 
+        # Send welcome email on first login (fire-and-forget)
+        try:
+            from redirx.database import SupabaseClient
+            client = SupabaseClient.get_client()
+            profile = client.table('user_profiles').select(
+                'welcome_email_sent, full_name'
+            ).eq('id', result['user'].id).maybe_single().execute()
+
+            if profile.data and not profile.data.get('welcome_email_sent'):
+                from backend.services.email_service import EmailService
+                email_service = EmailService()
+                user_name = profile.data.get('full_name', '')
+                email_service.send_welcome(
+                    user_id=result['user'].id,
+                    to_email=result['user'].email,
+                    user_name=user_name,
+                )
+                client.table('user_profiles').update(
+                    {'welcome_email_sent': True}
+                ).eq('id', result['user'].id).execute()
+        except Exception:
+            import logging
+            logging.getLogger(__name__).exception("Welcome email failed (non-blocking)")
+
         return jsonify({
             "success": True,
             "user_id": result['user'].id,

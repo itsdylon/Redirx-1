@@ -1,0 +1,104 @@
+{% extends "_base.html" %}
+
+{% block title %}Your redirects are ready{% endblock %}
+
+{% block content %}
+<!-- Success indicator -->
+<table role="presentation" cellpadding="0" cellspacing="0" style="margin-bottom:24px;">
+  <tr>
+    <td width="48" height="48" style="width:48px;height:48px;border-radius:24px;background-color:#ecfdf5;text-align:center;vertical-align:middle;font-size:24px;line-height:48px;color:#2DD4A4;">&#10003;</td>
+  </tr>
+</table>
+
+<!-- Heading -->
+<h2 style="margin:0 0 8px;font-size:22px;font-weight:700;color:#18181b;letter-spacing:-0.3px;">Your redirects are ready</h2>
+<p style="margin:0 0 28px;font-size:15px;color:#52525b;line-height:1.6;">
+  The redirect mapping for <strong style="color:#18181b;">{{ project_name }}</strong> has completed successfully.
+</p>
+
+<!-- Divider -->
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:28px;">
+  <tr><td style="border-top:1px solid #e4e4e7;font-size:0;line-height:0;height:1px;">&nbsp;</td></tr>
+</table>
+
+<!-- Results summary card -->
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:32px;">
+  <tr>
+    <td style="background-color:#f9fafb;border-radius:8px;border-left:3px solid #2DD4A4;padding:0;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+
+        <!-- Total Mappings -->
+        <tr>
+          <td style="padding:16px 20px 12px;">
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+              <tr>
+                <td style="font-size:11px;color:#71717a;font-weight:600;text-transform:uppercase;letter-spacing:0.8px;">Total Mappings</td>
+                <td align="right" style="font-size:24px;color:#18181b;font-weight:700;">{{ total_mappings }}</td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+
+        {% if old_site_domain or new_site_domain %}
+        <tr><td style="padding:0 20px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td style="border-top:1px solid #e4e4e7;font-size:0;line-height:0;">&nbsp;</td></tr></table></td></tr>
+
+        <!-- Site domains with left-side arrow -->
+        <tr>
+          <td style="padding:12px 20px 16px;">
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+              {% if old_site_domain %}
+              <!-- Old Site row -->
+              <tr>
+                <td width="28" valign="middle" rowspan="{% if old_site_domain and new_site_domain %}3{% else %}1{% endif %}" style="vertical-align:middle;">
+                  {% if old_site_domain and new_site_domain %}
+                  <table role="presentation" cellpadding="0" cellspacing="0" width="28" style="width:28px;">
+                    <tr><td align="center" style="font-size:10px;color:#a1a1aa;padding-bottom:2px;">&#9679;</td></tr>
+                    <tr><td align="center" style="font-size:16px;color:#a1a1aa;line-height:1;">&#8595;</td></tr>
+                    <tr><td align="center" style="font-size:10px;color:#2DD4A4;padding-top:2px;">&#9679;</td></tr>
+                  </table>
+                  {% endif %}
+                </td>
+                <td style="font-size:11px;color:#71717a;font-weight:600;text-transform:uppercase;letter-spacing:0.8px;">Old Site</td>
+                <td align="right" style="font-size:14px;color:#3f3f46;font-family:'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace;">{{ old_site_domain }}</td>
+              </tr>
+              {% endif %}
+              {% if old_site_domain and new_site_domain %}
+              <!-- Spacer row -->
+              <tr>
+                <td colspan="2" style="height:12px;font-size:0;line-height:0;">&nbsp;</td>
+              </tr>
+              {% endif %}
+              {% if new_site_domain %}
+              <!-- New Site row -->
+              <tr>
+                {% if not old_site_domain %}
+                <td width="28"></td>
+                {% endif %}
+                <td style="font-size:11px;color:#71717a;font-weight:600;text-transform:uppercase;letter-spacing:0.8px;">New Site</td>
+                <td align="right" style="font-size:14px;color:#2DD4A4;font-weight:500;font-family:'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace;">{{ new_site_domain }}</td>
+              </tr>
+              {% endif %}
+            </table>
+          </td>
+        </tr>
+        {% endif %}
+
+      </table>
+    </td>
+  </tr>
+</table>
+
+<!-- CTA Button -->
+<table role="presentation" cellpadding="0" cellspacing="0" style="margin-bottom:28px;">
+  <tr>
+    <td style="border-radius:8px;background-color:#2DD4A4;">
+      <a href="{{ app_url }}/results/{{ session_id }}" style="display:inline-block;padding:14px 32px;color:#ffffff;font-size:15px;font-weight:600;text-decoration:none;">View Your Results &rarr;</a>
+    </td>
+  </tr>
+</table>
+
+<!-- Closing note -->
+<p style="margin:0;font-size:13px;color:#a1a1aa;line-height:1.5;">
+  Review, edit, and export your redirect map from the results page.
+</p>
+{% endblock %}

@@ -1,0 +1,103 @@
+{% extends "_base.html" %}
+
+{% block title %}Don't miss out on automated redirects{% endblock %}
+
+{% block content %}
+<!-- Feature indicator -->
+<table role="presentation" cellpadding="0" cellspacing="0" style="margin-bottom:24px;">
+  <tr>
+    <td width="48" height="48" style="width:48px;height:48px;border-radius:24px;background-color:#f3e8ff;text-align:center;vertical-align:middle;font-size:20px;line-height:48px;color:#9F6CE6;">&#10024;</td>
+  </tr>
+</table>
+
+<!-- Heading -->
+<h2 style="margin:0 0 8px;font-size:22px;font-weight:700;color:#18181b;letter-spacing:-0.3px;">Here's what you're missing</h2>
+<p style="margin:0 0 28px;font-size:15px;color:#52525b;line-height:1.6;">
+  You signed up a few days ago but haven't run a mapping yet. Here's what Redirx does for you.
+</p>
+
+<!-- Divider -->
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:28px;">
+  <tr><td style="border-top:1px solid #e4e4e7;font-size:0;line-height:0;height:1px;">&nbsp;</td></tr>
+</table>
+
+<!-- Feature cards -->
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:28px;">
+  <!-- Feature 1 -->
+  <tr>
+    <td style="padding:14px 16px;background-color:#f9fafb;border-radius:6px;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+        <tr>
+          <td width="36" valign="top" style="padding-right:12px;">
+            <table role="presentation" cellpadding="0" cellspacing="0">
+              <tr>
+                <td width="28" height="28" style="width:28px;height:28px;border-radius:14px;background-color:#ecfdf5;text-align:center;vertical-align:middle;font-size:14px;line-height:28px;color:#2DD4A4;">&#10003;</td>
+              </tr>
+            </table>
+          </td>
+          <td style="font-size:14px;color:#3f3f46;line-height:1.5;">
+            <strong style="color:#18181b;">AI-powered page matching</strong><br>
+            <span style="font-size:13px;color:#71717a;">Reads your pages and matches them by meaning, not just URL patterns.</span>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+  <tr><td style="height:6px;font-size:0;line-height:0;">&nbsp;</td></tr>
+  <!-- Feature 2 -->
+  <tr>
+    <td style="padding:14px 16px;background-color:#f9fafb;border-radius:6px;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+        <tr>
+          <td width="36" valign="top" style="padding-right:12px;">
+            <table role="presentation" cellpadding="0" cellspacing="0">
+              <tr>
+                <td width="28" height="28" style="width:28px;height:28px;border-radius:14px;background-color:#ecfdf5;text-align:center;vertical-align:middle;font-size:14px;line-height:28px;color:#2DD4A4;">&#10003;</td>
+              </tr>
+            </table>
+          </td>
+          <td style="font-size:14px;color:#3f3f46;line-height:1.5;">
+            <strong style="color:#18181b;">Confidence scores on every match</strong><br>
+            <span style="font-size:13px;color:#71717a;">Know exactly which redirects are solid and which need a second look.</span>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+  <tr><td style="height:6px;font-size:0;line-height:0;">&nbsp;</td></tr>
+  <!-- Feature 3 -->
+  <tr>
+    <td style="padding:14px 16px;background-color:#f9fafb;border-radius:6px;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+        <tr>
+          <td width="36" valign="top" style="padding-right:12px;">
+            <table role="presentation" cellpadding="0" cellspacing="0">
+              <tr>
+                <td width="28" height="28" style="width:28px;height:28px;border-radius:14px;background-color:#ecfdf5;text-align:center;vertical-align:middle;font-size:14px;line-height:28px;color:#2DD4A4;">&#10003;</td>
+              </tr>
+            </table>
+          </td>
+          <td style="font-size:14px;color:#3f3f46;line-height:1.5;">
+            <strong style="color:#18181b;">Export-ready redirect maps</strong><br>
+            <span style="font-size:13px;color:#71717a;">Download a complete 301 redirect file for your server config in one click.</span>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>
+
+<!-- CTA Button -->
+<table role="presentation" cellpadding="0" cellspacing="0" style="margin-bottom:28px;">
+  <tr>
+    <td style="border-radius:8px;background-color:#2DD4A4;">
+      <a href="{{ app_url }}/dashboard" style="display:inline-block;padding:14px 32px;color:#ffffff;font-size:15px;font-weight:600;text-decoration:none;">Try It Now &rarr;</a>
+    </td>
+  </tr>
+</table>
+
+<!-- Closing note -->
+<p style="margin:0;font-size:13px;color:#a1a1aa;line-height:1.5;">
+  Questions about how it works? We're at <a href="mailto:support@redirx.dev" style="color:#2DD4A4;text-decoration:none;font-weight:500;">support@redirx.dev</a>
+</p>
+{% endblock %}

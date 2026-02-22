@@ -4,6 +4,7 @@ import { LayoutDashboard, FolderOpen, Settings, ChevronLeft, ChevronRight, LogOu
 import { useTheme } from 'next-themes';
 import { useAuth } from '../contexts/AuthContext';
 import { Button } from './ui/button';
+import faviconImg from '@/assets/favicon.png';
 
 interface SidebarProps {
   onLogout: () => void;
@@ -48,12 +49,12 @@ export function Sidebar({ onLogout }: SidebarProps) {
       <div className="flex items-center justify-between p-4 border-b border-border">
         {!isCollapsed && (
           <div className="flex items-center gap-2">
-            <img src="/favicon.png" alt="RedirX" className="w-8 h-8 rounded object-contain" />
+            <img src={faviconImg} alt="RedirX" className="w-8 h-8 rounded object-contain" />
             <span className="font-semibold text-foreground">RedirX</span>
           </div>
         )}
         {isCollapsed && (
-          <img src="/favicon.png" alt="RedirX" className="w-8 h-8 rounded object-contain mx-auto" />
+          <img src={faviconImg} alt="RedirX" className="w-8 h-8 rounded object-contain mx-auto" />
         )}
       </div>
 

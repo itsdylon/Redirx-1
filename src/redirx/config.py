@@ -42,6 +42,11 @@ class Config:
     TRIAL_INVITE_PEPPER: Optional[str] = os.getenv('TRIAL_INVITE_PEPPER')
     CRON_SECRET: Optional[str] = os.getenv('CRON_SECRET')
 
+    # Email / Resend
+    RESEND_API_KEY: Optional[str] = os.getenv('RESEND_API_KEY')
+    EMAIL_FROM_ADDRESS: str = os.getenv('EMAIL_FROM_ADDRESS', 'Dylon @ RedirX <noreply@redirx.dev>')
+    APP_BASE_URL: str = os.getenv('APP_BASE_URL', 'http://localhost:3000')
+
     # Matching Thresholds
     # HIGH = 0.9+, MEDIUM = 0.85-0.9, LOW = 0.7-0.85, < 0.7 = rejected (orphaned)
     HIGH_CONFIDENCE_THRESHOLD: float = float(os.getenv('HIGH_CONFIDENCE_THRESHOLD', '0.85'))

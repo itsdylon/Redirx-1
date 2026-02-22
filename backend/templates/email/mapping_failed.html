@@ -1,0 +1,99 @@
+{% extends "_base.html" %}
+
+{% block title %}Mapping job failed{% endblock %}
+
+{% block content %}
+<!-- Warning indicator -->
+<table role="presentation" cellpadding="0" cellspacing="0" style="margin-bottom:24px;">
+  <tr>
+    <td width="48" height="48" style="width:48px;height:48px;border-radius:24px;background-color:#fef3c7;text-align:center;vertical-align:middle;font-size:20px;line-height:48px;font-family:Arial,sans-serif;color:#d97706;">!</td>
+  </tr>
+</table>
+
+<!-- Heading -->
+<h2 style="margin:0 0 8px;font-size:22px;font-weight:700;color:#18181b;letter-spacing:-0.3px;">We ran into an issue</h2>
+<p style="margin:0 0 28px;font-size:15px;color:#52525b;line-height:1.6;">
+  The redirect mapping for <strong style="color:#18181b;">{{ project_name }}</strong> couldn't be completed after multiple attempts.
+</p>
+
+{% if error_summary %}
+<!-- Error details card -->
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:28px;">
+  <tr>
+    <td style="background-color:#fef7ee;border-radius:8px;border-left:3px solid #f59e0b;padding:16px 20px;">
+      <p style="margin:0 0 6px;font-size:11px;color:#92400e;font-weight:600;text-transform:uppercase;letter-spacing:0.8px;">Error Details</p>
+      <p style="margin:0;font-size:13px;color:#78350f;font-family:'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace;line-height:1.5;word-break:break-all;">{{ error_summary }}</p>
+    </td>
+  </tr>
+</table>
+{% endif %}
+
+<!-- Divider -->
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:24px;">
+  <tr><td style="border-top:1px solid #e4e4e7;font-size:0;line-height:0;height:1px;">&nbsp;</td></tr>
+</table>
+
+<!-- What to try next -->
+<p style="margin:0 0 16px;font-size:14px;font-weight:600;color:#18181b;">What to try next</p>
+
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:28px;">
+  <!-- Step 1 -->
+  <tr>
+    <td style="padding:10px 16px;background-color:#f9fafb;border-radius:6px;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+        <tr>
+          <td width="28" valign="top" style="font-size:13px;font-weight:700;color:#2DD4A4;">1.</td>
+          <td style="font-size:14px;color:#3f3f46;line-height:1.5;">
+            <strong style="color:#18181b;">Check your URLs</strong><br>
+            <span style="font-size:13px;color:#71717a;">Make sure all URLs in your CSV files are accessible and return valid pages.</span>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+  <tr><td style="height:6px;font-size:0;line-height:0;">&nbsp;</td></tr>
+  <!-- Step 2 -->
+  <tr>
+    <td style="padding:10px 16px;background-color:#f9fafb;border-radius:6px;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+        <tr>
+          <td width="28" valign="top" style="font-size:13px;font-weight:700;color:#2DD4A4;">2.</td>
+          <td style="font-size:14px;color:#3f3f46;line-height:1.5;">
+            <strong style="color:#18181b;">Verify CSV formatting</strong><br>
+            <span style="font-size:13px;color:#71717a;">Each file should contain one URL per line with no extra columns or headers.</span>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+  <tr><td style="height:6px;font-size:0;line-height:0;">&nbsp;</td></tr>
+  <!-- Step 3 -->
+  <tr>
+    <td style="padding:10px 16px;background-color:#f9fafb;border-radius:6px;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+        <tr>
+          <td width="28" valign="top" style="font-size:13px;font-weight:700;color:#2DD4A4;">3.</td>
+          <td style="font-size:14px;color:#3f3f46;line-height:1.5;">
+            <strong style="color:#18181b;">Try again</strong><br>
+            <span style="font-size:13px;color:#71717a;">Upload your files and run a fresh mapping from the dashboard.</span>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>
+
+<!-- CTA Button -->
+<table role="presentation" cellpadding="0" cellspacing="0" style="margin-bottom:28px;">
+  <tr>
+    <td style="border-radius:8px;background-color:#2DD4A4;">
+      <a href="{{ app_url }}/dashboard" style="display:inline-block;padding:14px 32px;color:#ffffff;font-size:15px;font-weight:600;text-decoration:none;">Go to Dashboard &rarr;</a>
+    </td>
+  </tr>
+</table>
+
+<!-- Closing note -->
+<p style="margin:0;font-size:13px;color:#a1a1aa;line-height:1.5;">
+  If this keeps happening, contact us at <a href="mailto:support@redirx.dev" style="color:#2DD4A4;text-decoration:none;font-weight:500;">support@redirx.dev</a> and we'll help you out.
+</p>
+{% endblock %}

@@ -63,6 +63,7 @@ import {
   type WaitlistEntry,
 } from '../api/trials';
 import { toast } from 'sonner';
+import { AdminEmailTesting } from './AdminEmailTesting';
 
 const STATUS_COLORS: Record<string, string> = {
   created: 'bg-blue-500/10 text-blue-600 border-blue-500/30',
@@ -833,6 +834,9 @@ export function AdminTrials() {
           )}
         </CardContent>
       </Card>
+
+      {/* Email Testing Section */}
+      <AdminEmailTesting />
 
       {/* ================================================================ */}
       {/* Approve Waitlist Dialog */}

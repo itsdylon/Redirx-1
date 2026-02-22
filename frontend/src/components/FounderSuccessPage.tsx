@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Button } from './ui/button';
 import { Loader2 } from 'lucide-react';
 import { getSubscriptionStatus } from '../api/billing';
+import faviconImg from '@/assets/favicon.png';
 
 const RAIN_COUNT = 30;
 
@@ -15,7 +16,7 @@ function RainingImages() {
     return (
       <img
         key={i}
-        src="/favicon.PNG"
+        src={faviconImg}
         alt=""
         className="founder-rain-item pointer-events-none"
         style={{

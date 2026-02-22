@@ -1,0 +1,81 @@
+{% extends "_base.html" %}
+
+{% block title %}Your Redirx account is waiting{% endblock %}
+
+{% block content %}
+<!-- Waiting indicator -->
+<table role="presentation" cellpadding="0" cellspacing="0" style="margin-bottom:24px;">
+  <tr>
+    <td width="48" height="48" style="width:48px;height:48px;border-radius:24px;background-color:#ecfdf5;text-align:center;vertical-align:middle;font-size:22px;line-height:48px;color:#2DD4A4;">&#8635;</td>
+  </tr>
+</table>
+
+<!-- Heading -->
+<h2 style="margin:0 0 8px;font-size:22px;font-weight:700;color:#18181b;letter-spacing:-0.3px;">We're here when you're ready</h2>
+<p style="margin:0 0 28px;font-size:15px;color:#52525b;line-height:1.6;">
+  It's been a week since you signed up. Whenever your next site migration comes around, Redirx is ready to go.
+</p>
+
+<!-- Divider -->
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:28px;">
+  <tr><td style="border-top:1px solid #e4e4e7;font-size:0;line-height:0;height:1px;">&nbsp;</td></tr>
+</table>
+
+<!-- Value reminder card -->
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:28px;">
+  <tr>
+    <td style="background-color:#f9fafb;border-radius:8px;border-left:3px solid #2DD4A4;padding:20px 24px;">
+      <p style="margin:0 0 4px;font-size:11px;color:#71717a;font-weight:600;text-transform:uppercase;letter-spacing:0.8px;">What you'll save</p>
+      <p style="margin:0 0 16px;font-size:15px;color:#18181b;line-height:1.6;font-weight:500;">
+        Hours of manual URL matching, replaced by a redirect map in minutes.
+      </p>
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+        <tr>
+          <td style="padding:8px 0;border-top:1px solid #e4e4e7;">
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+              <tr>
+                <td style="font-size:13px;color:#71717a;">Upload two CSVs</td>
+                <td align="right" style="font-size:13px;color:#a1a1aa;">30 seconds</td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:8px 0;border-top:1px solid #e4e4e7;">
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+              <tr>
+                <td style="font-size:13px;color:#71717a;">AI matches your pages</td>
+                <td align="right" style="font-size:13px;color:#a1a1aa;">a few minutes</td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:8px 0;border-top:1px solid #e4e4e7;">
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+              <tr>
+                <td style="font-size:13px;color:#71717a;">Review &amp; export</td>
+                <td align="right" style="font-size:13px;color:#a1a1aa;">one click</td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>
+
+<!-- CTA Button -->
+<table role="presentation" cellpadding="0" cellspacing="0" style="margin-bottom:28px;">
+  <tr>
+    <td style="border-radius:8px;background-color:#2DD4A4;">
+      <a href="{{ app_url }}/dashboard" style="display:inline-block;padding:14px 32px;color:#ffffff;font-size:15px;font-weight:600;text-decoration:none;">Go to Dashboard &rarr;</a>
+    </td>
+  </tr>
+</table>
+
+<!-- Closing note -->
+<p style="margin:0;font-size:13px;color:#a1a1aa;line-height:1.5;">
+  This is the last reminder we'll send. Need help when you're ready? <a href="mailto:support@redirx.dev" style="color:#2DD4A4;text-decoration:none;font-weight:500;">support@redirx.dev</a>
+</p>
+{% endblock %}

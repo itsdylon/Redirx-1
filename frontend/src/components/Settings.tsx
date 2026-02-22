@@ -361,6 +361,8 @@ export function Settings() {
                       <SelectItem value="nginx">Nginx map</SelectItem>
                       <SelectItem value="wordpress">WordPress CSV</SelectItem>
                       <SelectItem value="vercel">Vercel redirects</SelectItem>
+                      <SelectItem value="cloudflare">Cloudflare Pages</SelectItem>
+                      <SelectItem value="shopify">Shopify CSV</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>

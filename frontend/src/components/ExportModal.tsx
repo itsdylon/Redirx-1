@@ -3,6 +3,7 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from './ui/dialog';
@@ -206,6 +207,28 @@ export function ExportModal({ open, onOpenChange, onExport, redirects }: ExportM
         }
         break;
 
+      case 'cloudflare':
+        // Cloudflare Pages _redirects file: /old /new 301
+        content = displayRules
+          .map((r) => {
+            const oldPath = transformUrl(r.oldUrl, 'old');
+            const newPath = transformUrl(r.newUrl, 'new');
+            return `${oldPath} ${newPath} 301`;
+          })
+          .join('\n');
+        break;
+
+      case 'shopify':
+        // Shopify bulk redirect CSV
+        content = 'Redirect from,Redirect to\n' + displayRules
+          .map((r) => {
+            const oldPath = transformUrl(r.oldUrl, 'old');
+            const newPath = transformUrl(r.newUrl, 'new');
+            return `${oldPath},${newPath}`;
+          })
+          .join('\n');
+        break;
+
       default:
         return 'Select a format to preview rules';
     }
@@ -218,6 +241,31 @@ export function ExportModal({ open, onOpenChange, onExport, redirects }: ExportM
   };
 
   const previewContent = buildExportContent(format, filteredRedirects, true);
+
+  // Contextual warning for problematic format + URL format combinations
+  const getUrlFormatWarning = (): string | null => {
+    if (!format) return null;
+
+    const pathOnlyFormats: Record<string, string> = {
+      apache: 'Apache .htaccess expects paths for the source URL — full URLs will be ignored by the server.',
+      nginx: "Nginx map matches against the request path — full URLs in the source won't match.",
+      cloudflare: "Cloudflare _redirects expects relative paths — full URLs in the source won't match.",
+      shopify: 'Shopify redirects require paths only — full URLs will be rejected.',
+      vercel: "Vercel source patterns match against paths — full URLs won't route correctly.",
+    };
+
+    if (urlFormat === 'full' && pathOnlyFormats[format]) {
+      return pathOnlyFormats[format];
+    }
+
+    if (urlFormat === 'custom' && customOldDomain && pathOnlyFormats[format]) {
+      return pathOnlyFormats[format];
+    }
+
+    return null;
+  };
+
+  const urlFormatWarning = getUrlFormatWarning();
 
   const handleDownload = async () => {
     if (!format || selectedCount === 0) return;
@@ -242,6 +290,10 @@ export function ExportModal({ open, onOpenChange, onExport, redirects }: ExportM
           ? 'redirects_wordpress.csv'
           : format === 'vercel'
           ? 'vercel.json'
+          : format === 'cloudflare'
+          ? '_redirects'
+          : format === 'shopify'
+          ? 'shopify_redirects.csv'
           : 'redirects.txt';
 
       // Create a blob and trigger a download
@@ -304,7 +356,8 @@ export function ExportModal({ open, onOpenChange, onExport, redirects }: ExportM
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-4xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="sm:max-w-4xl max-h-[90vh] flex flex-col overflow-hidden">
+        <div className="flex-1 overflow-y-auto min-h-0">
         {/* Header */}
         <DialogHeader>
           <DialogTitle>Export Redirects</DialogTitle>
@@ -326,6 +379,8 @@ export function ExportModal({ open, onOpenChange, onExport, redirects }: ExportM
                 <SelectItem value="nginx">Nginx map</SelectItem>
                 <SelectItem value="wordpress">WordPress Redirection CSV</SelectItem>
                 <SelectItem value="vercel">Vercel redirects (vercel.json)</SelectItem>
+                <SelectItem value="cloudflare">Cloudflare Pages (_redirects)</SelectItem>
+                <SelectItem value="shopify">Shopify CSV</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -426,6 +481,16 @@ export function ExportModal({ open, onOpenChange, onExport, redirects }: ExportM
           </div>
 
           <Separator />
+
+          {/* URL Format Warning */}
+          {urlFormatWarning && (
+            <Alert className="border-yellow-500/50 bg-yellow-500/10">
+              <AlertTriangle className="h-4 w-4 text-yellow-600" />
+              <AlertDescription className="text-foreground">
+                {urlFormatWarning}
+              </AlertDescription>
+            </Alert>
+          )}
 
           {/* Confidence Level Selection */}
           <div>
@@ -595,7 +660,7 @@ export function ExportModal({ open, onOpenChange, onExport, redirects }: ExportM
                   </div>
                 )}
 
-                <div className="bg-card border border-border p-4 font-mono text-xs overflow-x-auto">
+                <div className="bg-card border border-border p-4 font-mono text-xs overflow-x-auto max-h-[250px] overflow-y-auto">
                   <pre className="text-foreground whitespace-pre">
                     {previewContent}
                   </pre>
@@ -610,9 +675,10 @@ export function ExportModal({ open, onOpenChange, onExport, redirects }: ExportM
             </CollapsibleContent>
           </Collapsible>
         </div>
+        </div>
 
         {/* Action Buttons */}
-        <div className="flex justify-end gap-3 pt-4 border-t border-border">
+        <DialogFooter className="flex justify-end gap-3 pt-4 border-t border-border bg-background">
           <Button
             variant="outline"
             onClick={() => onOpenChange(false)}
@@ -632,7 +698,7 @@ export function ExportModal({ open, onOpenChange, onExport, redirects }: ExportM
               'Download File'
             )}
           </Button>
-        </div>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );

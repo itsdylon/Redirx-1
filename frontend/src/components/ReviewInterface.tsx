@@ -160,12 +160,16 @@ export function ReviewInterface() {
       apache: '.htaccess',
       nginx: '_nginx.conf',
       wordpress: '_wordpress.csv',
+      cloudflare: '',
+      shopify: '.csv',
     };
 
     const formatNames: Record<string, string> = {
       apache: 'redirects_apache',
       nginx: 'redirects_nginx',
       wordpress: 'redirects_wordpress',
+      cloudflare: '_redirects',
+      shopify: 'shopify_redirects',
     };
 
     const today = new Date().toISOString().split('T')[0];

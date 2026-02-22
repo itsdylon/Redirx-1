@@ -6,7 +6,7 @@ import { DashboardLayout } from './DashboardLayout';
 import { FileUploadZone } from './FileUploadZone';
 import { LoadingScreen } from './LoadingScreen';
 import { Button } from './ui/button';
-import { AlertTriangle, Loader2, Zap, Search, Info } from 'lucide-react';
+import { AlertTriangle, Loader2, Zap, Search, Info, ShieldAlert } from 'lucide-react';
 import { validateCSV, CSVValidationResult } from '../utils/validation';
 
 interface FileData {
@@ -44,6 +44,10 @@ export function UploadPage() {
   const [oldFileValidation, setOldFileValidation] = useState<CSVValidationResult | null>(null);
   const [newFileValidation, setNewFileValidation] = useState<CSVValidationResult | null>(null);
   const [pendingWarnings, setPendingWarnings] = useState<{ old: string[], new: string[] } | null>(null);
+
+  // Scraping warning state (Deep Match only)
+  const [showScrapingWarning, setShowScrapingWarning] = useState(false);
+  const [scrapingWarningAcknowledged, setScrapingWarningAcknowledged] = useState(false);
 
   const handleFileUpload = async (file: File, type: 'old' | 'new') => {
     // Clear previous errors for this file type
@@ -95,7 +99,7 @@ export function UploadPage() {
     reader.readAsText(file);
   };
 
-  const handleBeginMatching = async (force: boolean = false, skipWarningCheck: boolean = false) => {
+  const handleBeginMatching = async (force: boolean = false, skipWarningCheck: boolean = false, skipScrapingWarning: boolean = false) => {
     if (!oldCsvFile || !newCsvFile) {
       setError("Upload both CSV files first.");
       return;
@@ -110,6 +114,14 @@ export function UploadPage() {
         setPendingWarnings({ old: oldWarnings, new: newWarnings });
         return;
       }
+    }
+
+    // Show scraping warning for Deep Match (content pipeline)
+    const effectivePipelineType = isFreeUser ? 'url_only' : pipelineType;
+    if (effectivePipelineType === 'content' && !skipScrapingWarning) {
+      setShowScrapingWarning(true);
+      setScrapingWarningAcknowledged(false);
+      return;
     }
 
     // Clear previous errors
@@ -171,6 +183,16 @@ export function UploadPage() {
 
   const handleCancelWarnings = () => {
     setPendingWarnings(null);
+  };
+
+  const handleConfirmScrapingWarning = () => {
+    setShowScrapingWarning(false);
+    handleBeginMatching(false, true, true);
+  };
+
+  const handleCancelScrapingWarning = () => {
+    setShowScrapingWarning(false);
+    setScrapingWarningAcknowledged(false);
   };
 
   const bothFilesUploaded = oldSiteFile && newSiteFile;
@@ -353,6 +375,57 @@ export function UploadPage() {
                     onClick={handleProceedWithWarnings}
                   >
                     Proceed Anyway
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Scraping Warning (Deep Match only) */}
+          {showScrapingWarning && (
+            <div className="mb-6 border border-orange-500 bg-orange-500/10 p-4 flex items-start gap-3">
+              <ShieldAlert className="h-5 w-5 text-orange-500 flex-shrink-0 mt-0.5" />
+              <div className="flex-1">
+                <div className="font-medium text-orange-600 dark:text-orange-400">Disable Rate Limiting Before Scanning</div>
+                <p className="text-sm text-muted-foreground mt-1">
+                  Deep Match will send many requests to scrape pages on your old and new sites. If your sites have anti-spam, rate limiting, or bot protection enabled, the requests may be blocked — which can cause incomplete or failed results.
+                </p>
+                <div className="mt-3 text-sm text-muted-foreground">
+                  <p className="font-medium text-foreground mb-2">Before proceeding, make sure you have:</p>
+                  <ul className="list-disc list-inside space-y-1">
+                    <li>Disabled rate limiting or WAF rules on both sites</li>
+                    <li>Whitelisted automated traffic (e.g., Cloudflare Bot Fight Mode, Sucuri, Wordfence)</li>
+                  </ul>
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    Pages behind CAPTCHAs or challenge screens will not be scraped unless these protections are temporarily disabled. You can re-enable all protections after the scan completes.
+                  </p>
+                </div>
+                <label className="flex items-center gap-2 mt-4 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={scrapingWarningAcknowledged}
+                    onChange={(e) => setScrapingWarningAcknowledged(e.target.checked)}
+                    className="h-4 w-4 rounded border-border accent-primary"
+                  />
+                  <span className="text-sm text-foreground">
+                    I've disabled rate limiting and bot protection on my sites
+                  </span>
+                </label>
+                <div className="flex gap-3 mt-3">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleCancelScrapingWarning}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    variant="default"
+                    size="sm"
+                    disabled={!scrapingWarningAcknowledged}
+                    onClick={handleConfirmScrapingWarning}
+                  >
+                    Proceed with Deep Match
                   </Button>
                 </div>
               </div>

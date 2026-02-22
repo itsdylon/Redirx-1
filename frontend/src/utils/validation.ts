@@ -301,28 +301,25 @@ export async function validateCSV(file: File): Promise<CSVValidationResult> {
       result.warnings.push('File contains only a header row with no data');
     }
 
-    // Check basic CSV structure (commas present)
-    const firstLine = lines[0];
-    if (!firstLine.includes(',')) {
-      result.warnings.push('File may not be properly formatted as CSV (no commas detected in first line)');
-    }
-
     // Warn if row count is very large
     if (result.rowCount > WARN_ROW_COUNT) {
       result.warnings.push(`Large dataset detected (${result.rowCount.toLocaleString()} rows). Processing may take several minutes.`);
     }
 
-    // Check for inconsistent column counts (basic structure validation)
-    const columnCounts = lines.slice(0, Math.min(10, lines.length)).map(line => {
-      // Simple CSV column count (doesn't handle quoted commas, but good enough for basic validation)
-      return line.split(',').length;
-    });
+    // Check for inconsistent column counts (only for multi-column CSVs)
+    const firstLine = lines[0];
+    if (firstLine.includes(',')) {
+      const columnCounts = lines.slice(0, Math.min(10, lines.length)).map(line => {
+        // Simple CSV column count (doesn't handle quoted commas, but good enough for basic validation)
+        return line.split(',').length;
+      });
 
-    const firstColumnCount = columnCounts[0];
-    const hasInconsistentColumns = columnCounts.some(count => count !== firstColumnCount);
+      const firstColumnCount = columnCounts[0];
+      const hasInconsistentColumns = columnCounts.some(count => count !== firstColumnCount);
 
-    if (hasInconsistentColumns) {
-      result.warnings.push('File may have inconsistent column counts across rows. This could indicate formatting issues.');
+      if (hasInconsistentColumns) {
+        result.warnings.push('File may have inconsistent column counts across rows. This could indicate formatting issues.');
+      }
     }
 
     // Check for common encoding issues (non-ASCII characters that might indicate wrong encoding)

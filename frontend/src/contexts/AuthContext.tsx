@@ -250,6 +250,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Update tokens
     localStorage.setItem('access_token', data.access_token);
     localStorage.setItem('refresh_token', data.refresh_token);
+
+    // Re-fetch user profile so context reflects latest data
+    try {
+      const meResponse = await fetch(`${API_BASE_URL}/api/auth/me`, {
+        headers: { 'Authorization': `Bearer ${data.access_token}` },
+      });
+      if (meResponse.ok) {
+        const meData = await meResponse.json();
+        setUser(meData.user);
+      }
+    } catch {
+      // Token refresh succeeded; profile fetch is best-effort
+    }
   };
 
   return (

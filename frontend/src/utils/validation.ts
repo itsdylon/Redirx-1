@@ -5,6 +5,8 @@
  * Accepts both relative paths and absolute URLs.
  */
 
+import { looksLikeUrl, parseXmlSitemap, parseXlsx, urlsToTxtFile } from './fileParsers';
+
 export interface ValidationResult {
   valid: boolean;
   error: string | null;
@@ -222,29 +224,38 @@ export interface CSVValidationResult {
   rowCount: number;
 }
 
+/**
+ * Extended validation result that may include a converted file
+ * (e.g., XML/XLSX converted to .txt for backend consumption)
+ */
+export interface FileValidationResult extends CSVValidationResult {
+  convertedFile?: File;
+}
+
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 const WARN_FILE_SIZE = 5 * 1024 * 1024; // 5MB
 const WARN_ROW_COUNT = 5000;
 
+const ACCEPTED_EXTENSIONS = ['.csv', '.txt', '.xml', '.xlsx'];
+
 /**
- * Validates a CSV file for size, structure, and content
- *
- * @param file - The File object to validate
- * @returns Promise<CSVValidationResult> - Validation result with errors and warnings
+ * Validates a file (CSV, TXT, XML sitemap, or XLSX) for size, structure, and content.
+ * XML and XLSX files are parsed and converted to a .txt file for the backend.
  */
-export async function validateCSV(file: File): Promise<CSVValidationResult> {
-  const result: CSVValidationResult = {
+export async function validateFile(file: File): Promise<FileValidationResult> {
+  const result: FileValidationResult = {
     valid: true,
     warnings: [],
     errors: [],
     rowCount: 0,
   };
 
-  // Check file extension
   const fileName = file.name.toLowerCase();
-  if (!fileName.endsWith('.csv') && !fileName.endsWith('.txt')) {
+  const ext = ACCEPTED_EXTENSIONS.find(e => fileName.endsWith(e));
+
+  if (!ext) {
     result.valid = false;
-    result.errors.push('File must have a .csv or .txt extension');
+    result.errors.push('File must have a .csv, .txt, .xml, or .xlsx extension');
     return result;
   }
 
@@ -267,18 +278,89 @@ export async function validateCSV(file: File): Promise<CSVValidationResult> {
     return result;
   }
 
-  // Read and validate file content
+  // Branch by format
+  if (ext === '.xml') {
+    return validateXmlFile(file, result);
+  }
+
+  if (ext === '.xlsx') {
+    return validateXlsxFile(file, result);
+  }
+
+  // .csv / .txt — existing text-based validation
+  return validateTextFile(file, result);
+}
+
+/** Backwards-compatible alias */
+export const validateCSV = validateFile;
+
+async function validateXmlFile(file: File, result: FileValidationResult): Promise<FileValidationResult> {
+  try {
+    const text = await readFileAsText(file);
+    const parsed = parseXmlSitemap(text);
+
+    if (parsed.errors.length > 0) {
+      result.valid = false;
+      result.errors.push(...parsed.errors);
+      return result;
+    }
+
+    result.warnings.push(...parsed.warnings);
+    result.rowCount = parsed.urls.length;
+
+    if (parsed.urls.length === 1) {
+      result.warnings.push('File contains only 1 URL');
+    }
+    if (result.rowCount > WARN_ROW_COUNT) {
+      result.warnings.push(`Large dataset detected (${result.rowCount.toLocaleString()} URLs). Processing may take several minutes.`);
+    }
+
+    result.convertedFile = urlsToTxtFile(parsed.urls, file.name);
+  } catch (error) {
+    result.valid = false;
+    result.errors.push(error instanceof Error ? `Failed to parse XML: ${error.message}` : 'Failed to parse XML file');
+  }
+  return result;
+}
+
+async function validateXlsxFile(file: File, result: FileValidationResult): Promise<FileValidationResult> {
+  try {
+    const parsed = await parseXlsx(file);
+
+    if (parsed.errors.length > 0) {
+      result.valid = false;
+      result.errors.push(...parsed.errors);
+      return result;
+    }
+
+    result.warnings.push(...parsed.warnings);
+    result.rowCount = parsed.urls.length;
+
+    if (parsed.urls.length === 1) {
+      result.warnings.push('File contains only 1 URL');
+    }
+    if (result.rowCount > WARN_ROW_COUNT) {
+      result.warnings.push(`Large dataset detected (${result.rowCount.toLocaleString()} URLs). Processing may take several minutes.`);
+    }
+
+    result.convertedFile = urlsToTxtFile(parsed.urls, file.name);
+  } catch (error) {
+    result.valid = false;
+    result.errors.push(error instanceof Error ? `Failed to parse Excel file: ${error.message}` : 'Failed to parse Excel file');
+  }
+  return result;
+}
+
+async function validateTextFile(file: File, result: FileValidationResult): Promise<FileValidationResult> {
   try {
     const text = await readFileAsText(file);
 
-    // Check if file has any content
     if (text.trim().length === 0) {
       result.valid = false;
       result.errors.push('File contains no data');
       return result;
     }
 
-    // Parse CSV structure
     const lines = text.split('\n').filter(line => line.trim());
 
     if (lines.length === 0) {
@@ -287,15 +369,12 @@ export async function validateCSV(file: File): Promise<CSVValidationResult> {
       return result;
     }
 
-    // Row count is total non-empty lines (no header assumption)
     result.rowCount = lines.length;
 
-    // Warn if only 1 URL
     if (lines.length === 1) {
       result.warnings.push('File contains only 1 URL');
     }
 
-    // Warn if row count is very large
     if (result.rowCount > WARN_ROW_COUNT) {
       result.warnings.push(`Large dataset detected (${result.rowCount.toLocaleString()} rows). Processing may take several minutes.`);
     }
@@ -316,12 +395,10 @@ export async function validateCSV(file: File): Promise<CSVValidationResult> {
     }
 
     // Validate that content looks like URLs
-    // For multi-column CSVs, check the first column; for single-column, check the whole line
     const sampleSize = Math.min(20, lines.length);
     let nonUrlCount = 0;
     for (let i = 0; i < sampleSize; i++) {
       const value = lines[i].includes(',') ? lines[i].split(',')[0].trim() : lines[i].trim();
-      // Skip if it looks like a header (common header names)
       if (i === 0 && /^(url|address|link|page|path|location|source|destination)s?$/i.test(value)) {
         continue;
       }
@@ -338,7 +415,6 @@ export async function validateCSV(file: File): Promise<CSVValidationResult> {
       result.warnings.push(`${nonUrlCount} of the first ${sampleSize} rows don't appear to be valid URLs.`);
     }
 
-    // Check for common encoding issues (non-ASCII characters that might indicate wrong encoding)
     const hasNullBytes = text.includes('\u0000');
     if (hasNullBytes) {
       result.valid = false;
@@ -353,9 +429,7 @@ export async function validateCSV(file: File): Promise<CSVValidationResult> {
     } else {
       result.errors.push('Failed to read file due to an unknown error');
     }
-    return result;
   }
-
   return result;
 }
 
@@ -381,14 +455,6 @@ function readFileAsText(file: File): Promise<string> {
 
     reader.readAsText(file, 'UTF-8');
   });
-}
-
-/**
- * Checks if a string looks like a URL (absolute or relative path)
- */
-function looksLikeUrl(value: string): boolean {
-  if (!value) return false;
-  return /^https?:\/\//i.test(value) || value.startsWith('/');
 }
 
 /**

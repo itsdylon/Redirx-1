@@ -32,16 +32,27 @@ interface ExportModalProps {
 }
 
 export function ExportModal({ open, onOpenChange, onExport, redirects }: ExportModalProps) {
-  const [format, setFormat] = useState<string>('');
-  const [includeHigh, setIncludeHigh] = useState(true);
-  const [includeMedium, setIncludeMedium] = useState(true);
-  const [includeLow, setIncludeLow] = useState(false);
+  const [format, setFormat] = useState<string>(() =>
+    localStorage.getItem('redirx_default_export_format') || ''
+  );
+  const [includeHigh, setIncludeHigh] = useState(() =>
+    localStorage.getItem('redirx_default_confidence_high') !== 'false'
+  );
+  const [includeMedium, setIncludeMedium] = useState(() =>
+    localStorage.getItem('redirx_default_confidence_medium') !== 'false'
+  );
+  const [includeLow, setIncludeLow] = useState(() =>
+    localStorage.getItem('redirx_default_confidence_low') === 'true'
+  );
   const [previewExpanded, setPreviewExpanded] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
   const [showDuplicateDetails, setShowDuplicateDetails] = useState(false);
 
   // URL format options
-  const [urlFormat, setUrlFormat] = useState<'paths' | 'full' | 'custom'>('paths');
+  const [urlFormat, setUrlFormat] = useState<'paths' | 'full' | 'custom'>(() => {
+    const saved = localStorage.getItem('redirx_default_url_format');
+    return (saved === 'paths' || saved === 'full') ? saved : 'paths';
+  });
   const [customOldDomain, setCustomOldDomain] = useState('');
   const [customNewDomain, setCustomNewDomain] = useState('');
 

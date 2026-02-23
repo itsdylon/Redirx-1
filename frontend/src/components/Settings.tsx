@@ -29,28 +29,39 @@ import {
   type SubscriptionStatus,
   type PlanInfo,
 } from '../api/billing';
+import { API_BASE_URL, getAuthHeaders } from '../api/config';
+import { getEmailPreferences, updateEmailPreference } from '../api/email';
 
 export function Settings() {
-  const { user } = useAuth();
+  const { user, refreshSession } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
 
   // Profile state
   const [fullName, setFullName] = useState(user?.full_name || '');
+  const [profileSaving, setProfileSaving] = useState(false);
 
-  // Defaults state
-  const [exportFormat, setExportFormat] = useState('htaccess');
-  const [urlFormat, setUrlFormat] = useState('paths');
-  const [highConfidence, setHighConfidence] = useState(true);
-  const [mediumConfidence, setMediumConfidence] = useState(true);
-  const [lowConfidence, setLowConfidence] = useState(false);
-  const [autoApproveHigh, setAutoApproveHigh] = useState(false);
+  // Defaults state (loaded from localStorage)
+  const [exportFormat, setExportFormat] = useState(() =>
+    localStorage.getItem('redirx_default_export_format') || 'htaccess'
+  );
+  const [urlFormat, setUrlFormat] = useState(() =>
+    localStorage.getItem('redirx_default_url_format') || 'paths'
+  );
+  const [highConfidence, setHighConfidence] = useState(() =>
+    localStorage.getItem('redirx_default_confidence_high') !== 'false'
+  );
+  const [mediumConfidence, setMediumConfidence] = useState(() =>
+    localStorage.getItem('redirx_default_confidence_medium') !== 'false'
+  );
+  const [lowConfidence, setLowConfidence] = useState(() =>
+    localStorage.getItem('redirx_default_confidence_low') === 'true'
+  );
 
   // Notifications state
   const [emailJobCompleted, setEmailJobCompleted] = useState(true);
   const [emailJobFailed, setEmailJobFailed] = useState(true);
-  const [emailWeeklySummary, setEmailWeeklySummary] = useState(false);
-  const [desktopNotifications, setDesktopNotifications] = useState(false);
-  const [soundOnCompletion, setSoundOnCompletion] = useState(false);
+  const [notificationsLoading, setNotificationsLoading] = useState(true);
+  const [notificationsSaving, setNotificationsSaving] = useState(false);
 
   // Subscription state
   const [subscription, setSubscription] = useState<SubscriptionStatus | null>(null);
@@ -89,6 +100,72 @@ export function Settings() {
   useEffect(() => {
     fetchBillingData();
   }, [fetchBillingData]);
+
+  // Fetch email preferences on mount
+  useEffect(() => {
+    const fetchPrefs = async () => {
+      try {
+        const prefs = await getEmailPreferences();
+        for (const p of prefs) {
+          if (p.email_type === 'mapping_complete') setEmailJobCompleted(!p.opted_out);
+          if (p.email_type === 'mapping_failed') setEmailJobFailed(!p.opted_out);
+        }
+      } catch {
+        // Defaults remain true (opted-in) if fetch fails
+      } finally {
+        setNotificationsLoading(false);
+      }
+    };
+    fetchPrefs();
+  }, []);
+
+  // Profile save handler
+  const handleProfileSave = async () => {
+    setProfileSaving(true);
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/user/profile`, {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ full_name: fullName }),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || 'Failed to update profile');
+      }
+      await refreshSession();
+      toast.success('Profile saved successfully.');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to save profile');
+    } finally {
+      setProfileSaving(false);
+    }
+  };
+
+  // Defaults save handler (localStorage)
+  const handleDefaultsSave = () => {
+    localStorage.setItem('redirx_default_export_format', exportFormat);
+    localStorage.setItem('redirx_default_url_format', urlFormat);
+    localStorage.setItem('redirx_default_confidence_high', String(highConfidence));
+    localStorage.setItem('redirx_default_confidence_medium', String(mediumConfidence));
+    localStorage.setItem('redirx_default_confidence_low', String(lowConfidence));
+    toast.success('Default settings saved successfully.');
+  };
+
+  // Notifications save handler (email prefs API)
+  const handleNotificationsSave = async () => {
+    setNotificationsSaving(true);
+    try {
+      await Promise.all([
+        updateEmailPreference('mapping_complete', !emailJobCompleted),
+        updateEmailPreference('mapping_failed', !emailJobFailed),
+      ]);
+      toast.success('Notification preferences saved successfully.');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to save preferences');
+    } finally {
+      setNotificationsSaving(false);
+    }
+  };
 
   // Handle return from Stripe checkout with polling for webhook processing
   useEffect(() => {
@@ -325,8 +402,10 @@ export function Settings() {
 
                 <div className="flex justify-end">
                   <Button
-                    onClick={() => toast.success('Profile saved successfully.')}
+                    onClick={handleProfileSave}
+                    disabled={profileSaving}
                   >
+                    {profileSaving && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
                     Save Changes
                   </Button>
                 </div>
@@ -432,31 +511,8 @@ export function Settings() {
                   </div>
                 </div>
 
-                <Separator />
-
-                {/* Auto-approve High Confidence */}
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-medium text-foreground">
-                      Auto-approve High Confidence
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      Automatically approve redirects with high confidence
-                      scores without manual review.
-                    </p>
-                  </div>
-                  <Switch
-                    checked={autoApproveHigh}
-                    onCheckedChange={setAutoApproveHigh}
-                  />
-                </div>
-
                 <div className="flex justify-end">
-                  <Button
-                    onClick={() =>
-                      toast.success('Default settings saved successfully.')
-                    }
-                  >
+                  <Button onClick={handleDefaultsSave}>
                     Save Defaults
                   </Button>
                 </div>
@@ -476,111 +532,63 @@ export function Settings() {
 
               <Separator />
 
-              <div className="space-y-6 mt-6">
-                {/* Email Notifications */}
-                <div className="space-y-4">
-                  <h3 className="text-sm font-semibold text-foreground">
-                    Email Notifications
-                  </h3>
+              {notificationsLoading ? (
+                <div className="flex items-center justify-center py-12 text-muted-foreground">
+                  <Loader2 className="h-5 w-5 animate-spin mr-2" />
+                  Loading preferences...
+                </div>
+              ) : (
+                <div className="space-y-6 mt-6">
+                  {/* Email Notifications */}
                   <div className="space-y-4">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm font-medium text-foreground">
-                          Job completed
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          Receive an email when a redirect job finishes
-                          processing.
-                        </p>
+                    <h3 className="text-sm font-semibold text-foreground">
+                      Email Notifications
+                    </h3>
+                    <div className="space-y-4">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-sm font-medium text-foreground">
+                            Job completed
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            Receive an email when a redirect job finishes
+                            processing.
+                          </p>
+                        </div>
+                        <Switch
+                          checked={emailJobCompleted}
+                          onCheckedChange={setEmailJobCompleted}
+                        />
                       </div>
-                      <Switch
-                        checked={emailJobCompleted}
-                        onCheckedChange={setEmailJobCompleted}
-                      />
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm font-medium text-foreground">
-                          Job failed
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          Receive an email when a redirect job fails or
-                          encounters an error.
-                        </p>
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-sm font-medium text-foreground">
+                            Job failed
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            Receive an email when a redirect job fails or
+                            encounters an error.
+                          </p>
+                        </div>
+                        <Switch
+                          checked={emailJobFailed}
+                          onCheckedChange={setEmailJobFailed}
+                        />
                       </div>
-                      <Switch
-                        checked={emailJobFailed}
-                        onCheckedChange={setEmailJobFailed}
-                      />
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm font-medium text-foreground">
-                          Weekly summary
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          Receive a weekly digest of your redirect activity.
-                        </p>
-                      </div>
-                      <Switch
-                        checked={emailWeeklySummary}
-                        onCheckedChange={setEmailWeeklySummary}
-                      />
                     </div>
                   </div>
-                </div>
 
-                <Separator />
-
-                {/* In-App Notifications */}
-                <div className="space-y-4">
-                  <h3 className="text-sm font-semibold text-foreground">
-                    In-App Notifications
-                  </h3>
-                  <div className="space-y-4">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm font-medium text-foreground">
-                          Show desktop notifications
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          Display browser notifications for important events.
-                        </p>
-                      </div>
-                      <Switch
-                        checked={desktopNotifications}
-                        onCheckedChange={setDesktopNotifications}
-                      />
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm font-medium text-foreground">
-                          Play sound on completion
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          Play an audio cue when a job finishes.
-                        </p>
-                      </div>
-                      <Switch
-                        checked={soundOnCompletion}
-                        onCheckedChange={setSoundOnCompletion}
-                      />
-                    </div>
+                  <div className="flex justify-end">
+                    <Button
+                      onClick={handleNotificationsSave}
+                      disabled={notificationsSaving}
+                    >
+                      {notificationsSaving && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+                      Save Preferences
+                    </Button>
                   </div>
                 </div>
-
-                <div className="flex justify-end">
-                  <Button
-                    onClick={() =>
-                      toast.success(
-                        'Notification preferences saved successfully.'
-                      )
-                    }
-                  >
-                    Save Preferences
-                  </Button>
-                </div>
-              </div>
+              )}
             </Card>
           </TabsContent>
 

@@ -7,7 +7,7 @@ import { FileUploadZone } from './FileUploadZone';
 import { LoadingScreen } from './LoadingScreen';
 import { Button } from './ui/button';
 import { AlertTriangle, Loader2, Zap, Search, Info, ShieldAlert } from 'lucide-react';
-import { validateCSV, CSVValidationResult } from '../utils/validation';
+import { validateFile, FileValidationResult } from '../utils/validation';
 
 interface FileData {
   name: string;
@@ -41,8 +41,8 @@ export function UploadPage() {
   const [newCsvFile, setNewCsvFile] = useState<File | null>(null);
 
   // Validation state
-  const [oldFileValidation, setOldFileValidation] = useState<CSVValidationResult | null>(null);
-  const [newFileValidation, setNewFileValidation] = useState<CSVValidationResult | null>(null);
+  const [oldFileValidation, setOldFileValidation] = useState<FileValidationResult | null>(null);
+  const [newFileValidation, setNewFileValidation] = useState<FileValidationResult | null>(null);
   const [pendingWarnings, setPendingWarnings] = useState<{ old: string[], new: string[] } | null>(null);
 
   // Scraping warning state (Deep Match only)
@@ -61,8 +61,8 @@ export function UploadPage() {
       setNewCsvFile(null);
     }
 
-    // Validate the CSV file
-    const validationResult = await validateCSV(file);
+    // Validate the file (CSV, TXT, XML, or XLSX)
+    const validationResult = await validateFile(file);
 
     if (type === 'old') {
       setOldFileValidation(validationResult);
@@ -75,28 +75,22 @@ export function UploadPage() {
       return;
     }
 
-    // Read the file content
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const text = e.target?.result as string;
-      const lines = text.split('\n').filter(line => line.trim());
+    // Use the converted file for XML/XLSX, otherwise use the original
+    const fileToSend = validationResult.convertedFile || file;
 
-      const fileData: FileData = {
-        name: file.name,
-        rowCount: validationResult.rowCount,
-        file: file,
-      };
-
-      if (type === 'old') {
-        setOldCsvFile(file);
-        setOldSiteFile(fileData);
-      } else {
-        setNewCsvFile(file);
-        setNewSiteFile(fileData);
-      }
+    const fileData: FileData = {
+      name: file.name,
+      rowCount: validationResult.rowCount,
+      file: fileToSend,
     };
 
-    reader.readAsText(file);
+    if (type === 'old') {
+      setOldCsvFile(fileToSend);
+      setOldSiteFile(fileData);
+    } else {
+      setNewCsvFile(fileToSend);
+      setNewSiteFile(fileData);
+    }
   };
 
   const handleBeginMatching = async (force: boolean = false, skipWarningCheck: boolean = false, skipScrapingWarning: boolean = false) => {
@@ -212,7 +206,7 @@ export function UploadPage() {
       <div className="max-w-5xl">
           {/* Subtitle */}
           <div className="mb-8">
-            <p className="text-muted-foreground">Upload CSV files from your old and new site to begin the redirect mapping process.</p>
+            <p className="text-muted-foreground">Upload URL lists from your old and new site to begin the redirect mapping process.</p>
           </div>
 
           {/* Pipeline Type Selector / Tier Banner */}

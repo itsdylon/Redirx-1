@@ -44,7 +44,7 @@ describe('errorHandler', () => {
       const result = await handleApiError(null, response);
 
       expect(result.type).toBe('not_found');
-      expect(result.message).toContain('not found');
+      expect(result.message).toContain('Not found');
       expect(result.retryable).toBe(false);
     });
 

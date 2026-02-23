@@ -55,6 +55,46 @@ export async function sendTestEmail(data: {
   return res.json();
 }
 
+// ============================================================================
+// User: Email Preferences
+// ============================================================================
+
+export interface EmailPreference {
+  email_type: string;
+  opted_out: boolean;
+}
+
+export async function getEmailPreferences(): Promise<EmailPreference[]> {
+  const res = await fetch(`${API_BASE_URL}/api/email/preferences`, {
+    headers: getAuthHeaders(),
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.error || 'Failed to fetch email preferences');
+  }
+  const json = await res.json();
+  return json.preferences;
+}
+
+export async function updateEmailPreference(
+  emailType: string,
+  optedOut: boolean
+): Promise<void> {
+  const res = await fetch(`${API_BASE_URL}/api/email/preferences`, {
+    method: 'PUT',
+    headers: getAuthHeaders(),
+    body: JSON.stringify({ email_type: emailType, opted_out: optedOut }),
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.error || 'Failed to update email preference');
+  }
+}
+
+// ============================================================================
+// Admin: Email Log
+// ============================================================================
+
 export async function getEmailLog(params?: {
   limit?: number;
   email_type?: string;

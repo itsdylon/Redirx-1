@@ -1,16 +1,27 @@
 import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 import { ThemeProvider } from "next-themes";
+import { PostHogProvider } from "@posthog/react";
 import { AuthProvider } from "./contexts/AuthContext";
-import App from "./App.tsx";
+import { AppWithToaster } from "./App.tsx";
 import "./styles/globals.css";
 
+const posthogOptions = {
+  api_host: import.meta.env.VITE_PUBLIC_POSTHOG_HOST,
+  defaults: "2026-01-30",
+} as const;
+
 createRoot(document.getElementById("root")!).render(
-  <BrowserRouter>
-    <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
-      <AuthProvider>
-        <App />
-      </AuthProvider>
-    </ThemeProvider>
-  </BrowserRouter>
+  <PostHogProvider
+    apiKey={import.meta.env.VITE_PUBLIC_POSTHOG_KEY}
+    options={posthogOptions}
+  >
+    <BrowserRouter>
+      <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
+        <AuthProvider>
+          <AppWithToaster />
+        </AuthProvider>
+      </ThemeProvider>
+    </BrowserRouter>
+  </PostHogProvider>
 );

@@ -33,7 +33,7 @@ export async function handleApiError(
   }
 
   // Generic network/connection errors
-  if (error.name === 'TypeError' || error.name === 'NetworkError') {
+  if (error?.name === 'TypeError' || error?.name === 'NetworkError') {
     return {
       message: 'Connection lost. Check your internet and try again.',
       type: 'network_error',
@@ -43,7 +43,7 @@ export async function handleApiError(
   }
 
   // Timeout errors
-  if (error.name === 'AbortError' || error.message?.includes('timeout')) {
+  if (error?.name === 'AbortError' || error?.message?.includes('timeout')) {
     return {
       message: 'Request timed out. The server might be busy. Please try again.',
       type: 'timeout_error',
@@ -153,7 +153,7 @@ export async function handleApiError(
  */
 export function handleSimpleError(error: any): UserFriendlyError {
   // Network errors
-  if (error instanceof TypeError || error.name === 'TypeError' || error.name === 'NetworkError') {
+  if (error instanceof TypeError || error?.name === 'TypeError' || error?.name === 'NetworkError') {
     return {
       message: 'Connection lost. Check your internet and try again.',
       type: 'network_error',
@@ -163,7 +163,7 @@ export function handleSimpleError(error: any): UserFriendlyError {
   }
 
   // Timeout errors
-  if (error.name === 'AbortError' || error.message?.includes('timeout')) {
+  if (error?.name === 'AbortError' || error?.message?.includes('timeout')) {
     return {
       message: 'Request timed out. The server might be busy. Please try again.',
       type: 'timeout_error',

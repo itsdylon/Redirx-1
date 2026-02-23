@@ -29,7 +29,7 @@ export function FileUploadZone({ label, onFileUpload, file, validationError }: F
 
     const droppedFile = e.dataTransfer.files[0];
     const name = droppedFile?.name.toLowerCase() || '';
-    if (droppedFile && (name.endsWith('.csv') || name.endsWith('.txt'))) {
+    if (droppedFile && (name.endsWith('.csv') || name.endsWith('.txt') || name.endsWith('.xml') || name.endsWith('.xlsx'))) {
       onFileUpload(droppedFile);
     }
   };
@@ -80,7 +80,7 @@ export function FileUploadZone({ label, onFileUpload, file, validationError }: F
         <input
           ref={fileInputRef}
           type="file"
-          accept=".csv,.txt"
+          accept=".csv,.txt,.xml,.xlsx"
           onChange={handleFileSelect}
           className="hidden"
         />
@@ -96,7 +96,7 @@ export function FileUploadZone({ label, onFileUpload, file, validationError }: F
               Browse Files
             </Button>
             <p className="text-muted-foreground text-xs mt-4">
-              Accepted formats: .csv, .txt
+              Accepted formats: .csv, .txt, .xml (sitemap), .xlsx
             </p>
           </>
         ) : (

@@ -1,5 +1,5 @@
-import { useState, useMemo } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useState, useMemo, useEffect } from 'react';
+import { useNavigate, Link, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -22,6 +22,21 @@ export function SignupPage() {
 
   const { register } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+
+  useEffect(() => {
+    const prefillEmail = (searchParams.get('email') || '').trim();
+    if (!prefillEmail || email) {
+      return;
+    }
+
+    setEmail(prefillEmail);
+    const validation = validateEmail(prefillEmail);
+    if (!validation.valid) {
+      setEmailError(validation.error || 'Invalid email');
+      setEmailTouched(true);
+    }
+  }, [searchParams, email]);
 
   // Calculate password strength in real-time
   const passwordStrength = useMemo(

@@ -2,6 +2,7 @@ import { createContext, useContext, useState, useEffect, ReactNode } from 'react
 import { useNavigate } from 'react-router-dom';
 import { API_BASE_URL } from '../api/config';
 import { supabase } from '../lib/supabase';
+import { ApiError, throwApiErrorFromResponse, toApiError } from '../utils/errorHandler';
 
 interface User {
   id: string;
@@ -30,6 +31,7 @@ interface AuthContextType {
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
   register: (email: string, password: string, fullName: string) => Promise<RegisterResult>;
+  resendConfirmationEmail: (email: string) => Promise<{ message: string }>;
   logout: () => Promise<void>;
   refreshSession: () => Promise<void>;
 }
@@ -134,8 +136,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
 
     if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.error || 'Login failed');
+      await throwApiErrorFromResponse(response, 'Sign-in failed. Please try again.');
     }
 
     const data = await response.json();
@@ -168,8 +169,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
 
     if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.error || 'Registration failed');
+      await throwApiErrorFromResponse(response, 'Registration failed. Please try again.');
     }
 
     const data = await response.json();
@@ -226,11 +226,42 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
   };
 
+  const resendConfirmationEmail = async (email: string): Promise<{ message: string }> => {
+    const response = await fetch(`${API_BASE_URL}/api/auth/resend-confirmation`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email }),
+    });
+
+    if (!response.ok) {
+      await throwApiErrorFromResponse(response, 'Unable to resend confirmation email right now.');
+    }
+
+    let data: { message?: string } = {};
+    try {
+      data = await response.json();
+    } catch {
+      data = {};
+    }
+
+    return {
+      message:
+        data.message ||
+        'If an unconfirmed account exists, a new confirmation email has been sent.',
+    };
+  };
+
   const refreshSession = async () => {
     const refreshToken = localStorage.getItem('refresh_token');
 
     if (!refreshToken) {
-      throw new Error('No refresh token');
+      throw new ApiError('Session expired. Please log in again.', {
+        code: 'auth_invalid_refresh_token',
+        user_message: 'Session expired. Please log in again.',
+        retryable: false,
+        next_action: 'login',
+        status: 401,
+      });
     }
 
     const response = await fetch(`${API_BASE_URL}/api/auth/refresh`, {
@@ -240,9 +271,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
 
     if (!response.ok) {
+      const apiError = await toApiError(response, 'Session expired. Please log in again.');
       // Refresh failed, force logout
       await logout();
-      throw new Error('Session expired');
+      throw apiError;
     }
 
     const data = await response.json();
@@ -266,7 +298,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, register, logout, refreshSession }}>
+    <AuthContext.Provider value={{ user, loading, login, register, resendConfirmationEmail, logout, refreshSession }}>
       {children}
     </AuthContext.Provider>
   );

@@ -7,6 +7,7 @@ import { Badge } from './ui/badge';
 import { Separator } from './ui/separator';
 import { Gift, Clock, Check, AlertTriangle, ArrowRight, Loader2 } from 'lucide-react';
 import { validateTrialCode, redeemTrialCode, type ValidationResult } from '../api/trials';
+import { ApiError } from '../utils/errorHandler';
 
 type PageState = 'loading' | 'invalid' | 'preview' | 'redeeming' | 'success' | 'error';
 
@@ -29,6 +30,25 @@ export function TrialLandingPage() {
   const cidFromUrl = searchParams.get('cid');
   const pendingCode = localStorage.getItem('pending_trial_code');
   const code = codeFromUrl || pendingCode || '';
+
+  const getTrialErrorMessage = (err: unknown, fallback: string): string => {
+    if (err instanceof ApiError) {
+      if (err.code === 'trial_code_email_mismatch') {
+        return 'This invite code was issued to a different email address. Sign in with the invited account.';
+      }
+      if (err.code === 'trial_redeem_rate_limited') {
+        if (typeof err.retry_after_seconds === 'number') {
+          return `Too many redemption attempts. Please wait ${err.retry_after_seconds} seconds and try again.`;
+        }
+        return 'Too many redemption attempts. Please try again later.';
+      }
+      return err.user_message || err.message || fallback;
+    }
+    if (err instanceof Error) {
+      return err.message;
+    }
+    return fallback;
+  };
 
   useEffect(() => {
     if (!code) {
@@ -58,9 +78,9 @@ export function TrialLandingPage() {
           setErrorMessage(result.error || 'Invalid invite code');
         }
       })
-      .catch(() => {
+      .catch((err: unknown) => {
         setPageState('invalid');
-        setErrorMessage('Failed to validate invite code');
+        setErrorMessage(getTrialErrorMessage(err, 'Unable to validate this invite code right now.'));
       });
   }, [code, user]);
 
@@ -82,9 +102,9 @@ export function TrialLandingPage() {
         setPageState('error');
         setErrorMessage(result.error || 'Redemption failed');
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       setPageState('error');
-      setErrorMessage(err.message || 'Redemption failed');
+      setErrorMessage(getTrialErrorMessage(err, 'Unable to redeem this invite code right now.'));
     }
   };
 
@@ -108,9 +128,9 @@ export function TrialLandingPage() {
         setPageState('error');
         setErrorMessage(result.error || 'Redemption failed');
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       setPageState('error');
-      setErrorMessage(err.message || 'Redemption failed');
+      setErrorMessage(getTrialErrorMessage(err, 'Unable to redeem this invite code right now.'));
     }
   };
 

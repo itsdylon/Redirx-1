@@ -1,21 +1,39 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Card } from './ui/card';
 import { validateEmail } from '../utils/validation';
+import { ApiError } from '../utils/errorHandler';
 
 export function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [authCode, setAuthCode] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [emailError, setEmailError] = useState('');
   const [emailTouched, setEmailTouched] = useState(false);
+  const [resendLoading, setResendLoading] = useState(false);
+  const [resendSuccess, setResendSuccess] = useState('');
+  const [resendError, setResendError] = useState('');
+  const [resendCooldown, setResendCooldown] = useState(0);
 
-  const { login } = useAuth();
+  const { login, resendConfirmationEmail } = useAuth();
   const navigate = useNavigate();
+
+  useEffect(() => {
+    if (resendCooldown <= 0) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      setResendCooldown((seconds) => Math.max(0, seconds - 1));
+    }, 1000);
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [resendCooldown]);
 
   const handleEmailBlur = () => {
     setEmailTouched(true);
@@ -29,15 +47,28 @@ export function LoginPage() {
 
   const handleEmailChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setEmail(e.target.value);
+    setResendSuccess('');
+    setResendError('');
+    setAuthCode(null);
+    setError('');
     // Clear error when user starts typing again
     if (emailTouched) {
       setEmailError('');
     }
   };
 
+  const handlePasswordChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setPassword(e.target.value);
+    setAuthCode(null);
+    setError('');
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    setAuthCode(null);
+    setResendSuccess('');
+    setResendError('');
 
     // Validate email before submission
     const emailValidation = validateEmail(email);
@@ -58,10 +89,56 @@ export function LoginPage() {
       } else {
         navigate('/');
       }
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      if (err instanceof ApiError) {
+        setAuthCode(err.code || null);
+        if (err.code === 'auth_invalid_credentials') {
+          setError('Email or password is incorrect.');
+        } else if (err.code === 'auth_email_unconfirmed') {
+          setError('Please confirm your email before signing in.');
+        } else if (err.code === 'auth_service_unavailable') {
+          setError('Sign-in is temporarily unavailable. Please try again shortly.');
+        } else if (err.code === 'auth_rate_limited') {
+          setError('Too many sign-in attempts. Please wait and try again.');
+        } else {
+          setError(err.user_message || err.message);
+        }
+      } else if (err instanceof Error) {
+        setError(err.message);
+      } else {
+        setError('Unable to sign in right now. Please try again.');
+      }
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleResendConfirmation = async () => {
+    const emailValidation = validateEmail(email);
+    if (!emailValidation.valid) {
+      setEmailError(emailValidation.error || 'Invalid email');
+      setEmailTouched(true);
+      return;
+    }
+
+    setResendLoading(true);
+    setResendError('');
+    setResendSuccess('');
+
+    try {
+      const result = await resendConfirmationEmail(email.trim());
+      setResendSuccess(result.message);
+      setResendCooldown(30);
+    } catch (err: unknown) {
+      if (err instanceof ApiError) {
+        setResendError(err.user_message || err.message);
+      } else if (err instanceof Error) {
+        setResendError(err.message);
+      } else {
+        setResendError('Unable to resend confirmation email right now.');
+      }
+    } finally {
+      setResendLoading(false);
     }
   };
 
@@ -78,6 +155,37 @@ export function LoginPage() {
         {error && (
           <div className="bg-destructive/10 border border-destructive/50 text-destructive px-4 py-3 rounded mb-4">
             {error}
+          </div>
+        )}
+
+        {authCode === 'auth_email_unconfirmed' && (
+          <div className="bg-amber-500/10 border border-amber-500/40 text-amber-700 px-4 py-3 rounded mb-4 space-y-3">
+            <p className="text-sm">Didn&apos;t get the confirmation email?</p>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={handleResendConfirmation}
+              disabled={resendLoading || resendCooldown > 0 || !email.trim()}
+            >
+              {resendLoading
+                ? 'Sending...'
+                : resendCooldown > 0
+                  ? `Resend in ${resendCooldown}s`
+                  : 'Resend confirmation email'}
+            </Button>
+          </div>
+        )}
+
+        {resendSuccess && (
+          <div className="bg-emerald-500/10 border border-emerald-500/40 text-emerald-700 px-4 py-3 rounded mb-4">
+            {resendSuccess}
+          </div>
+        )}
+
+        {resendError && (
+          <div className="bg-destructive/10 border border-destructive/50 text-destructive px-4 py-3 rounded mb-4">
+            {resendError}
           </div>
         )}
 
@@ -108,7 +216,7 @@ export function LoginPage() {
             <Input
               type="password"
               value={password}
-              onChange={(e) => setPassword(e.target.value)}
+              onChange={handlePasswordChange}
               placeholder="Enter your password"
               required
               autoComplete="current-password"
@@ -127,7 +235,10 @@ export function LoginPage() {
 
         <p className="mt-6 text-center text-sm text-muted-foreground">
           Don't have an account?{' '}
-          <Link to="/signup" className="text-primary hover:underline font-medium">
+          <Link
+            to={email ? `/signup?email=${encodeURIComponent(email)}` : '/signup'}
+            className="text-primary hover:underline font-medium"
+          >
             Sign up
           </Link>
         </p>

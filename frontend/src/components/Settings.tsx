@@ -32,6 +32,7 @@ import {
 } from '../api/billing';
 import { API_BASE_URL, getAuthHeaders } from '../api/config';
 import { getEmailPreferences, updateEmailPreference } from '../api/email';
+import { ApiError, throwApiErrorFromResponse } from '../utils/errorHandler';
 
 export function Settings() {
   const { user, refreshSession } = useAuth();
@@ -85,6 +86,16 @@ export function Settings() {
 
   const pollingRef = useRef(false);
 
+  const getErrorMessage = (err: unknown, fallback: string): string => {
+    if (err instanceof ApiError) {
+      return err.user_message || err.message || fallback;
+    }
+    if (err instanceof Error) {
+      return err.message;
+    }
+    return fallback;
+  };
+
   const fetchBillingData = useCallback(async () => {
     setLoadingSubscription(true);
     setSubscriptionError(null);
@@ -95,10 +106,8 @@ export function Settings() {
       ]);
       setSubscription(sub);
       setPlans(planList);
-    } catch (err) {
-      setSubscriptionError(
-        err instanceof Error ? err.message : 'Failed to load subscription data'
-      );
+    } catch (err: unknown) {
+      setSubscriptionError(getErrorMessage(err, 'Unable to load subscription details right now.'));
     } finally {
       setLoadingSubscription(false);
     }
@@ -137,13 +146,12 @@ export function Settings() {
         body: JSON.stringify({ full_name: fullName }),
       });
       if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.error || 'Failed to update profile');
+        await throwApiErrorFromResponse(res, 'Unable to save your profile right now.');
       }
       await refreshSession();
       toast.success('Profile saved successfully.');
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to save profile');
+    } catch (err: unknown) {
+      toast.error(getErrorMessage(err, 'Unable to save your profile right now.'));
     } finally {
       setProfileSaving(false);
     }
@@ -168,8 +176,8 @@ export function Settings() {
         updateEmailPreference('mapping_failed', !emailJobFailed),
       ]);
       toast.success('Notification preferences saved successfully.');
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to save preferences');
+    } catch (err: unknown) {
+      toast.error(getErrorMessage(err, 'Unable to save preferences right now.'));
     } finally {
       setNotificationsSaving(false);
     }
@@ -271,8 +279,8 @@ export function Settings() {
       const url = await createCheckoutSession(priceId);
       window.location.href = url;
       return; // Don't clear loading — page is navigating away
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to start checkout');
+    } catch (err: unknown) {
+      toast.error(getErrorMessage(err, 'Unable to start checkout right now.'));
     }
     setCheckoutLoading(null);
   };
@@ -284,12 +292,11 @@ export function Settings() {
     try {
       const url = await createPortalSession();
       window.location.href = url;
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to open billing portal';
-      if (message.includes('No Stripe customer')) {
-        toast.error('No billing account found. Please contact support if you believe this is an error.');
+    } catch (err: unknown) {
+      if (err instanceof ApiError && err.code === 'billing_no_customer') {
+        toast.error('No billing account was found for this user. Please contact support.');
       } else {
-        toast.error(message);
+        toast.error(getErrorMessage(err, 'Unable to open billing portal right now.'));
       }
       setPortalLoading(false);
     }
@@ -307,8 +314,8 @@ export function Settings() {
       });
       window.location.href = url;
       return;
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to start checkout');
+    } catch (err: unknown) {
+      toast.error(getErrorMessage(err, 'Unable to start checkout right now.'));
     }
     setFounderCheckoutLoading(false);
   };
@@ -340,8 +347,8 @@ export function Settings() {
       setEntryModalOpen(true);
       toast.success('Tutorial restarted');
       navigate('/dashboard?tutorial=1');
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to restart tutorial');
+    } catch (err: unknown) {
+      toast.error(getErrorMessage(err, 'Unable to restart tutorial right now.'));
     } finally {
       setReplayLoading(false);
     }

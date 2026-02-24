@@ -10,6 +10,7 @@ from backend.services.auth_service import require_auth, require_admin
 from backend.services.trial_service import TrialService
 from backend.services.stripe_service import StripeService
 from backend.services.demo_rate_limiter import DemoRateLimiter
+from backend.routes.error_utils import error_response
 from redirx.database import SupabaseClient
 
 logger = logging.getLogger(__name__)
@@ -52,6 +53,20 @@ def _parse_utc_timestamp(value: Any) -> Optional[datetime]:
     return parsed.astimezone(timezone.utc)
 
 
+def _map_trial_validation_error(error_message: str) -> tuple[str, str]:
+    normalized = (error_message or "").lower()
+    if "different email address" in normalized:
+        return "trial_code_email_mismatch", "This invite code was issued to a different email address."
+    if (
+        "invalid code format" in normalized
+        or "invalid or expired" in normalized
+        or "has expired" in normalized
+        or "already been used" in normalized
+    ):
+        return "trial_code_invalid_or_expired", "This invite code is invalid or expired."
+    return "trial_code_invalid_or_expired", "This invite code is invalid or expired."
+
+
 # ============================================================================
 # Admin: Campaign management
 # ============================================================================
@@ -63,7 +78,13 @@ def create_campaign():
     """Create a new trial campaign."""
     data = request.get_json()
     if not data or not data.get('name') or not data.get('slug'):
-        return jsonify({'error': 'name and slug are required'}), 400
+        return error_response(
+            code="trial_campaign_name_slug_required",
+            user_message="Campaign name and slug are required.",
+            status=400,
+            retryable=False,
+            next_action="fill_form",
+        )
 
     try:
         service = _get_trial_service()
@@ -79,8 +100,20 @@ def create_campaign():
     except Exception as e:
         logger.error(f"Campaign creation failed: {e}")
         if 'duplicate key' in str(e).lower() or 'unique' in str(e).lower():
-            return jsonify({'error': 'A campaign with this slug already exists'}), 409
-        return jsonify({'error': 'Failed to create campaign'}), 500
+            return error_response(
+                code="trial_campaign_slug_conflict",
+                user_message="A campaign with this slug already exists.",
+                status=409,
+                retryable=False,
+                next_action="edit_slug",
+            )
+        return error_response(
+            code="trial_campaign_create_failed",
+            user_message="Unable to create campaign right now.",
+            status=500,
+            retryable=True,
+            next_action="retry",
+        )
 
 
 @trial_blueprint.route('/admin/trials/campaigns', methods=['GET'])
@@ -99,7 +132,13 @@ def list_campaigns():
         return jsonify({'campaigns': campaigns})
     except Exception as e:
         logger.error(f"Campaign listing failed: {e}")
-        return jsonify({'error': 'Failed to list campaigns'}), 500
+        return error_response(
+            code="trial_campaign_list_failed",
+            user_message="Unable to load campaigns right now.",
+            status=500,
+            retryable=True,
+            next_action="retry",
+        )
 
 
 @trial_blueprint.route('/admin/onboarding/report', methods=['GET'])
@@ -120,13 +159,31 @@ def get_onboarding_report():
         stuck_hours = int(stuck_hours_raw)
         limit = int(limit_raw)
     except (TypeError, ValueError):
-        return jsonify({'error': 'stuck_hours and limit must be integers'}), 400
+        return error_response(
+            code="trial_onboarding_report_invalid_params",
+            user_message="stuck_hours and limit must be integers.",
+            status=400,
+            retryable=False,
+            next_action="fill_form",
+        )
 
     if stuck_hours < 1 or stuck_hours > 24 * 30:
-        return jsonify({'error': 'stuck_hours must be between 1 and 720'}), 400
+        return error_response(
+            code="trial_onboarding_report_stuck_hours_range",
+            user_message="stuck_hours must be between 1 and 720.",
+            status=400,
+            retryable=False,
+            next_action="fill_form",
+        )
 
     if limit < 1 or limit > 500:
-        return jsonify({'error': 'limit must be between 1 and 500'}), 400
+        return error_response(
+            code="trial_onboarding_report_limit_range",
+            user_message="limit must be between 1 and 500.",
+            status=400,
+            retryable=False,
+            next_action="fill_form",
+        )
 
     now = datetime.now(timezone.utc)
     cutoff = now - timedelta(hours=stuck_hours)
@@ -274,7 +331,13 @@ def get_onboarding_report():
 
     except Exception as e:
         logger.error(f"Onboarding report failed: {e}")
-        return jsonify({'error': 'Failed to generate onboarding report'}), 500
+        return error_response(
+            code="trial_onboarding_report_failed",
+            user_message="Unable to generate onboarding report right now.",
+            status=500,
+            retryable=True,
+            next_action="retry",
+        )
 
 
 # ============================================================================
@@ -296,16 +359,34 @@ def generate_invites():
         if request.content_type and 'multipart' in request.content_type:
             campaign_id = request.form.get('campaign_id')
             if not campaign_id:
-                return jsonify({'error': 'campaign_id is required'}), 400
+                return error_response(
+                    code="trial_campaign_required",
+                    user_message="Campaign is required.",
+                    status=400,
+                    retryable=False,
+                    next_action="fill_form",
+                )
 
             csv_file = request.files.get('csv')
             if not csv_file:
-                return jsonify({'error': 'CSV file is required for CSV mode'}), 400
+                return error_response(
+                    code="trial_csv_required",
+                    user_message="CSV file is required for CSV mode.",
+                    status=400,
+                    retryable=False,
+                    next_action="fill_form",
+                )
 
             csv_content = csv_file.read().decode('utf-8')
             emails = service.parse_recipient_csv(csv_content)
             if not emails:
-                return jsonify({'error': 'No valid email addresses found in CSV'}), 400
+                return error_response(
+                    code="trial_csv_no_valid_emails",
+                    user_message="No valid email addresses were found in the CSV.",
+                    status=400,
+                    retryable=False,
+                    next_action="fix_csv",
+                )
 
             invites = service.generate_invites(
                 campaign_id=campaign_id,
@@ -319,7 +400,13 @@ def generate_invites():
         else:
             data = request.get_json()
             if not data or not data.get('campaign_id'):
-                return jsonify({'error': 'campaign_id is required'}), 400
+                return error_response(
+                    code="trial_campaign_required",
+                    user_message="Campaign is required.",
+                    status=400,
+                    retryable=False,
+                    next_action="fill_form",
+                )
 
             invites = service.generate_invites(
                 campaign_id=data['campaign_id'],
@@ -335,7 +422,13 @@ def generate_invites():
         return jsonify({'invites': invites}), 201
     except Exception as e:
         logger.error(f"Invite generation failed: {e}")
-        return jsonify({'error': 'Failed to generate invites'}), 500
+        return error_response(
+            code="trial_invite_generate_failed",
+            user_message="Unable to generate invites right now.",
+            status=500,
+            retryable=True,
+            next_action="retry",
+        )
 
 
 @trial_blueprint.route('/admin/trials/invites', methods=['GET'])
@@ -352,7 +445,13 @@ def list_invites():
         return jsonify({'invites': invites})
     except Exception as e:
         logger.error(f"Invite listing failed: {e}")
-        return jsonify({'error': 'Failed to list invites'}), 500
+        return error_response(
+            code="trial_invite_list_failed",
+            user_message="Unable to load invites right now.",
+            status=500,
+            retryable=True,
+            next_action="retry",
+        )
 
 
 @trial_blueprint.route('/admin/trials/mark-sent', methods=['POST'])
@@ -362,11 +461,23 @@ def mark_sent():
     """Mark invites as sent by IDs."""
     data = request.get_json()
     if not data or not data.get('invite_ids'):
-        return jsonify({'error': 'invite_ids is required'}), 400
+        return error_response(
+            code="trial_invite_ids_required",
+            user_message="invite_ids is required.",
+            status=400,
+            retryable=False,
+            next_action="fill_form",
+        )
 
     invite_ids = data['invite_ids']
     if not isinstance(invite_ids, list) or len(invite_ids) == 0:
-        return jsonify({'error': 'invite_ids must be a non-empty array'}), 400
+        return error_response(
+            code="trial_invite_ids_invalid",
+            user_message="invite_ids must be a non-empty array.",
+            status=400,
+            retryable=False,
+            next_action="fill_form",
+        )
 
     try:
         service = _get_trial_service()
@@ -374,7 +485,13 @@ def mark_sent():
         return jsonify({'success': True, 'updated': count})
     except Exception as e:
         logger.error(f"Mark sent failed: {e}")
-        return jsonify({'error': 'Failed to mark invites as sent'}), 500
+        return error_response(
+            code="trial_invite_mark_sent_failed",
+            user_message="Unable to mark invites as sent right now.",
+            status=500,
+            retryable=True,
+            next_action="retry",
+        )
 
 
 @trial_blueprint.route('/admin/trials/revoke', methods=['POST'])
@@ -384,17 +501,35 @@ def revoke_invite():
     """Revoke an invite by ID."""
     data = request.get_json()
     if not data or not data.get('invite_id'):
-        return jsonify({'error': 'invite_id is required'}), 400
+        return error_response(
+            code="trial_invite_id_required",
+            user_message="invite_id is required.",
+            status=400,
+            retryable=False,
+            next_action="fill_form",
+        )
 
     try:
         service = _get_trial_service()
         revoked = service.revoke_invite(data['invite_id'], request.user.id)
         if revoked:
             return jsonify({'success': True})
-        return jsonify({'error': 'Invite not found or already redeemed/revoked'}), 404
+        return error_response(
+            code="trial_invite_not_found",
+            user_message="Invite not found or already redeemed/revoked.",
+            status=404,
+            retryable=False,
+            next_action="refresh",
+        )
     except Exception as e:
         logger.error(f"Invite revocation failed: {e}")
-        return jsonify({'error': 'Failed to revoke invite'}), 500
+        return error_response(
+            code="trial_invite_revoke_failed",
+            user_message="Unable to revoke invite right now.",
+            status=500,
+            retryable=True,
+            next_action="retry",
+        )
 
 
 @trial_blueprint.route('/admin/trials/expire', methods=['POST'])
@@ -408,7 +543,13 @@ def run_expiry():
     provided = request.headers.get('X-Cron-Secret', '')
 
     if not cron_secret or provided != cron_secret:
-        return jsonify({'error': 'Unauthorized'}), 401
+        return error_response(
+            code="trial_admin_unauthorized",
+            user_message="Unauthorized.",
+            status=401,
+            retryable=False,
+            next_action="authenticate",
+        )
 
     try:
         service = _get_trial_service()
@@ -416,7 +557,13 @@ def run_expiry():
         return jsonify({'expired_count': count})
     except Exception as e:
         logger.error(f"Trial expiry failed: {e}")
-        return jsonify({'error': 'Failed to expire trials'}), 500
+        return error_response(
+            code="trial_expiry_failed",
+            user_message="Unable to expire trials right now.",
+            status=500,
+            retryable=True,
+            next_action="retry",
+        )
 
 
 # ============================================================================
@@ -431,14 +578,31 @@ def validate_code():
     """
     data = request.get_json()
     if not data or not data.get('code'):
-        return jsonify({'error': 'code is required'}), 400
+        return error_response(
+            code="trial_code_required",
+            user_message="Invite code is required.",
+            status=400,
+            retryable=False,
+            next_action="fill_form",
+        )
 
     try:
         service = _get_trial_service()
         is_valid, error_msg, invite = service.validate_code(data['code'])
 
         if not is_valid:
-            return jsonify({'valid': False, 'error': error_msg})
+            code, user_message = _map_trial_validation_error(error_msg)
+            next_action = 'request_new_code'
+            if code == 'trial_code_email_mismatch':
+                next_action = 'use_matching_account'
+            return error_response(
+                code=code,
+                user_message=user_message,
+                status=400,
+                retryable=False,
+                next_action=next_action,
+                extra={'valid': False},
+            )
 
         campaign = invite.get('trial_campaigns', {})
         invite_type = invite.get('invite_type') or campaign.get('invite_type') or 'trial'
@@ -453,7 +617,13 @@ def validate_code():
         })
     except Exception as e:
         logger.error(f"Code validation failed: {e}")
-        return jsonify({'error': 'Validation failed'}), 500
+        return error_response(
+            code="trial_validation_failed",
+            user_message="Unable to validate this invite code right now.",
+            status=500,
+            retryable=True,
+            next_action="retry",
+        )
 
 
 @trial_blueprint.route('/founder/checkout', methods=['POST'])
@@ -465,25 +635,53 @@ def founder_checkout():
     """
     data = request.get_json()
     if not data or not data.get('code'):
-        return jsonify({'error': 'code is required'}), 400
+        return error_response(
+            code="trial_code_required",
+            user_message="Invite code is required.",
+            status=400,
+            retryable=False,
+            next_action="fill_form",
+        )
 
     try:
         service = _get_trial_service()
         is_valid, error_msg, invite = service.validate_code(data['code'])
 
         if not is_valid:
-            return jsonify({'error': error_msg}), 400
+            code, user_message = _map_trial_validation_error(error_msg)
+            next_action = "request_new_code"
+            if code == "trial_code_email_mismatch":
+                next_action = "use_matching_account"
+            return error_response(
+                code=code,
+                user_message=user_message,
+                status=400,
+                retryable=False,
+                next_action=next_action,
+            )
 
         # Verify this is a founder invite
         campaign = invite.get('trial_campaigns', {})
         invite_type = invite.get('invite_type') or campaign.get('invite_type') or 'trial'
         if invite_type != 'founder':
-            return jsonify({'error': 'This invite code is not for the Founder package'}), 400
+            return error_response(
+                code="trial_founder_invite_required",
+                user_message="This invite code is not for the Founder package.",
+                status=400,
+                retryable=False,
+                next_action="request_new_code",
+            )
 
         # Check recipient email restriction
         if invite.get('recipient_email'):
             if invite['recipient_email'].lower() != request.user.email.lower():
-                return jsonify({'error': 'This invite code was issued to a different email address'}), 400
+                return error_response(
+                    code="trial_code_email_mismatch",
+                    user_message="This invite code was issued to a different email address.",
+                    status=400,
+                    retryable=False,
+                    next_action="use_matching_account",
+                )
 
         # Check user is not already on founder plan
         from redirx.database import SupabaseClient
@@ -495,12 +693,24 @@ def founder_checkout():
         if profile_result.data:
             current_plan = profile_result.data.get('plan', 'launch')
             if current_plan == 'founder':
-                return jsonify({'error': 'You are already on the Founder plan'}), 400
+                return error_response(
+                    code="trial_already_founder",
+                    user_message="You are already on the Founder plan.",
+                    status=400,
+                    retryable=False,
+                    next_action="open_dashboard",
+                )
 
         # Create Stripe Checkout session
         from redirx.config import Config
         if not Config.STRIPE_PRICE_ID_FOUNDER:
-            return jsonify({'error': 'Founder pricing not configured'}), 500
+            return error_response(
+                code="trial_founder_pricing_unavailable",
+                user_message="Founder pricing is currently unavailable.",
+                status=500,
+                retryable=True,
+                next_action="contact_support",
+            )
 
         origin = request.headers.get('Origin', 'http://localhost:3000')
         stripe_service = StripeService()
@@ -519,7 +729,13 @@ def founder_checkout():
         return jsonify({'url': url})
     except Exception as e:
         logger.error(f"Founder checkout failed: {e}")
-        return jsonify({'error': 'Failed to create checkout session'}), 500
+        return error_response(
+            code="trial_founder_checkout_failed",
+            user_message="Unable to create checkout session right now.",
+            status=500,
+            retryable=True,
+            next_action="retry",
+        )
 
 
 @trial_blueprint.route('/trials/redeem', methods=['POST'])
@@ -530,14 +746,24 @@ def redeem_code():
     ip = _get_client_ip()
     allowed, retry_after = _redeem_limiter.check(ip)
     if not allowed:
-        return jsonify({
-            'error': 'Too many redemption attempts. Please try again later.',
-            'retry_after_seconds': retry_after,
-        }), 429
+        return error_response(
+            code="trial_redeem_rate_limited",
+            user_message="Too many redemption attempts. Please try again later.",
+            status=429,
+            retryable=True,
+            next_action="retry_later",
+            extra={'retry_after_seconds': retry_after},
+        )
 
     data = request.get_json()
     if not data or not data.get('code'):
-        return jsonify({'error': 'code is required'}), 400
+        return error_response(
+            code="trial_code_required",
+            user_message="Invite code is required.",
+            status=400,
+            retryable=False,
+            next_action="fill_form",
+        )
 
     try:
         service = _get_trial_service()
@@ -549,7 +775,17 @@ def redeem_code():
         )
 
         if not success:
-            return jsonify({'success': False, 'error': error_msg}), 400
+            code, user_message = _map_trial_validation_error(error_msg)
+            next_action = "request_new_code"
+            if code == "trial_code_email_mismatch":
+                next_action = "use_matching_account"
+            return error_response(
+                code=code,
+                user_message=user_message,
+                status=400,
+                retryable=False,
+                next_action=next_action,
+            )
 
         return jsonify({
             'success': True,
@@ -560,7 +796,13 @@ def redeem_code():
         })
     except Exception as e:
         logger.error(f"Code redemption failed: {e}")
-        return jsonify({'error': 'Redemption failed'}), 500
+        return error_response(
+            code="trial_redeem_failed",
+            user_message="We couldn't redeem this code right now. Please try again.",
+            status=500,
+            retryable=True,
+            next_action="retry",
+        )
 
 
 # ============================================================================
@@ -573,23 +815,45 @@ def submit_waitlist():
     ip = _get_client_ip()
     allowed, retry_after = _waitlist_limiter.check(ip)
     if not allowed:
-        return jsonify({
-            'error': 'Too many requests. Please try again later.',
-            'retry_after_seconds': retry_after,
-        }), 429
+        return error_response(
+            code="trial_waitlist_rate_limited",
+            user_message="Too many requests. Please try again later.",
+            status=429,
+            retryable=True,
+            next_action="retry_later",
+            extra={'retry_after_seconds': retry_after},
+        )
 
     data = request.get_json()
     if not data:
-        return jsonify({'error': 'Request body is required'}), 400
+        return error_response(
+            code="trial_waitlist_body_required",
+            user_message="Request body is required.",
+            status=400,
+            retryable=False,
+            next_action="fill_form",
+        )
 
     name = (data.get('name') or '').strip()
     email = (data.get('email') or '').strip()
     company = (data.get('company') or '').strip() or None
 
     if not name:
-        return jsonify({'error': 'Name is required'}), 400
+        return error_response(
+            code="trial_waitlist_name_required",
+            user_message="Name is required.",
+            status=400,
+            retryable=False,
+            next_action="fill_form",
+        )
     if not email or '@' not in email or '.' not in email:
-        return jsonify({'error': 'A valid email address is required'}), 400
+        return error_response(
+            code="trial_waitlist_email_invalid",
+            user_message="A valid email address is required.",
+            status=400,
+            retryable=False,
+            next_action="fill_form",
+        )
 
     try:
         service = _get_trial_service()
@@ -603,9 +867,21 @@ def submit_waitlist():
     except Exception as e:
         error_str = str(e).lower()
         if 'duplicate' in error_str or 'unique' in error_str:
-            return jsonify({'error': 'A request with this email is already pending'}), 409
+            return error_response(
+                code="trial_waitlist_duplicate",
+                user_message="A request with this email is already pending.",
+                status=409,
+                retryable=False,
+                next_action="check_email",
+            )
         logger.error(f"Waitlist submission failed: {e}")
-        return jsonify({'error': 'Failed to submit request'}), 500
+        return error_response(
+            code="trial_waitlist_submit_failed",
+            user_message="Unable to submit your request right now.",
+            status=500,
+            retryable=True,
+            next_action="retry",
+        )
 
 
 # ============================================================================
@@ -623,7 +899,13 @@ def list_waitlist():
         return jsonify({'entries': entries})
     except Exception as e:
         logger.error(f"Waitlist listing failed: {e}")
-        return jsonify({'error': 'Failed to list waitlist'}), 500
+        return error_response(
+            code="trial_waitlist_list_failed",
+            user_message="Unable to load waitlist entries right now.",
+            status=500,
+            retryable=True,
+            next_action="retry",
+        )
 
 
 @trial_blueprint.route('/admin/trials/waitlist/approve', methods=['POST'])
@@ -633,7 +915,13 @@ def approve_waitlist():
     """Approve a waitlist entry and generate a founder invite code."""
     data = request.get_json()
     if not data or not data.get('waitlist_id') or not data.get('campaign_id'):
-        return jsonify({'error': 'waitlist_id and campaign_id are required'}), 400
+        return error_response(
+            code="trial_waitlist_approve_fields_required",
+            user_message="waitlist_id and campaign_id are required.",
+            status=400,
+            retryable=False,
+            next_action="fill_form",
+        )
 
     try:
         service = _get_trial_service()
@@ -644,10 +932,22 @@ def approve_waitlist():
         )
         return jsonify({'success': True, 'raw_code': raw_code})
     except ValueError as e:
-        return jsonify({'error': str(e)}), 404
+        return error_response(
+            code="trial_waitlist_not_found",
+            user_message="Waitlist entry not found.",
+            status=404,
+            retryable=False,
+            next_action="refresh",
+        )
     except Exception as e:
         logger.error(f"Waitlist approval failed: {e}")
-        return jsonify({'error': 'Failed to approve request'}), 500
+        return error_response(
+            code="trial_waitlist_approve_failed",
+            user_message="Unable to approve request right now.",
+            status=500,
+            retryable=True,
+            next_action="retry",
+        )
 
 
 @trial_blueprint.route('/admin/trials/waitlist/reject', methods=['POST'])
@@ -657,7 +957,13 @@ def reject_waitlist():
     """Reject a waitlist entry with optional admin notes."""
     data = request.get_json()
     if not data or not data.get('waitlist_id'):
-        return jsonify({'error': 'waitlist_id is required'}), 400
+        return error_response(
+            code="trial_waitlist_id_required",
+            user_message="waitlist_id is required.",
+            status=400,
+            retryable=False,
+            next_action="fill_form",
+        )
 
     try:
         service = _get_trial_service()
@@ -668,7 +974,19 @@ def reject_waitlist():
         )
         if rejected:
             return jsonify({'success': True})
-        return jsonify({'error': 'Entry not found or already processed'}), 404
+        return error_response(
+            code="trial_waitlist_not_found",
+            user_message="Entry not found or already processed.",
+            status=404,
+            retryable=False,
+            next_action="refresh",
+        )
     except Exception as e:
         logger.error(f"Waitlist rejection failed: {e}")
-        return jsonify({'error': 'Failed to reject request'}), 500
+        return error_response(
+            code="trial_waitlist_reject_failed",
+            user_message="Unable to reject request right now.",
+            status=500,
+            retryable=True,
+            next_action="retry",
+        )

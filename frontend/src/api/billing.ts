@@ -1,4 +1,5 @@
 import { API_BASE_URL, getAuthHeaders } from './config';
+import { throwApiErrorFromResponse } from '../utils/errorHandler';
 
 export interface SubscriptionStatus {
   plan: string;
@@ -41,13 +42,17 @@ export async function getSubscriptionStatus(): Promise<SubscriptionStatus> {
   const res = await fetch(`${API_BASE_URL}/api/billing/subscription`, {
     headers: getAuthHeaders(),
   });
-  if (!res.ok) throw new Error('Failed to fetch subscription status');
+  if (!res.ok) {
+    await throwApiErrorFromResponse(res, 'Unable to load subscription details right now.');
+  }
   return res.json();
 }
 
 export async function getPlans(): Promise<PlanInfo[]> {
   const res = await fetch(`${API_BASE_URL}/api/billing/plans`);
-  if (!res.ok) throw new Error('Failed to fetch plans');
+  if (!res.ok) {
+    await throwApiErrorFromResponse(res, 'Unable to load billing plans right now.');
+  }
   const data = await res.json();
   return data.plans;
 }
@@ -66,8 +71,7 @@ export async function createCheckoutSession(
     body: JSON.stringify(body),
   });
   if (!res.ok) {
-    const data = await res.json();
-    throw new Error(data.error || 'Failed to create checkout session');
+    await throwApiErrorFromResponse(res, 'Unable to start checkout right now. Please try again.');
   }
   const data = await res.json();
   return data.url;
@@ -79,8 +83,7 @@ export async function reactivateSubscription(): Promise<void> {
     headers: getAuthHeaders(),
   });
   if (!res.ok) {
-    const data = await res.json();
-    throw new Error(data.error || 'Failed to reactivate subscription');
+    await throwApiErrorFromResponse(res, 'Unable to reactivate your subscription right now.');
   }
 }
 
@@ -90,8 +93,7 @@ export async function createPortalSession(): Promise<string> {
     headers: getAuthHeaders(),
   });
   if (!res.ok) {
-    const data = await res.json();
-    throw new Error(data.error || 'Failed to create portal session');
+    await throwApiErrorFromResponse(res, 'Unable to open billing portal right now.');
   }
   const data = await res.json();
   return data.url;

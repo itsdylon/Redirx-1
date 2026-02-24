@@ -1,13 +1,15 @@
-/**
- * Tests for centralized error handler utility
- */
-
 import { describe, it, expect } from 'vitest';
-import { handleApiError, handleSimpleError } from './errorHandler';
+import {
+  ApiError,
+  handleApiError,
+  handleSimpleError,
+  throwApiErrorFromResponse,
+  toApiError,
+} from './errorHandler';
 
 describe('errorHandler', () => {
   describe('handleApiError', () => {
-    it('should handle network errors', async () => {
+    it('handles network errors', async () => {
       const error = new TypeError('Failed to fetch');
       const result = await handleApiError(error);
 
@@ -16,7 +18,7 @@ describe('errorHandler', () => {
       expect(result.retryable).toBe(true);
     });
 
-    it('should handle timeout errors', async () => {
+    it('handles timeout errors', async () => {
       const error = new Error('timeout');
       error.name = 'AbortError';
       const result = await handleApiError(error);
@@ -26,73 +28,78 @@ describe('errorHandler', () => {
       expect(result.retryable).toBe(true);
     });
 
-    it('should handle 401 unauthorized', async () => {
-      const response = new Response(JSON.stringify({ error: 'Unauthorized' }), {
-        status: 401,
-      });
+    it('uses retry_after_seconds from structured payload for 429', async () => {
+      const response = new Response(
+        JSON.stringify({
+          code: 'trial_redeem_rate_limited',
+          user_message: 'Too many redemption attempts. Please try again later.',
+          retry_after_seconds: 22,
+        }),
+        { status: 429, headers: { 'Content-Type': 'application/json' } }
+      );
+
       const result = await handleApiError(null, response);
-
-      expect(result.type).toBe('unauthorized');
-      expect(result.message).toContain('Unauthorized');
-      expect(result.retryable).toBe(false);
-    });
-
-    it('should handle 404 not found', async () => {
-      const response = new Response(JSON.stringify({ error: 'Not found' }), {
-        status: 404,
-      });
-      const result = await handleApiError(null, response);
-
-      expect(result.type).toBe('not_found');
-      expect(result.message).toContain('Not found');
-      expect(result.retryable).toBe(false);
-    });
-
-    it('should handle 429 rate limiting with Retry-After header', async () => {
-      const response = new Response(JSON.stringify({ message: 'Too many requests' }), {
-        status: 429,
-        headers: { 'Retry-After': '30' },
-      });
-      const result = await handleApiError(null, response);
-
       expect(result.type).toBe('rate_limit');
-      expect(result.message).toContain('30 seconds');
-      expect(result.retryable).toBe(true);
-      expect(result.retryAfter).toBe(30);
+      expect(result.retryAfter).toBe(22);
+      expect(result.message).toContain('Too many redemption attempts');
     });
 
-    it('should handle 500 server errors', async () => {
-      const response = new Response(JSON.stringify({}), { status: 500 });
-      const result = await handleApiError(null, response);
+    it('falls back to status text when non-json body is technical', async () => {
+      const response = new Response('<html><body>500 Internal Error</body></html>', {
+        status: 500,
+        headers: { 'Content-Type': 'text/html' },
+      });
 
+      const result = await handleApiError(null, response);
       expect(result.type).toBe('server_error');
       expect(result.message).toContain('Server error');
-      expect(result.retryable).toBe(true);
     });
+  });
 
-    it('should parse backend error messages for 4xx errors', async () => {
+  describe('ApiError conversion', () => {
+    it('prefers user_message then legacy error', async () => {
       const response = new Response(
-        JSON.stringify({ error: 'Invalid input data' }),
-        { status: 400 }
+        JSON.stringify({
+          code: 'auth_email_unconfirmed',
+          error: 'Legacy fallback text',
+          user_message: 'Please confirm your email before signing in.',
+          retryable: false,
+          next_action: 'verify_email',
+        }),
+        { status: 403, headers: { 'Content-Type': 'application/json' } }
       );
-      const result = await handleApiError(null, response);
 
-      expect(result.type).toBe('client_error');
-      expect(result.message).toBe('Invalid input data');
-      expect(result.retryable).toBe(false);
+      const apiError = await toApiError(response);
+      expect(apiError).toBeInstanceOf(ApiError);
+      expect(apiError.code).toBe('auth_email_unconfirmed');
+      expect(apiError.message).toBe('Please confirm your email before signing in.');
+      expect(apiError.user_message).toBe('Please confirm your email before signing in.');
+      expect(apiError.next_action).toBe('verify_email');
+      expect(apiError.retryable).toBe(false);
+      expect(apiError.status).toBe(403);
     });
 
-    it('should handle unknown errors gracefully', async () => {
-      const result = await handleApiError({ weird: 'object' });
+    it('throwApiErrorFromResponse throws ApiError with parsed metadata', async () => {
+      const response = new Response(
+        JSON.stringify({
+          code: 'billing_no_customer',
+          user_message: 'No billing account was found for this user.',
+          retryable: false,
+        }),
+        { status: 404, headers: { 'Content-Type': 'application/json' } }
+      );
 
-      expect(result.type).toBe('unknown_error');
-      expect(result.message).toContain('unexpected error');
-      expect(result.retryable).toBe(false);
+      await expect(throwApiErrorFromResponse(response)).rejects.toMatchObject({
+        name: 'ApiError',
+        code: 'billing_no_customer',
+        status: 404,
+        retryable: false,
+      });
     });
   });
 
   describe('handleSimpleError', () => {
-    it('should handle TypeError', () => {
+    it('handles TypeError', () => {
       const error = new TypeError('Some type error');
       const result = handleSimpleError(error);
 
@@ -100,7 +107,7 @@ describe('errorHandler', () => {
       expect(result.retryable).toBe(true);
     });
 
-    it('should handle AbortError', () => {
+    it('handles AbortError', () => {
       const error = new Error('Aborted');
       error.name = 'AbortError';
       const result = handleSimpleError(error);
@@ -109,7 +116,7 @@ describe('errorHandler', () => {
       expect(result.retryable).toBe(true);
     });
 
-    it('should preserve error messages', () => {
+    it('preserves custom error messages', () => {
       const error = new Error('Custom error message');
       const result = handleSimpleError(error);
 

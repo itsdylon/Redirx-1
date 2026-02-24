@@ -1,4 +1,5 @@
 import { API_BASE_URL, getAuthHeaders, getAuthHeadersMultipart } from './config';
+import { throwApiErrorFromResponse } from '../utils/errorHandler';
 
 // ============================================================================
 // Types
@@ -59,6 +60,10 @@ export interface GeneratedInvite {
 export interface ValidationResult {
   valid: boolean;
   error?: string;
+  code?: string;
+  user_message?: string;
+  retryable?: boolean;
+  next_action?: string;
   invite_type?: 'trial' | 'founder';
   campaign_name?: string;
   campaign_slug?: string;
@@ -70,6 +75,10 @@ export interface ValidationResult {
 export interface RedemptionResult {
   success: boolean;
   error?: string;
+  code?: string;
+  user_message?: string;
+  retryable?: boolean;
+  next_action?: string;
   trial_days?: number;
   credits_granted?: number;
   trial_expires_at?: string;
@@ -128,8 +137,7 @@ export async function createCampaign(data: {
     body: JSON.stringify(data),
   });
   if (!res.ok) {
-    const err = await res.json();
-    throw new Error(err.error || 'Failed to create campaign');
+    await throwApiErrorFromResponse(res, 'Unable to create campaign right now.');
   }
   const json = await res.json();
   return json.campaign;
@@ -140,11 +148,7 @@ export async function listCampaigns(): Promise<Campaign[]> {
     headers: getAuthHeaders(),
   });
   if (!res.ok) {
-    if (res.status === 403) {
-      throw new Error('Admin access required');
-    }
-    const err = await res.json();
-    throw new Error(err.error || 'Failed to list campaigns');
+    await throwApiErrorFromResponse(res, 'Unable to load campaigns right now.');
   }
   const json = await res.json();
   return json.campaigns;
@@ -169,11 +173,7 @@ export async function getOnboardingReport(params?: {
   });
 
   if (!res.ok) {
-    if (res.status === 403) {
-      throw new Error('Admin access required');
-    }
-    const err = await res.json();
-    throw new Error(err.error || 'Failed to load onboarding report');
+    await throwApiErrorFromResponse(res, 'Unable to load onboarding report right now.');
   }
 
   return res.json();
@@ -198,8 +198,7 @@ export async function generateInvites(data: {
     body: JSON.stringify(data),
   });
   if (!res.ok) {
-    const err = await res.json();
-    throw new Error(err.error || 'Failed to generate invites');
+    await throwApiErrorFromResponse(res, 'Unable to generate invites right now.');
   }
   const json = await res.json();
   return json.invites;
@@ -223,8 +222,7 @@ export async function generateInvitesWithCsv(
     body: formData,
   });
   if (!res.ok) {
-    const err = await res.json();
-    throw new Error(err.error || 'Failed to generate invites from CSV');
+    await throwApiErrorFromResponse(res, 'Unable to generate invites from CSV right now.');
   }
   const json = await res.json();
   return json.invites;
@@ -245,8 +243,7 @@ export async function listInvites(params?: {
     headers: getAuthHeaders(),
   });
   if (!res.ok) {
-    const err = await res.json();
-    throw new Error(err.error || 'Failed to list invites');
+    await throwApiErrorFromResponse(res, 'Unable to load invites right now.');
   }
   const json = await res.json();
   return json.invites;
@@ -259,8 +256,7 @@ export async function markSent(inviteIds: string[]): Promise<{ updated: number }
     body: JSON.stringify({ invite_ids: inviteIds }),
   });
   if (!res.ok) {
-    const err = await res.json();
-    throw new Error(err.error || 'Failed to mark invites as sent');
+    await throwApiErrorFromResponse(res, 'Unable to mark invites as sent right now.');
   }
   return res.json();
 }
@@ -272,8 +268,7 @@ export async function revokeInvite(inviteId: string): Promise<void> {
     body: JSON.stringify({ invite_id: inviteId }),
   });
   if (!res.ok) {
-    const err = await res.json();
-    throw new Error(err.error || 'Failed to revoke invite');
+    await throwApiErrorFromResponse(res, 'Unable to revoke invite right now.');
   }
 }
 
@@ -288,8 +283,7 @@ export async function validateTrialCode(code: string): Promise<ValidationResult>
     body: JSON.stringify({ code }),
   });
   if (!res.ok) {
-    const err = await res.json();
-    throw new Error(err.error || 'Validation failed');
+    await throwApiErrorFromResponse(res, 'Unable to validate this invite code right now.');
   }
   return res.json();
 }
@@ -301,8 +295,7 @@ export async function redeemTrialCode(code: string): Promise<RedemptionResult> {
     body: JSON.stringify({ code }),
   });
   if (!res.ok) {
-    const err = await res.json();
-    throw new Error(err.error || 'Redemption failed');
+    await throwApiErrorFromResponse(res, 'Unable to redeem this invite code right now.');
   }
   return res.json();
 }
@@ -337,8 +330,7 @@ export async function submitWaitlistRequest(data: {
     body: JSON.stringify(data),
   });
   if (!res.ok) {
-    const err = await res.json();
-    throw new Error(err.error || 'Failed to submit request');
+    await throwApiErrorFromResponse(res, 'Unable to submit your request right now.');
   }
   return res.json();
 }
@@ -356,8 +348,7 @@ export async function listWaitlist(params?: {
     headers: getAuthHeaders(),
   });
   if (!res.ok) {
-    const err = await res.json();
-    throw new Error(err.error || 'Failed to list waitlist');
+    await throwApiErrorFromResponse(res, 'Unable to load waitlist right now.');
   }
   const json = await res.json();
   return json.entries;
@@ -373,8 +364,7 @@ export async function approveWaitlistEntry(data: {
     body: JSON.stringify(data),
   });
   if (!res.ok) {
-    const err = await res.json();
-    throw new Error(err.error || 'Failed to approve request');
+    await throwApiErrorFromResponse(res, 'Unable to approve request right now.');
   }
   return res.json();
 }
@@ -389,8 +379,7 @@ export async function rejectWaitlistEntry(data: {
     body: JSON.stringify(data),
   });
   if (!res.ok) {
-    const err = await res.json();
-    throw new Error(err.error || 'Failed to reject request');
+    await throwApiErrorFromResponse(res, 'Unable to reject request right now.');
   }
 }
 
@@ -405,8 +394,7 @@ export async function createFounderCheckout(code: string): Promise<{ url: string
     body: JSON.stringify({ code }),
   });
   if (!res.ok) {
-    const err = await res.json();
-    throw new Error(err.error || 'Checkout failed');
+    await throwApiErrorFromResponse(res, 'Unable to create checkout session right now.');
   }
   return res.json();
 }

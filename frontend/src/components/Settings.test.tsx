@@ -36,6 +36,18 @@ vi.mock('../contexts/AuthContext', () => ({
   }),
 }));
 
+// Onboarding context mock (Settings depends on replay tutorial actions)
+const mockResetOnboarding = vi.fn();
+const mockStartOnboarding = vi.fn();
+const mockSetEntryModalOpen = vi.fn();
+vi.mock('../contexts/OnboardingContext', () => ({
+  useOnboarding: () => ({
+    resetOnboarding: mockResetOnboarding,
+    startOnboarding: mockStartOnboarding,
+    setEntryModalOpen: mockSetEntryModalOpen,
+  }),
+}));
+
 // React Router mock
 const mockSearchParams = new URLSearchParams();
 const mockSetSearchParams = vi.fn();

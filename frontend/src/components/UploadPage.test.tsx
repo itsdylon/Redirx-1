@@ -8,9 +8,16 @@ import * as XLSX from 'xlsx';
 // ---------------------------------------------------------------------------
 
 const mockNavigate = vi.fn();
-vi.mock('react-router-dom', () => ({
-  useNavigate: () => mockNavigate,
-}));
+const mockSetSearchParams = vi.fn();
+const mockSearchParams = new URLSearchParams();
+vi.mock('react-router-dom', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('react-router-dom')>();
+  return {
+    ...actual,
+    useNavigate: () => mockNavigate,
+    useSearchParams: () => [mockSearchParams, mockSetSearchParams],
+  };
+});
 
 const mockUploadCSVs = vi.fn();
 vi.mock('../api/pipeline', () => ({
@@ -28,6 +35,30 @@ vi.mock('../contexts/AuthContext', () => ({
       credits_used: 50,
     },
     loading: false,
+  }),
+}));
+
+vi.mock('../contexts/OnboardingContext', () => ({
+  useOnboarding: () => ({
+    state: {
+      status: 'completed',
+      path: null,
+      steps: {},
+    },
+    loading: false,
+    updateStepCompletion: vi.fn(),
+    updateActivity: vi.fn(),
+    selectPath: vi.fn(),
+    completeOnboarding: vi.fn(),
+    dismissOnboarding: vi.fn(),
+    resetOnboarding: vi.fn(),
+    refreshOnboarding: vi.fn(),
+    startOnboarding: vi.fn(),
+    maybeOpenPromptForCurrentRoute: vi.fn(),
+    setEntryModalOpen: vi.fn(),
+    entryModalOpen: false,
+    shouldShowPromptForCurrentRoute: false,
+    canStartTutorial: true,
   }),
 }));
 

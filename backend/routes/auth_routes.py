@@ -2,6 +2,7 @@
 Authentication endpoints for user registration, login, logout, and token refresh.
 """
 from flask import Blueprint, request, jsonify
+import logging
 import sys
 import os
 
@@ -10,9 +11,15 @@ BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
 BACKEND_DIR = os.path.join(BASE_DIR, "backend")
 sys.path.insert(0, BACKEND_DIR)
 
-from services.auth_service import AuthService, require_auth
+from services.auth_service import AuthService, AuthServiceError, require_auth
+from routes.error_utils import error_response
 
 auth_blueprint = Blueprint("auth", __name__)
+logger = logging.getLogger(__name__)
+
+
+def _looks_like_email(email: str) -> bool:
+    return "@" in email and "." in email and " " not in email
 
 
 @auth_blueprint.route("/register", methods=["POST"])
@@ -37,7 +44,7 @@ def register():
         }
         400: {"success": false, "error": "Error message"}
     """
-    data = request.json
+    data = request.get_json(silent=True) or {}
 
     # Validation
     email = data.get('email')
@@ -45,16 +52,22 @@ def register():
     full_name = data.get('full_name', '')
 
     if not email or not password:
-        return jsonify({
-            "success": False,
-            "error": "Email and password required"
-        }), 400
+        return error_response(
+            code="auth_missing_credentials",
+            user_message="Enter both email and password.",
+            status=400,
+            retryable=False,
+            next_action="fill_form",
+        )
 
     if len(password) < 8:
-        return jsonify({
-            "success": False,
-            "error": "Password must be at least 8 characters"
-        }), 400
+        return error_response(
+            code="auth_password_too_short",
+            user_message="Password must be at least 8 characters.",
+            status=400,
+            retryable=False,
+            next_action="fill_form",
+        )
 
     try:
         auth_service = AuthService()
@@ -83,15 +96,22 @@ def register():
 
         # Handle common Supabase errors
         if "already registered" in error_msg.lower() or "duplicate" in error_msg.lower():
-            return jsonify({
-                "success": False,
-                "error": "Email already registered"
-            }), 400
+            return error_response(
+                code="auth_email_already_registered",
+                user_message="This email is already registered. Try logging in instead.",
+                status=409,
+                retryable=False,
+                next_action="login",
+            )
 
-        return jsonify({
-            "success": False,
-            "error": error_msg
-        }), 400
+        logger.exception("Registration failed")
+        return error_response(
+            code="auth_registration_failed",
+            user_message="Unable to create your account right now. Please try again.",
+            status=500,
+            retryable=True,
+            next_action="retry",
+        )
 
 
 @auth_blueprint.route("/login", methods=["POST"])
@@ -115,16 +135,19 @@ def login():
         }
         401: {"success": false, "error": "Invalid credentials"}
     """
-    data = request.json
+    data = request.get_json(silent=True) or {}
 
     email = data.get('email')
     password = data.get('password')
 
     if not email or not password:
-        return jsonify({
-            "success": False,
-            "error": "Email and password required"
-        }), 400
+        return error_response(
+            code="auth_missing_credentials",
+            user_message="Enter both email and password.",
+            status=400,
+            retryable=False,
+            next_action="fill_form",
+        )
 
     try:
         auth_service = AuthService()
@@ -162,11 +185,57 @@ def login():
             "refresh_token": result['refresh_token']
         }), 200
 
-    except Exception as e:
-        return jsonify({
-            "success": False,
-            "error": "Invalid credentials"
-        }), 401
+    except AuthServiceError as e:
+        return error_response(
+            code=e.code,
+            user_message=e.user_message,
+            status=e.status_code,
+            retryable=e.retryable,
+            next_action=e.next_action,
+        )
+    except Exception:
+        logger.exception("Unexpected login error")
+        return error_response(
+            code="auth_service_unavailable",
+            user_message="Sign-in is temporarily unavailable. Please try again shortly.",
+            status=503,
+            retryable=True,
+            next_action="retry",
+        )
+
+
+@auth_blueprint.route("/resend-confirmation", methods=["POST"])
+def resend_confirmation():
+    """
+    Request a new signup confirmation email.
+    Anti-enumeration: always returns a neutral success response for valid inputs.
+    """
+    data = request.get_json(silent=True) or {}
+    email = (data.get("email") or "").strip().lower()
+
+    if not email or not _looks_like_email(email):
+        return error_response(
+            code="auth_invalid_email",
+            user_message="Enter a valid email address.",
+            status=400,
+            retryable=False,
+            next_action="fill_form",
+        )
+
+    origin = request.headers.get("Origin", "http://localhost:3000")
+    redirect_to = data.get("redirect_to") or f"{origin}/auth/callback"
+
+    try:
+        auth_service = AuthService()
+        auth_service.resend_confirmation_email(email, redirect_to)
+    except Exception:
+        # Keep response neutral for anti-enumeration and account privacy.
+        logger.exception("Resend confirmation request failed")
+
+    return jsonify({
+        "success": True,
+        "message": "If an unconfirmed account exists, a new confirmation email has been sent."
+    }), 200
 
 
 @auth_blueprint.route("/logout", methods=["POST"])
@@ -208,14 +277,17 @@ def refresh():
         }
         401: {"success": false, "error": "Invalid refresh token"}
     """
-    data = request.json
+    data = request.get_json(silent=True) or {}
     refresh_token = data.get('refresh_token')
 
     if not refresh_token:
-        return jsonify({
-            "success": False,
-            "error": "Refresh token required"
-        }), 400
+        return error_response(
+            code="auth_refresh_token_required",
+            user_message="Refresh token is required.",
+            status=400,
+            retryable=False,
+            next_action="login",
+        )
 
     try:
         auth_service = AuthService()
@@ -227,11 +299,23 @@ def refresh():
             "refresh_token": result['refresh_token']
         }), 200
 
-    except Exception as e:
-        return jsonify({
-            "success": False,
-            "error": "Invalid refresh token"
-        }), 401
+    except AuthServiceError as e:
+        return error_response(
+            code=e.code,
+            user_message=e.user_message,
+            status=e.status_code,
+            retryable=e.retryable,
+            next_action=e.next_action,
+        )
+    except Exception:
+        logger.exception("Token refresh failed")
+        return error_response(
+            code="auth_invalid_refresh_token",
+            user_message="Session expired. Please log in again.",
+            status=401,
+            retryable=False,
+            next_action="login",
+        )
 
 
 @auth_blueprint.route("/me", methods=["GET"])
@@ -271,8 +355,12 @@ def get_current_user():
                 **profile
             }
         }), 200
-    except Exception as e:
-        return jsonify({
-            "success": False,
-            "error": str(e)
-        }), 500
+    except Exception:
+        logger.exception("Failed to load current user profile")
+        return error_response(
+            code="auth_profile_load_failed",
+            user_message="Unable to load your profile right now. Please try again.",
+            status=500,
+            retryable=True,
+            next_action="retry",
+        )

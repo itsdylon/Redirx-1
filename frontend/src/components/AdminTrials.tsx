@@ -65,6 +65,7 @@ import {
 } from '../api/trials';
 import { toast } from 'sonner';
 import { AdminEmailTesting } from './AdminEmailTesting';
+import { ApiError } from '../utils/errorHandler';
 
 const STATUS_COLORS: Record<string, string> = {
   created: 'bg-blue-500/10 text-blue-600 border-blue-500/30',
@@ -132,6 +133,16 @@ export function AdminTrials() {
 
   const csvInputRef = useRef<HTMLInputElement>(null);
 
+  const getAdminErrorMessage = (err: unknown, fallback: string): string => {
+    if (err instanceof ApiError) {
+      return err.user_message || err.message || fallback;
+    }
+    if (err instanceof Error) {
+      return err.message;
+    }
+    return fallback;
+  };
+
   // ======================================================================
   // Derived stats
   // ======================================================================
@@ -168,8 +179,8 @@ export function AdminTrials() {
       const data = await listCampaigns();
       setCampaigns(data);
       setAccessDenied(false);
-    } catch (err: any) {
-      if (err.message?.includes('Admin access required') || err.message?.includes('403')) {
+    } catch (err: unknown) {
+      if ((err instanceof ApiError && (err.code === 'trial_admin_forbidden' || err.status === 403)) || (err instanceof Error && err.message.includes('403'))) {
         setAccessDenied(true);
       }
     } finally {
@@ -185,8 +196,10 @@ export function AdminTrials() {
         status: inviteFilter.status,
       });
       setInvites(data);
-    } catch {
-      // Silently fail if access denied
+    } catch (err: unknown) {
+      if (err instanceof ApiError && (err.code === 'trial_admin_forbidden' || err.status === 403)) {
+        setAccessDenied(true);
+      }
     } finally {
       setLoadingInvites(false);
     }
@@ -198,8 +211,10 @@ export function AdminTrials() {
       const status = waitlistFilter === 'all' ? undefined : waitlistFilter;
       const data = await listWaitlist({ status });
       setWaitlistEntries(data);
-    } catch {
-      // Silently fail if access denied
+    } catch (err: unknown) {
+      if (err instanceof ApiError && (err.code === 'trial_admin_forbidden' || err.status === 403)) {
+        setAccessDenied(true);
+      }
     } finally {
       setLoadingWaitlist(false);
     }
@@ -228,8 +243,8 @@ export function AdminTrials() {
       setCampaignForm({ name: '', slug: '', channel: '', template_version: '', invite_type: 'trial' });
       await loadCampaigns();
       toast.success('Campaign created');
-    } catch (err: any) {
-      toast.error(err.message);
+    } catch (err: unknown) {
+      toast.error(getAdminErrorMessage(err, 'Unable to create campaign right now.'));
     } finally {
       setCreatingCampaign(false);
     }
@@ -265,8 +280,8 @@ export function AdminTrials() {
       setShowCodes(true);
       await loadCampaigns();
       await loadInvites();
-    } catch (err: any) {
-      toast.error(err.message);
+    } catch (err: unknown) {
+      toast.error(getAdminErrorMessage(err, 'Unable to generate invites right now.'));
     } finally {
       setGenerating(false);
     }
@@ -280,8 +295,8 @@ export function AdminTrials() {
       setRevokeTarget(null);
       await loadInvites();
       toast.success('Invite revoked');
-    } catch (err: any) {
-      toast.error(err.message);
+    } catch (err: unknown) {
+      toast.error(getAdminErrorMessage(err, 'Unable to revoke invite right now.'));
     } finally {
       setRevoking(false);
     }
@@ -298,8 +313,8 @@ export function AdminTrials() {
       setApprovedCode(result.raw_code);
       toast.success('Request approved — invite code generated');
       await loadWaitlist();
-    } catch (err: any) {
-      toast.error(err.message);
+    } catch (err: unknown) {
+      toast.error(getAdminErrorMessage(err, 'Unable to approve request right now.'));
     } finally {
       setApproving(false);
     }
@@ -317,8 +332,8 @@ export function AdminTrials() {
       setRejectNotes('');
       toast.success('Request rejected');
       await loadWaitlist();
-    } catch (err: any) {
-      toast.error(err.message);
+    } catch (err: unknown) {
+      toast.error(getAdminErrorMessage(err, 'Unable to reject request right now.'));
     } finally {
       setRejecting(false);
     }

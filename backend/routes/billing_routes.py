@@ -6,6 +6,7 @@ import logging
 
 from backend.services.auth_service import require_auth
 from backend.services.stripe_service import StripeService
+from backend.routes.error_utils import error_response
 from redirx.config import Config
 
 logger = logging.getLogger(__name__)
@@ -16,6 +17,36 @@ billing_blueprint = Blueprint('billing', __name__)
 def _get_stripe_service() -> StripeService:
     """Lazily create StripeService (only when billing endpoints are called)."""
     return StripeService()
+
+
+def _map_billing_value_error(exc: Exception):
+    message = str(exc).lower()
+
+    if "no stripe customer" in message:
+        return (
+            "billing_no_customer",
+            "No billing account was found for this user.",
+            404,
+            False,
+            "contact_support",
+        )
+
+    if "price" in message or "plan" in message:
+        return (
+            "billing_invalid_price",
+            "That billing option is not available.",
+            400,
+            False,
+            "select_plan",
+        )
+
+    return (
+        "billing_invalid_request",
+        "Your billing request could not be processed.",
+        400,
+        False,
+        "retry",
+    )
 
 
 @billing_blueprint.route('/create-checkout-session', methods=['POST'])
@@ -30,7 +61,13 @@ def create_checkout_session():
     data = request.get_json()
 
     if not data or not data.get('price_id'):
-        return jsonify({'error': 'price_id is required'}), 400
+        return error_response(
+            code="billing_price_required",
+            user_message="Please select a plan before checkout.",
+            status=400,
+            retryable=False,
+            next_action="select_plan",
+        )
 
     price_id = data['price_id']
     # Default URLs redirect back to settings with status param
@@ -49,10 +86,23 @@ def create_checkout_session():
         )
         return jsonify({'url': url})
     except ValueError as e:
-        return jsonify({'error': str(e)}), 400
+        code, message, status, retryable, next_action = _map_billing_value_error(e)
+        return error_response(
+            code=code,
+            user_message=message,
+            status=status,
+            retryable=retryable,
+            next_action=next_action,
+        )
     except Exception as e:
         logger.error(f"Checkout session creation failed: {e}")
-        return jsonify({'error': 'Failed to create checkout session'}), 500
+        return error_response(
+            code="billing_checkout_failed",
+            user_message="Unable to start checkout right now. Please try again.",
+            status=500,
+            retryable=True,
+            next_action="retry",
+        )
 
 
 @billing_blueprint.route('/create-portal-session', methods=['POST'])
@@ -76,10 +126,23 @@ def create_portal_session():
         )
         return jsonify({'url': url})
     except ValueError as e:
-        return jsonify({'error': str(e)}), 400
+        code, message, status, retryable, next_action = _map_billing_value_error(e)
+        return error_response(
+            code=code,
+            user_message=message,
+            status=status,
+            retryable=retryable,
+            next_action=next_action,
+        )
     except Exception as e:
         logger.error(f"Portal session creation failed: {e}")
-        return jsonify({'error': 'Failed to create portal session'}), 500
+        return error_response(
+            code="billing_portal_failed",
+            user_message="Unable to open billing portal right now.",
+            status=500,
+            retryable=True,
+            next_action="retry",
+        )
 
 
 @billing_blueprint.route('/webhook', methods=['POST'])
@@ -91,7 +154,13 @@ def stripe_webhook():
     sig_header = request.headers.get('Stripe-Signature')
 
     if not sig_header:
-        return jsonify({'error': 'Missing Stripe-Signature header'}), 400
+        return error_response(
+            code="billing_webhook_signature_missing",
+            user_message="Missing Stripe signature header.",
+            status=400,
+            retryable=False,
+            next_action="contact_support",
+        )
 
     try:
         service = _get_stripe_service()
@@ -99,10 +168,22 @@ def stripe_webhook():
         return jsonify(result)
     except ValueError as e:
         logger.warning(f"Webhook signature verification failed: {e}")
-        return jsonify({'error': 'Invalid signature'}), 400
+        return error_response(
+            code="billing_webhook_signature_invalid",
+            user_message="Invalid webhook signature.",
+            status=400,
+            retryable=False,
+            next_action="contact_support",
+        )
     except Exception as e:
         logger.error(f"Webhook processing failed: {e}")
-        return jsonify({'error': 'Webhook processing failed'}), 500
+        return error_response(
+            code="billing_webhook_failed",
+            user_message="Webhook processing failed.",
+            status=500,
+            retryable=True,
+            next_action="retry",
+        )
 
 
 @billing_blueprint.route('/update-subscription', methods=['POST'])
@@ -117,7 +198,13 @@ def update_subscription():
     data = request.get_json()
 
     if not data or not data.get('price_id'):
-        return jsonify({'error': 'price_id is required'}), 400
+        return error_response(
+            code="billing_price_required",
+            user_message="Please select a plan before updating your subscription.",
+            status=400,
+            retryable=False,
+            next_action="select_plan",
+        )
 
     try:
         service = _get_stripe_service()
@@ -127,10 +214,23 @@ def update_subscription():
         )
         return jsonify(result)
     except ValueError as e:
-        return jsonify({'error': str(e)}), 400
+        code, message, status, retryable, next_action = _map_billing_value_error(e)
+        return error_response(
+            code=code,
+            user_message=message,
+            status=status,
+            retryable=retryable,
+            next_action=next_action,
+        )
     except Exception as e:
         logger.error(f"Subscription update failed: {e}")
-        return jsonify({'error': 'Failed to update subscription'}), 500
+        return error_response(
+            code="billing_update_failed",
+            user_message="Unable to update your subscription right now.",
+            status=500,
+            retryable=True,
+            next_action="retry",
+        )
 
 
 @billing_blueprint.route('/cancel-subscription', methods=['POST'])
@@ -146,10 +246,23 @@ def cancel_subscription():
         result = service.cancel_subscription(user_id=request.user.id)
         return jsonify(result)
     except ValueError as e:
-        return jsonify({'error': str(e)}), 400
+        code, message, status, retryable, next_action = _map_billing_value_error(e)
+        return error_response(
+            code=code,
+            user_message=message,
+            status=status,
+            retryable=retryable,
+            next_action=next_action,
+        )
     except Exception as e:
         logger.error(f"Subscription cancellation failed: {e}")
-        return jsonify({'error': 'Failed to cancel subscription'}), 500
+        return error_response(
+            code="billing_cancel_failed",
+            user_message="Unable to cancel your subscription right now.",
+            status=500,
+            retryable=True,
+            next_action="retry",
+        )
 
 
 @billing_blueprint.route('/reactivate-subscription', methods=['POST'])
@@ -165,10 +278,23 @@ def reactivate_subscription():
         result = service.reactivate_subscription(user_id=request.user.id)
         return jsonify(result)
     except ValueError as e:
-        return jsonify({'error': str(e)}), 400
+        code, message, status, retryable, next_action = _map_billing_value_error(e)
+        return error_response(
+            code=code,
+            user_message=message,
+            status=status,
+            retryable=retryable,
+            next_action=next_action,
+        )
     except Exception as e:
         logger.error(f"Subscription reactivation failed: {e}")
-        return jsonify({'error': 'Failed to reactivate subscription'}), 500
+        return error_response(
+            code="billing_reactivate_failed",
+            user_message="Unable to reactivate your subscription right now.",
+            status=500,
+            retryable=True,
+            next_action="retry",
+        )
 
 
 @billing_blueprint.route('/plans', methods=['GET'])
@@ -191,9 +317,24 @@ def get_subscription():
         service = _get_stripe_service()
         status = service.get_subscription_status(request.user.id)
         return jsonify(status)
+    except ValueError as e:
+        code, message, status, retryable, next_action = _map_billing_value_error(e)
+        return error_response(
+            code=code,
+            user_message=message,
+            status=status,
+            retryable=retryable,
+            next_action=next_action,
+        )
     except Exception as e:
         logger.error(f"Failed to get subscription status: {e}")
-        return jsonify({'error': 'Failed to get subscription status'}), 500
+        return error_response(
+            code="billing_subscription_status_failed",
+            user_message="Unable to load subscription details right now.",
+            status=500,
+            retryable=True,
+            next_action="retry",
+        )
 
 
 @billing_blueprint.route('/admin/reconcile', methods=['POST'])
@@ -207,7 +348,13 @@ def reconcile_plans():
     provided = request.headers.get('X-Cron-Secret', '')
 
     if not cron_secret or provided != cron_secret:
-        return jsonify({'error': 'Unauthorized'}), 401
+        return error_response(
+            code="billing_admin_unauthorized",
+            user_message="Unauthorized.",
+            status=401,
+            retryable=False,
+            next_action="authenticate",
+        )
 
     try:
         service = _get_stripe_service()
@@ -215,4 +362,10 @@ def reconcile_plans():
         return jsonify(result)
     except Exception as e:
         logger.error(f"Reconciliation failed: {e}")
-        return jsonify({'error': 'Reconciliation failed'}), 500
+        return error_response(
+            code="billing_reconciliation_failed",
+            user_message="Reconciliation failed.",
+            status=500,
+            retryable=True,
+            next_action="retry",
+        )

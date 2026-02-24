@@ -8,6 +8,7 @@ import { Input } from './ui/input';
 import { Separator } from './ui/separator';
 import { Crown, Check, AlertTriangle, ArrowRight, Loader2, CheckCircle2 } from 'lucide-react';
 import { validateTrialCode, createFounderCheckout, submitWaitlistRequest, type ValidationResult } from '../api/trials';
+import { ApiError } from '../utils/errorHandler';
 
 type PageState = 'loading' | 'invalid' | 'request_invite' | 'submitted' | 'preview' | 'processing' | 'error';
 
@@ -28,6 +29,25 @@ export function FounderLandingPage() {
   const codeFromUrl = searchParams.get('code');
   const pendingCode = localStorage.getItem('pending_founder_code');
   const code = codeFromUrl || pendingCode || '';
+
+  const getFounderErrorMessage = (err: unknown, fallback: string): string => {
+    if (err instanceof ApiError) {
+      if (err.code === 'trial_code_email_mismatch') {
+        return 'This invite code was issued to a different email address. Sign in with the invited account.';
+      }
+      if (err.code === 'trial_waitlist_rate_limited') {
+        if (typeof err.retry_after_seconds === 'number') {
+          return `Too many requests. Please wait ${err.retry_after_seconds} seconds and try again.`;
+        }
+        return 'Too many requests. Please try again later.';
+      }
+      return err.user_message || err.message || fallback;
+    }
+    if (err instanceof Error) {
+      return err.message;
+    }
+    return fallback;
+  };
 
   useEffect(() => {
     if (!code) {
@@ -59,9 +79,9 @@ export function FounderLandingPage() {
           setErrorMessage(result.error || 'Invalid invite code');
         }
       })
-      .catch(() => {
+      .catch((err: unknown) => {
         setPageState('invalid');
-        setErrorMessage('Failed to validate invite code');
+        setErrorMessage(getFounderErrorMessage(err, 'Unable to validate this invite code right now.'));
       });
   }, [code, user]);
 
@@ -75,11 +95,11 @@ export function FounderLandingPage() {
         window.location.href = result.url;
       } else {
         setPageState('error');
-        setErrorMessage('Failed to create checkout session');
+        setErrorMessage('Unable to create checkout session right now.');
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       setPageState('error');
-      setErrorMessage(err.message || 'Checkout failed');
+      setErrorMessage(getFounderErrorMessage(err, 'Unable to create checkout session right now.'));
     }
   };
 
@@ -117,8 +137,8 @@ export function FounderLandingPage() {
         company: waitlistForm.company.trim() || undefined,
       });
       setPageState('submitted');
-    } catch (err: any) {
-      setWaitlistError(err.message || 'Failed to submit request');
+    } catch (err: unknown) {
+      setWaitlistError(getFounderErrorMessage(err, 'Unable to submit your request right now.'));
     } finally {
       setWaitlistSubmitting(false);
     }

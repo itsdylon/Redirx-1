@@ -3,11 +3,14 @@ Trial invite routes for code generation, validation, redemption, and admin manag
 """
 from flask import Blueprint, request, jsonify
 import logging
+from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, Optional
 
 from backend.services.auth_service import require_auth, require_admin
 from backend.services.trial_service import TrialService
 from backend.services.stripe_service import StripeService
 from backend.services.demo_rate_limiter import DemoRateLimiter
+from redirx.database import SupabaseClient
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +34,22 @@ def _get_client_ip() -> str:
     if forwarded:
         return forwarded.split(",")[0].strip()
     return request.remote_addr or "unknown"
+
+
+def _parse_utc_timestamp(value: Any) -> Optional[datetime]:
+    """Parse an ISO timestamp into a timezone-aware UTC datetime."""
+    if not isinstance(value, str) or not value:
+        return None
+
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+
+    return parsed.astimezone(timezone.utc)
 
 
 # ============================================================================
@@ -81,6 +100,181 @@ def list_campaigns():
     except Exception as e:
         logger.error(f"Campaign listing failed: {e}")
         return jsonify({'error': 'Failed to list campaigns'}), 500
+
+
+@trial_blueprint.route('/admin/onboarding/report', methods=['GET'])
+@require_auth
+@require_admin
+def get_onboarding_report():
+    """
+    Return onboarding funnel + stuck-user report for operator workflows.
+
+    Query params:
+      - stuck_hours: inactivity threshold for "stuck" in-progress users (default: 24)
+      - limit: max stuck rows returned (default: 100)
+    """
+    stuck_hours_raw = request.args.get('stuck_hours', '24')
+    limit_raw = request.args.get('limit', '100')
+
+    try:
+        stuck_hours = int(stuck_hours_raw)
+        limit = int(limit_raw)
+    except (TypeError, ValueError):
+        return jsonify({'error': 'stuck_hours and limit must be integers'}), 400
+
+    if stuck_hours < 1 or stuck_hours > 24 * 30:
+        return jsonify({'error': 'stuck_hours must be between 1 and 720'}), 400
+
+    if limit < 1 or limit > 500:
+        return jsonify({'error': 'limit must be between 1 and 500'}), 400
+
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(hours=stuck_hours)
+
+    try:
+        client = SupabaseClient.get_admin_client()
+        profiles_result = client.table('user_profiles').select(
+            'id, email, full_name, company, created_at, onboarding_status, onboarding_state, '
+            'onboarding_started_at, onboarding_completed_at, onboarding_last_seen_at'
+        ).execute()
+        profiles = profiles_result.data or []
+
+        status_counts = {
+            'not_started': 0,
+            'in_progress': 0,
+            'completed': 0,
+            'dismissed': 0,
+            'unknown': 0,
+        }
+        funnel_counts = {
+            'started': 0,
+            'path_selected': 0,
+            'mapping_generated': 0,
+            'review_opened': 0,
+            'export_downloaded': 0,
+        }
+        stuck_rows = []
+
+        for profile in profiles:
+            status = profile.get('onboarding_status') or 'not_started'
+            if status not in status_counts:
+                status_counts['unknown'] += 1
+            else:
+                status_counts[status] += 1
+
+            onboarding_state = profile.get('onboarding_state')
+            if not isinstance(onboarding_state, dict):
+                onboarding_state = {}
+
+            if profile.get('onboarding_started_at'):
+                funnel_counts['started'] += 1
+            if onboarding_state.get('path_selected_at'):
+                funnel_counts['path_selected'] += 1
+            if onboarding_state.get('mapping_generated_at'):
+                funnel_counts['mapping_generated'] += 1
+            if onboarding_state.get('review_opened_at'):
+                funnel_counts['review_opened'] += 1
+            if onboarding_state.get('export_downloaded_at'):
+                funnel_counts['export_downloaded'] += 1
+
+            if status != 'in_progress':
+                continue
+
+            last_seen_dt = _parse_utc_timestamp(profile.get('onboarding_last_seen_at'))
+            started_dt = _parse_utc_timestamp(profile.get('onboarding_started_at'))
+            created_dt = _parse_utc_timestamp(profile.get('created_at'))
+            last_activity_dt = last_seen_dt or started_dt or created_dt
+
+            if last_activity_dt and last_activity_dt > cutoff:
+                continue
+
+            path = onboarding_state.get('path')
+            steps = onboarding_state.get('steps')
+            if not isinstance(steps, dict):
+                steps = {}
+
+            completed_steps = []
+            for step_name, step_state in steps.items():
+                if isinstance(step_state, dict) and step_state.get('completed'):
+                    completed_steps.append(step_name)
+
+            hours_since_last_activity = None
+            if last_activity_dt:
+                hours_since_last_activity = round((now - last_activity_dt).total_seconds() / 3600, 1)
+
+            hours_in_progress = None
+            if started_dt:
+                hours_in_progress = round((now - started_dt).total_seconds() / 3600, 1)
+
+            stuck_rows.append({
+                'id': profile.get('id'),
+                'email': profile.get('email'),
+                'full_name': profile.get('full_name'),
+                'company': profile.get('company'),
+                'onboarding_status': status,
+                'path': path if path in ('sample', 'real') else None,
+                'completed_steps': completed_steps,
+                'onboarding_started_at': profile.get('onboarding_started_at'),
+                'onboarding_last_seen_at': profile.get('onboarding_last_seen_at'),
+                'onboarding_completed_at': profile.get('onboarding_completed_at'),
+                'hours_since_last_activity': hours_since_last_activity,
+                'hours_in_progress': hours_in_progress,
+            })
+
+        # Add non-tutorial session counts to prioritize users who never reached real output.
+        stuck_user_ids = [row['id'] for row in stuck_rows if row.get('id')]
+        session_counts: Dict[str, int] = {}
+        if stuck_user_ids:
+            sessions_result = client.table('migration_sessions').select(
+                'user_id'
+            ).in_(
+                'user_id', stuck_user_ids
+            ).eq(
+                'is_tutorial', False
+            ).execute()
+
+            for row in (sessions_result.data or []):
+                user_id = row.get('user_id')
+                if not user_id:
+                    continue
+                session_counts[user_id] = session_counts.get(user_id, 0) + 1
+
+        for row in stuck_rows:
+            user_id = row.get('id')
+            row['non_tutorial_sessions'] = session_counts.get(user_id, 0)
+
+        stuck_rows.sort(
+            key=lambda row: (
+                row['hours_since_last_activity'] is None,
+                -(row['hours_since_last_activity'] or 0.0),
+            )
+        )
+
+        total_stuck = len(stuck_rows)
+        report_rows = stuck_rows[:limit]
+
+        return jsonify({
+            'success': True,
+            'generated_at': now.isoformat(),
+            'filters': {
+                'stuck_hours': stuck_hours,
+                'limit': limit,
+                'stuck_before_utc': cutoff.isoformat(),
+            },
+            'summary': {
+                'total_users': len(profiles),
+                'status_counts': status_counts,
+                'funnel_counts': funnel_counts,
+                'stuck_in_progress': total_stuck,
+            },
+            'total_stuck_users': total_stuck,
+            'returned_rows': len(report_rows),
+            'stuck_users': report_rows,
+        }), 200
+
+    except Exception as e:
+        logger.error(f"Onboarding report failed: {e}")
+        return jsonify({'error': 'Failed to generate onboarding report'}), 500
 
 
 # ============================================================================

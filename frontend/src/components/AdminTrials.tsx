@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { DashboardLayout } from './DashboardLayout';
 import { Card, CardHeader, CardTitle, CardAction, CardContent } from './ui/card';
 import { Button } from './ui/button';
@@ -75,6 +76,8 @@ const STATUS_COLORS: Record<string, string> = {
 };
 
 export function AdminTrials() {
+  const navigate = useNavigate();
+
   // Access check
   const [accessDenied, setAccessDenied] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -449,6 +452,14 @@ export function AdminTrials() {
             Campaigns
           </CardTitle>
           <CardAction className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => navigate('/admin/onboarding-report')}
+            >
+              <ClipboardList className="h-4 w-4 mr-1" />
+              Onboarding Report
+            </Button>
             <Button variant="outline" size="sm" onClick={refreshAll}>
               <RefreshCw className="h-4 w-4" />
             </Button>

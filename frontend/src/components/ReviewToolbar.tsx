@@ -30,6 +30,7 @@ interface ReviewToolbarProps {
   totalCount: number;
   filteredCount: number;
   searchInputRef?: React.RefObject<HTMLInputElement>;
+  tutorialExportHighlight?: boolean;
 }
 
 export function ReviewToolbar({
@@ -45,6 +46,7 @@ export function ReviewToolbar({
   totalCount,
   filteredCount,
   searchInputRef,
+  tutorialExportHighlight = false,
 }: ReviewToolbarProps) {
   return (
     <div className="bg-card border border-border p-4 flex items-center gap-4 flex-wrap">
@@ -114,7 +116,11 @@ export function ReviewToolbar({
       {/* Export Button */}
       <Tooltip>
         <TooltipTrigger asChild>
-          <Button variant="outline" onClick={onExportClick}>
+          <Button
+            variant="outline"
+            onClick={onExportClick}
+            className={tutorialExportHighlight ? 'border-[#26D99D] text-[#0B6B4C] dark:text-[#D8FFF2] ring-2 ring-[#26D99D]/80 ring-offset-2 ring-offset-background bg-[#26D99D]/10 dark:bg-[#26D99D]/18' : ''}
+          >
             <Download className="h-4 w-4 mr-2" />
             Export ({formatShortcut('E')})
           </Button>

@@ -14,6 +14,7 @@ import { TrialLandingPage } from './components/TrialLandingPage';
 import { FounderLandingPage } from './components/FounderLandingPage';
 import { FounderSuccessPage } from './components/FounderSuccessPage';
 import { AdminTrials } from './components/AdminTrials';
+import { AdminOnboardingReport } from './components/AdminOnboardingReport';
 import { Toaster } from './components/ui/sonner';
 
 export default function App() {
@@ -92,6 +93,10 @@ export default function App() {
       <Route
         path="/admin/trials"
         element={user ? <AdminTrials /> : <Navigate to="/login" replace />}
+      />
+      <Route
+        path="/admin/onboarding-report"
+        element={user ? <AdminOnboardingReport /> : <Navigate to="/login" replace />}
       />
     </Routes>
   );

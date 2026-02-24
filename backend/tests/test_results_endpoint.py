@@ -4,6 +4,8 @@ Test the GET /api/results/<session_id> endpoint
 import sys
 import os
 import unittest
+import json
+import base64
 from uuid import uuid4
 
 # Add parent directory to path
@@ -21,15 +23,29 @@ class TestResultsEndpoint(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         """Set up Flask test client"""
+        token = os.getenv("TEST_ACCESS_TOKEN")
+        if not token:
+            raise unittest.SkipTest("TEST_ACCESS_TOKEN is required for authenticated results endpoint tests")
+
         cls.app = create_app()
         cls.client = cls.app.test_client()
         cls.session_db = MigrationSessionDB()
         cls.mapping_db = URLMappingDB()
+        cls.auth_headers = {"Authorization": f"Bearer {token}"}
+
+        # Decode JWT payload to read the authenticated user's UUID (sub)
+        payload_segment = token.split(".")[1]
+        payload_segment += "=" * (-len(payload_segment) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(payload_segment))
+        cls.user_id = payload.get("sub")
+
+        if not cls.user_id:
+            raise unittest.SkipTest("Unable to decode user id from TEST_ACCESS_TOKEN")
 
     def test_get_results_with_valid_session(self):
         """Test GET /api/results/<session_id> with a valid session"""
         # Create a test session
-        session_id = self.session_db.create_session(user_id="test_user")
+        session_id = self.session_db.create_session(user_id=self.user_id)
 
         # Create some test mappings
         mappings = [
@@ -63,7 +79,7 @@ class TestResultsEndpoint(unittest.TestCase):
             )
 
         # Call the endpoint
-        response = self.client.get(f'/api/results/{session_id}')
+        response = self.client.get(f'/api/results/{session_id}', headers=self.auth_headers)
 
         # Verify response
         self.assertEqual(response.status_code, 200)
@@ -112,7 +128,7 @@ class TestResultsEndpoint(unittest.TestCase):
 
     def test_get_results_with_invalid_session_id(self):
         """Test GET /api/results/<session_id> with invalid session ID format"""
-        response = self.client.get('/api/results/invalid-uuid')
+        response = self.client.get('/api/results/invalid-uuid', headers=self.auth_headers)
 
         self.assertEqual(response.status_code, 400)
         data = response.get_json()
@@ -124,7 +140,7 @@ class TestResultsEndpoint(unittest.TestCase):
     def test_get_results_with_nonexistent_session(self):
         """Test GET /api/results/<session_id> with non-existent session"""
         fake_uuid = str(uuid4())
-        response = self.client.get(f'/api/results/{fake_uuid}')
+        response = self.client.get(f'/api/results/{fake_uuid}', headers=self.auth_headers)
 
         self.assertEqual(response.status_code, 404)
         data = response.get_json()

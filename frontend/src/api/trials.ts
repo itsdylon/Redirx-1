@@ -76,6 +76,41 @@ export interface RedemptionResult {
   campaign_name?: string;
 }
 
+export interface OnboardingReportUser {
+  id: string;
+  email?: string;
+  full_name?: string;
+  company?: string;
+  onboarding_status: string;
+  path?: 'sample' | 'real' | null;
+  completed_steps: string[];
+  onboarding_started_at?: string | null;
+  onboarding_last_seen_at?: string | null;
+  onboarding_completed_at?: string | null;
+  hours_since_last_activity?: number | null;
+  hours_in_progress?: number | null;
+  non_tutorial_sessions: number;
+}
+
+export interface OnboardingReportResponse {
+  success: boolean;
+  generated_at: string;
+  filters: {
+    stuck_hours: number;
+    limit: number;
+    stuck_before_utc: string;
+  };
+  summary: {
+    total_users: number;
+    status_counts: Record<string, number>;
+    funnel_counts: Record<string, number>;
+    stuck_in_progress: number;
+  };
+  total_stuck_users: number;
+  returned_rows: number;
+  stuck_users: OnboardingReportUser[];
+}
+
 // ============================================================================
 // Admin: Campaigns
 // ============================================================================
@@ -113,6 +148,35 @@ export async function listCampaigns(): Promise<Campaign[]> {
   }
   const json = await res.json();
   return json.campaigns;
+}
+
+export async function getOnboardingReport(params?: {
+  stuck_hours?: number;
+  limit?: number;
+}): Promise<OnboardingReportResponse> {
+  const searchParams = new URLSearchParams();
+  if (typeof params?.stuck_hours === 'number') {
+    searchParams.set('stuck_hours', String(params.stuck_hours));
+  }
+  if (typeof params?.limit === 'number') {
+    searchParams.set('limit', String(params.limit));
+  }
+
+  const qs = searchParams.toString();
+  const url = `${API_BASE_URL}/api/admin/onboarding/report${qs ? '?' + qs : ''}`;
+  const res = await fetch(url, {
+    headers: getAuthHeaders(),
+  });
+
+  if (!res.ok) {
+    if (res.status === 403) {
+      throw new Error('Admin access required');
+    }
+    const err = await res.json();
+    throw new Error(err.error || 'Failed to load onboarding report');
+  }
+
+  return res.json();
 }
 
 // ============================================================================

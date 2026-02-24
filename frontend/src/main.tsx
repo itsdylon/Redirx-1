@@ -4,6 +4,7 @@ import { ThemeProvider } from "next-themes";
 import { PostHogProvider } from "@posthog/react";
 import { AuthProvider } from "./contexts/AuthContext";
 import { AppWithToaster } from "./App.tsx";
+import { OnboardingProvider } from "./contexts/OnboardingContext";
 import "./styles/globals.css";
 
 const posthogOptions = {
@@ -19,7 +20,9 @@ createRoot(document.getElementById("root")!).render(
     <BrowserRouter>
       <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
         <AuthProvider>
-          <AppWithToaster />
+          <OnboardingProvider>
+            <AppWithToaster />
+          </OnboardingProvider>
         </AuthProvider>
       </ThemeProvider>
     </BrowserRouter>

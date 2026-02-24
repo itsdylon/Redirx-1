@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { Sidebar } from './Sidebar';
 import { TopBar } from './TopBar';
+import { OnboardingChecklistDock } from './OnboardingChecklistDock';
 
 interface DashboardLayoutProps {
   title: string;
@@ -29,6 +30,7 @@ export function DashboardLayout({ title, children }: DashboardLayoutProps) {
         <main className="flex-1 flex flex-col overflow-auto p-8 bg-muted/20">
           {children}
         </main>
+        <OnboardingChecklistDock />
       </div>
     </div>
   );

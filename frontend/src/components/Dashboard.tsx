@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { DashboardLayout } from './DashboardLayout';
 import { Card } from './ui/card';
 import { Button } from './ui/button';
@@ -9,11 +9,24 @@ import { fetchDashboardData, DashboardData } from '../api/dashboard';
 import { updateSessionName, deleteSession } from '../api/sessions';
 import { formatDate } from '../utils/date';
 import { toast } from 'sonner';
+import { useOnboarding } from '../contexts/OnboardingContext';
+import { OnboardingEntryModal } from './OnboardingEntryModal';
 
 const POLL_INTERVAL = 5000; // 5 seconds
 
 export function Dashboard() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const {
+    onboarding,
+    loading: onboardingLoading,
+    error: onboardingError,
+    entryModalOpen,
+    setEntryModalOpen,
+    startOnboarding,
+    selectPath,
+    dismissOnboarding,
+  } = useOnboarding();
   const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -29,6 +42,8 @@ export function Dashboard() {
   const [timeAgo, setTimeAgo] = useState<string>('');
   const [isPolling, setIsPolling] = useState(false);
   const [isManualRefreshing, setIsManualRefreshing] = useState(false);
+  const [isLaunchingTutorial, setIsLaunchingTutorial] = useState(false);
+  const tutorialPromptedRef = useRef(false);
 
   // Format time ago helper
   const formatTimeAgo = (date: Date): string => {
@@ -149,6 +164,93 @@ export function Dashboard() {
 
     return () => clearInterval(pollInterval);
   }, [dashboardData?.recent_sessions]);
+
+  // Auto-show onboarding entry modal for new users or forced replay.
+  useEffect(() => {
+    if (loading || onboardingLoading || !dashboardData || !onboarding) {
+      return;
+    }
+
+    const forcedReplay = searchParams.get('tutorial') === '1';
+    const totalSessions = dashboardData.total_sessions ?? dashboardData.recent_sessions?.length ?? 0;
+    const isNewUser = totalSessions === 0;
+    const hasEligibleStatus =
+      onboarding.onboarding_status === 'not_started' ||
+      onboarding.onboarding_status === 'in_progress';
+
+    const shouldOpen = forcedReplay || (isNewUser && hasEligibleStatus);
+    if (!shouldOpen || tutorialPromptedRef.current) {
+      return;
+    }
+
+    tutorialPromptedRef.current = true;
+    setEntryModalOpen(true);
+
+    if (forcedReplay || onboarding.onboarding_status === 'not_started') {
+      startOnboarding();
+    }
+
+    if (forcedReplay) {
+      const nextParams = new URLSearchParams(searchParams);
+      nextParams.delete('tutorial');
+      setSearchParams(nextParams, { replace: true });
+    }
+  }, [
+    dashboardData,
+    loading,
+    onboarding,
+    onboardingLoading,
+    searchParams,
+    setEntryModalOpen,
+    setSearchParams,
+    startOnboarding,
+  ]);
+
+  const handleTrySampleTutorial = async () => {
+    setIsLaunchingTutorial(true);
+    try {
+      await startOnboarding();
+      const selected = await selectPath('sample');
+      if (!selected) {
+        throw new Error('Unable to initialize tutorial path');
+      }
+      setEntryModalOpen(false);
+      navigate('/upload?tutorial=1&sample=1');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to launch sample tutorial');
+    } finally {
+      setIsLaunchingTutorial(false);
+    }
+  };
+
+  const handleUseOwnCsvTutorial = async () => {
+    setIsLaunchingTutorial(true);
+    try {
+      await startOnboarding();
+      const selected = await selectPath('real');
+      if (!selected) {
+        throw new Error('Unable to initialize tutorial path');
+      }
+      setEntryModalOpen(false);
+      navigate('/upload?tutorial=1');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to launch tutorial');
+    } finally {
+      setIsLaunchingTutorial(false);
+    }
+  };
+
+  const handleSkipTutorial = async () => {
+    setIsLaunchingTutorial(true);
+    try {
+      await dismissOnboarding();
+      setEntryModalOpen(false);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to dismiss tutorial');
+    } finally {
+      setIsLaunchingTutorial(false);
+    }
+  };
 
   const handleStartEdit = (sessionId: string, currentName: string) => {
     setEditingSessionId(sessionId);
@@ -633,6 +735,16 @@ export function Dashboard() {
           </Card>
         </div>
       )}
+
+      <OnboardingEntryModal
+        open={entryModalOpen}
+        loading={isLaunchingTutorial}
+        error={onboardingError}
+        onOpenChange={setEntryModalOpen}
+        onTrySample={handleTrySampleTutorial}
+        onUseOwnCsv={handleUseOwnCsvTutorial}
+        onSkip={handleSkipTutorial}
+      />
     </DashboardLayout>
   );
 }

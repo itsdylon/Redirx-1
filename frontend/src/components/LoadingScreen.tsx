@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Loader2, AlertTriangle, RefreshCw } from 'lucide-react';
 import { Button } from './ui/button';
@@ -8,13 +8,19 @@ import { getSessionStatus, SessionStatus } from '../api/sessions';
 
 interface LoadingScreenProps {
   sessionId?: string | null;
+  tutorialMode?: boolean;
+  minDisplayMs?: number;
 }
 
 const POLL_INTERVAL = 3000; // 3 seconds
 const WARNING_THRESHOLD = 3; // Show warning after 3 failures
 const ERROR_THRESHOLD = 5; // Show error after 5 failures
 
-export function LoadingScreen({ sessionId }: LoadingScreenProps) {
+export function LoadingScreen({
+  sessionId,
+  tutorialMode = false,
+  minDisplayMs = 0,
+}: LoadingScreenProps) {
   const navigate = useNavigate();
   const [progress, setProgress] = useState<{
     currentStage: number | null;
@@ -25,6 +31,13 @@ export function LoadingScreen({ sessionId }: LoadingScreenProps) {
   const [failureCount, setFailureCount] = useState(0);
   const [nextRetryIn, setNextRetryIn] = useState(0);
   const [pollingError, setPollingError] = useState(false);
+  const [isDelayingCompletion, setIsDelayingCompletion] = useState(false);
+  const startedAtRef = useRef<number>(Date.now());
+
+  useEffect(() => {
+    startedAtRef.current = Date.now();
+    setIsDelayingCompletion(false);
+  }, [sessionId, minDisplayMs]);
 
   // Calculate exponential backoff delay
   const getBackoffDelay = (failures: number): number => {
@@ -60,7 +73,22 @@ export function LoadingScreen({ sessionId }: LoadingScreenProps) {
         });
 
         if (status.status === 'completed') {
-          navigate(`/review/${sessionId}`);
+          const elapsedMs = Date.now() - startedAtRef.current;
+          const remainingMs = Math.max(0, minDisplayMs - elapsedMs);
+
+          if (remainingMs > 0) {
+            setIsDelayingCompletion(true);
+            setProgress({
+              currentStage: status.total_stages ?? status.current_stage ?? 4,
+              stageName: tutorialMode ? 'Finalizing sample tutorial flow' : status.stage_name ?? 'Finalizing',
+              totalStages: status.total_stages ?? 4,
+            });
+            timeoutId = setTimeout(poll, Math.min(remainingMs, 500));
+            return;
+          }
+
+          setIsDelayingCompletion(false);
+          navigate(tutorialMode ? `/review/${sessionId}?tutorial=1` : `/review/${sessionId}`);
           return;
         } else if (status.status === 'failed') {
           setError('The processing job failed. This could be due to invalid URLs, network issues, or an internal error. Please try uploading your files again.');
@@ -103,7 +131,7 @@ export function LoadingScreen({ sessionId }: LoadingScreenProps) {
         clearInterval(countdownIntervalId);
       }
     };
-  }, [sessionId, navigate, failureCount]);
+  }, [failureCount, minDisplayMs, navigate, sessionId, tutorialMode]);
 
   const handleContinueInBackground = () => {
     navigate('/');
@@ -237,8 +265,12 @@ export function LoadingScreen({ sessionId }: LoadingScreenProps) {
           {/* Info box */}
           <div className="mb-6 bg-card border border-border p-4 text-left">
             <p className="text-sm text-muted-foreground">
-              You can wait here or continue working. Your job will process in the background
-              and you can view the results from your dashboard.
+              {tutorialMode
+                ? (isDelayingCompletion
+                    ? 'Holding for a brief tutorial pause before opening your sample results.'
+                    : 'Tutorial mode: this sample run intentionally includes a short processing pause so the flow is easier to follow.')
+                : 'You can wait here or continue working. Your job will process in the background and you can view the results from your dashboard.'
+              }
             </p>
           </div>
 

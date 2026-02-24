@@ -141,6 +141,7 @@ def process_csv():
 
 
 @pipeline_blueprint.route("/results/<session_id>", methods=["GET"])
+@require_auth
 def get_results(session_id: str):
     """
     Retrieve pipeline results for a given session.
@@ -175,6 +176,13 @@ def get_results(session_id: str):
                 "error": str(e)
             }), 404
 
+        # Verify session belongs to authenticated user
+        if session_metadata.get('user_id') != str(request.user.id):
+            return jsonify({
+                "success": False,
+                "error": "Unauthorized: Session belongs to another user"
+            }), 403
+
         # Get mappings for this session
         mapping_db = URLMappingDB()
         db_mappings = mapping_db.get_mappings_by_session(session_uuid)
@@ -193,6 +201,7 @@ def get_results(session_id: str):
 
 
 @pipeline_blueprint.route("/results/<session_id>/alternatives/<mapping_id>", methods=["GET"])
+@require_auth
 def get_alternatives(session_id: str, mapping_id: str):
     """
     Retrieve alternative candidate URLs for a given mapping.
@@ -244,6 +253,13 @@ def get_alternatives(session_id: str, mapping_id: str):
                 "success": False,
                 "error": "Session not found"
             }), 404
+
+        # Verify session belongs to authenticated user
+        if session.get('user_id') != str(request.user.id):
+            return jsonify({
+                "success": False,
+                "error": "Unauthorized: Session belongs to another user"
+            }), 403
 
         if session.get('pipeline_type') == 'url_only':
             return jsonify({

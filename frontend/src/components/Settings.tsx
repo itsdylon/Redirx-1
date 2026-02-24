@@ -3,6 +3,7 @@ import { useSearchParams, useNavigate } from 'react-router-dom';
 import { User, Settings2, Bell, CreditCard, Check, Loader2, AlertTriangle, RefreshCw, ExternalLink, Crown, ArrowRight } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '../contexts/AuthContext';
+import { useOnboarding } from '../contexts/OnboardingContext';
 import { DashboardLayout } from './DashboardLayout';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from './ui/tabs';
 import { Card } from './ui/card';
@@ -34,6 +35,12 @@ import { getEmailPreferences, updateEmailPreference } from '../api/email';
 
 export function Settings() {
   const { user, refreshSession } = useAuth();
+  const navigate = useNavigate();
+  const {
+    resetOnboarding,
+    startOnboarding,
+    setEntryModalOpen,
+  } = useOnboarding();
   const [searchParams, setSearchParams] = useSearchParams();
 
   // Profile state
@@ -74,6 +81,7 @@ export function Settings() {
   const [founderCheckoutLoading, setFounderCheckoutLoading] = useState(false);
 
   const [postCheckoutPolling, setPostCheckoutPolling] = useState(false);
+  const [replayLoading, setReplayLoading] = useState(false);
 
   const pollingRef = useRef(false);
 
@@ -324,6 +332,21 @@ export function Settings() {
     return user?.email?.[0]?.toUpperCase() || 'U';
   };
 
+  const handleReplayTutorial = async () => {
+    setReplayLoading(true);
+    try {
+      await resetOnboarding();
+      await startOnboarding();
+      setEntryModalOpen(true);
+      toast.success('Tutorial restarted');
+      navigate('/dashboard?tutorial=1');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to restart tutorial');
+    } finally {
+      setReplayLoading(false);
+    }
+  };
+
   return (
     <DashboardLayout title="Settings">
       <div className="max-w-4xl mx-auto w-full">
@@ -400,7 +423,15 @@ export function Settings() {
                   </p>
                 </div>
 
-                <div className="flex justify-end">
+                <div className="flex flex-wrap justify-between gap-2">
+                  <Button
+                    variant="outline"
+                    onClick={handleReplayTutorial}
+                    disabled={replayLoading}
+                  >
+                    {replayLoading && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                    Replay Tutorial
+                  </Button>
                   <Button
                     onClick={handleProfileSave}
                     disabled={profileSaving}

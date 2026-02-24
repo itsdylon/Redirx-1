@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { useHotkeys } from 'react-hotkeys-hook';
 import { DashboardLayout } from './DashboardLayout';
 import { StatsBar } from './StatsBar';
@@ -9,7 +9,7 @@ import { InlineEditDialog } from './InlineEditDialog';
 import { ExportModal } from './ExportModal';
 import { KeyboardShortcutsDialog } from './KeyboardShortcutsDialog';
 import { Button } from './ui/button';
-import { Keyboard } from 'lucide-react';
+import { Keyboard, Loader2 } from 'lucide-react';
 import {
   Tooltip,
   TooltipContent,
@@ -19,6 +19,15 @@ import { toast } from 'sonner';
 import { Info } from 'lucide-react';
 import { getResults } from '../api/pipeline';
 import { isMac } from '../lib/keyboard';
+import { useOnboarding } from '../contexts/OnboardingContext';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from './ui/dialog';
 import {
   Pagination,
   PaginationContent,
@@ -53,6 +62,13 @@ export interface RedirectMapping {
 export function ReviewInterface() {
   const { sessionId } = useParams<{ sessionId: string }>();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const {
+    onboarding,
+    completeStep,
+    completeOnboarding,
+    isStepCompleted,
+  } = useOnboarding();
   const [redirects, setRedirects] = useState<RedirectMapping[]>([]);
   const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
   const [expandedRow, setExpandedRow] = useState<string | null>(null);
@@ -67,10 +83,21 @@ export function ReviewInterface() {
   const [sortOption, setSortOption] = useState<string>('confidence-desc');
   const [showExactMatches, setShowExactMatches] = useState(true);
   const [pipelineType, setPipelineType] = useState<string>('content');
+  const [showTutorialSuccess, setShowTutorialSuccess] = useState(false);
+  const [showCoachmarks, setShowCoachmarks] = useState(false);
+  const [samplePreparationActive, setSamplePreparationActive] = useState(false);
   const PAGE_SIZE = 25;
 
   // Refs for keyboard shortcuts
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const sampleGenerateMarkedRef = useRef(false);
+  const tutorialReviewMarkedRef = useRef(false);
+  const tutorialFromQuery = searchParams.get('tutorial') === '1';
+  const tutorialActive = !!onboarding &&
+    onboarding.onboarding_status === 'in_progress' &&
+    (tutorialFromQuery || onboarding.onboarding_state.path !== null);
+  const isSampleTutorial = tutorialActive && onboarding?.onboarding_state.path === 'sample';
+  const sampleTutorialBanner = tutorialFromQuery && onboarding?.onboarding_state.path === 'sample';
 
   // Fetch results from backend when sessionId is available
   useEffect(() => {
@@ -104,6 +131,67 @@ export function ReviewInterface() {
 
     fetchResults();
   }, [sessionId]);
+
+  useEffect(() => {
+    if (!tutorialActive) {
+      setShowCoachmarks(false);
+      return;
+    }
+    setShowCoachmarks(true);
+  }, [tutorialActive]);
+
+  useEffect(() => {
+    if (!isSampleTutorial || sampleGenerateMarkedRef.current || isStepCompleted('generate_mappings')) return;
+    sampleGenerateMarkedRef.current = true;
+    setSamplePreparationActive(true);
+
+    let cancelled = false;
+    const timer = window.setTimeout(async () => {
+      const updated = await completeStep('generate_mappings');
+      if (cancelled) return;
+      if (!updated) {
+        sampleGenerateMarkedRef.current = false;
+      }
+      setSamplePreparationActive(false);
+    }, 1200);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [completeStep, isSampleTutorial, isStepCompleted]);
+
+  useEffect(() => {
+    if (!tutorialActive || tutorialReviewMarkedRef.current) return;
+
+    // For sample-path users, wait until mappings are marked generated so step
+    // transitions feel sequential instead of instant.
+    if (isSampleTutorial && !isStepCompleted('generate_mappings')) return;
+
+    let cancelled = false;
+    const delayMs = isSampleTutorial ? 900 : 0;
+    const timer = window.setTimeout(async () => {
+      if (cancelled) return;
+      tutorialReviewMarkedRef.current = true;
+      await completeStep('open_review');
+    }, delayMs);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [completeStep, isSampleTutorial, isStepCompleted, tutorialActive]);
+
+  useEffect(() => {
+    if (!tutorialActive || !showCoachmarks) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setShowCoachmarks(false);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [showCoachmarks, tutorialActive]);
 
   const handleToggleSelect = (id: string) => {
     const newSelected = new Set(selectedRows);
@@ -154,7 +242,7 @@ export function ReviewInterface() {
   };
 
 
-  const handleExport = (format: string, confidenceLevels: string[]) => {
+  const handleExport = async (format: string, confidenceLevels: string[]) => {
     // Generate filename
     const formatExtensions: Record<string, string> = {
       apache: '.htaccess',
@@ -179,6 +267,13 @@ export function ReviewInterface() {
     toast.success(`${filename} downloaded successfully`, {
       duration: 3000,
     });
+
+    if (tutorialActive && !isStepCompleted('export_redirects')) {
+      const updated = await completeStep('export_redirects');
+      if (updated?.onboarding_status === 'completed') {
+        setShowTutorialSuccess(true);
+      }
+    }
   };
 
   const handleApproveRow = (id: string) => {
@@ -308,7 +403,24 @@ export function ReviewInterface() {
   }
 
   return (
-    <DashboardLayout title="Review Redirects">
+      <DashboardLayout title="Review Redirects">
+          {isSampleTutorial && samplePreparationActive && (
+            <div className="mb-4 border border-[#26D99D] bg-[#26D99D]/16 dark:bg-[#26D99D]/24 p-3">
+              <div className="flex items-center gap-2 text-sm font-medium text-[#064731] dark:text-[#E9FFF8]">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Generating mappings from sample CSVs...
+              </div>
+            </div>
+          )}
+
+          {sampleTutorialBanner && (
+            <div className="mb-4 border border-[#26D99D] bg-[#26D99D]/16 dark:bg-[#26D99D]/24 p-3">
+              <p className="text-sm font-medium text-[#064731] dark:text-[#E9FFF8]">
+                Sample data for learning. Start a real job anytime.
+              </p>
+            </div>
+          )}
+
           {/* URL-only upgrade banner */}
           {pipelineType === 'url_only' && (
             <div className="mb-4 border border-blue-500/30 bg-blue-500/5 p-3 flex items-center gap-3">
@@ -323,6 +435,11 @@ export function ReviewInterface() {
           <StatsBar stats={stats} />
 
           {/* Toolbar */}
+          {tutorialActive && showCoachmarks && (
+            <div className="mt-4 mb-2 border border-[#26D99D] bg-[#26D99D]/16 dark:bg-[#26D99D]/24 p-3 text-xs font-medium text-[#064731] dark:text-[#E9FFF8]">
+              Step 3-4 of 4: Review results, then export redirect rules. Press <kbd className="mx-1 rounded border border-[#26D99D]/70 px-1 py-0.5 font-semibold">Esc</kbd> to hide hints.
+            </div>
+          )}
           <ReviewToolbar
             searchQuery={searchQuery}
             onSearchChange={setSearchQuery}
@@ -336,6 +453,7 @@ export function ReviewInterface() {
             totalCount={redirects.length}
             filteredCount={sortedRedirects.length}
             searchInputRef={searchInputRef}
+            tutorialExportHighlight={tutorialActive && showCoachmarks && !isStepCompleted('export_redirects')}
           />
 
           {/* Table */}
@@ -468,6 +586,37 @@ export function ReviewInterface() {
         open={keyboardShortcutsOpen}
         onOpenChange={setKeyboardShortcutsOpen}
       />
+
+      <Dialog open={showTutorialSuccess} onOpenChange={setShowTutorialSuccess}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Tutorial complete</DialogTitle>
+            <DialogDescription>
+              You exported redirect rules successfully. You can now run a real project with your own CSVs.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="sm:justify-between gap-2">
+            <Button
+              variant="outline"
+              onClick={async () => {
+                await completeOnboarding();
+                setShowTutorialSuccess(false);
+              }}
+            >
+              Close
+            </Button>
+            <Button
+              onClick={async () => {
+                await completeOnboarding();
+                setShowTutorialSuccess(false);
+                navigate('/upload');
+              }}
+            >
+              Start Real Job Now
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </DashboardLayout>
   );
 }

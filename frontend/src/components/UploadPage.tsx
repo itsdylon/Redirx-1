@@ -1,7 +1,8 @@
 import { uploadCSVs, QuotaExceededError } from "../api/pipeline";
-import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import { useOnboarding } from '../contexts/OnboardingContext';
 import { DashboardLayout } from './DashboardLayout';
 import { FileUploadZone } from './FileUploadZone';
 import { LoadingScreen } from './LoadingScreen';
@@ -21,9 +22,42 @@ interface QuotaError {
   limit: number;
 }
 
+const SAMPLE_OLD_URLS = [
+  "https://legacy-example.com/about",
+  "https://legacy-example.com/services/seo-audit",
+  "https://legacy-example.com/case-studies/retail-growth",
+  "https://legacy-example.com/resources/redirect-guide",
+  "https://legacy-example.com/blog/platform-migration-checklist",
+  "https://legacy-example.com/pricing/agency",
+  "https://legacy-example.com/integrations/hubspot",
+  "https://legacy-example.com/docs/import",
+];
+
+const SAMPLE_NEW_URLS = [
+  "https://new-example.com/about",
+  "https://new-example.com/services/technical-seo-audit",
+  "https://new-example.com/case-studies/retail-traffic-growth",
+  "https://new-example.com/resources/301-redirect-guide",
+  "https://new-example.com/blog/website-migration-checklist",
+  "https://new-example.com/pricing/partners",
+  "https://new-example.com/integrations/crm",
+  "https://new-example.com/help/uploading-csvs",
+];
+
+function buildSampleCsv(urls: string[]): string {
+  return ["url", ...urls].join("\n");
+}
+
 export function UploadPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { user } = useAuth();
+  const {
+    onboarding,
+    startOnboarding,
+    completeStep,
+    createSampleSession,
+  } = useOnboarding();
   const userPlan = user?.plan || 'launch';
   const isFreeUser = userPlan === 'launch';
   const [pipelineType, setPipelineType] = useState<'content' | 'url_only'>(isFreeUser ? 'url_only' : 'content');
@@ -44,6 +78,81 @@ export function UploadPage() {
   const [oldFileValidation, setOldFileValidation] = useState<FileValidationResult | null>(null);
   const [newFileValidation, setNewFileValidation] = useState<FileValidationResult | null>(null);
   const [pendingWarnings, setPendingWarnings] = useState<{ old: string[], new: string[] } | null>(null);
+  const [showCoachmarks, setShowCoachmarks] = useState(false);
+
+  const tutorialFromQuery = searchParams.get('tutorial') === '1';
+  const sampleFromQuery = searchParams.get('sample') === '1';
+  const tutorialPath = onboarding?.onboarding_state.path;
+  const tutorialIntent = tutorialFromQuery || tutorialPath === 'real' || tutorialPath === 'sample';
+  const tutorialActive = !!onboarding &&
+    tutorialIntent &&
+    (onboarding.onboarding_status === 'in_progress' || onboarding.onboarding_status === 'not_started');
+  const sampleTutorialActive = tutorialActive && (sampleFromQuery || tutorialPath === 'sample');
+
+  useEffect(() => {
+    if (!tutorialActive) {
+      setShowCoachmarks(false);
+      return;
+    }
+    setShowCoachmarks(true);
+  }, [tutorialActive]);
+
+  useEffect(() => {
+    if (!tutorialActive || onboarding?.onboarding_status !== 'not_started') return;
+    startOnboarding();
+  }, [onboarding?.onboarding_status, startOnboarding, tutorialActive]);
+
+  useEffect(() => {
+    if (!tutorialActive || !showCoachmarks) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setShowCoachmarks(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [showCoachmarks, tutorialActive]);
+
+  useEffect(() => {
+    if (!sampleTutorialActive) return;
+    if (oldCsvFile && newCsvFile && oldSiteFile && newSiteFile) return;
+
+    const oldSampleFile = new File(
+      [buildSampleCsv(SAMPLE_OLD_URLS)],
+      "sample-old-urls.csv",
+      { type: "text/csv" }
+    );
+    const newSampleFile = new File(
+      [buildSampleCsv(SAMPLE_NEW_URLS)],
+      "sample-new-urls.csv",
+      { type: "text/csv" }
+    );
+
+    setOldCsvFile(oldSampleFile);
+    setNewCsvFile(newSampleFile);
+    setOldSiteFile({
+      name: oldSampleFile.name,
+      rowCount: SAMPLE_OLD_URLS.length,
+      file: oldSampleFile,
+    });
+    setNewSiteFile({
+      name: newSampleFile.name,
+      rowCount: SAMPLE_NEW_URLS.length,
+      file: newSampleFile,
+    });
+    setOldFileValidation({
+      valid: true,
+      warnings: [],
+      errors: [],
+      rowCount: SAMPLE_OLD_URLS.length,
+    });
+    setNewFileValidation({
+      valid: true,
+      warnings: [],
+      errors: [],
+      rowCount: SAMPLE_NEW_URLS.length,
+    });
+  }, [newCsvFile, newSiteFile, oldCsvFile, oldSiteFile, sampleTutorialActive]);
 
   // Scraping warning state (Deep Match only)
   const [showScrapingWarning, setShowScrapingWarning] = useState(false);
@@ -94,6 +203,30 @@ export function UploadPage() {
   };
 
   const handleBeginMatching = async (force: boolean = false, skipWarningCheck: boolean = false, skipScrapingWarning: boolean = false) => {
+    if (sampleTutorialActive) {
+      setError(null);
+      setQuotaError(null);
+      setDuplicateSessionId(null);
+      setPendingWarnings(null);
+      setIsUploading(true);
+      setIsLoading(true);
+
+      try {
+        const sample = await createSampleSession();
+        if (sample.session_id) {
+          setCurrentSessionId(sample.session_id);
+        }
+        await completeStep('generate_mappings');
+        setIsUploading(false);
+      } catch (err) {
+        console.error(err);
+        setIsUploading(false);
+        setIsLoading(false);
+        setCurrentSessionId(null);
+        setError(err instanceof Error ? err.message : "Failed to prepare sample tutorial session.");
+      }
+      return;
+    }
     if (!oldCsvFile || !newCsvFile) {
       setError("Upload both CSV files first.");
       return;
@@ -143,6 +276,9 @@ export function UploadPage() {
       // Store session ID - LoadingScreen will poll and navigate when complete
       if (result.session_id) {
         setCurrentSessionId(result.session_id);
+      }
+      if (tutorialActive) {
+        await completeStep('generate_mappings');
       }
       setIsUploading(false);
     } catch (err) {
@@ -196,7 +332,11 @@ export function UploadPage() {
   if (isLoading) {
     return (
       <DashboardLayout title="Processing">
-        <LoadingScreen sessionId={currentSessionId} />
+        <LoadingScreen
+          sessionId={currentSessionId}
+          tutorialMode={sampleTutorialActive}
+          minDisplayMs={sampleTutorialActive ? 4500 : 0}
+        />
       </DashboardLayout>
     );
   }
@@ -206,7 +346,11 @@ export function UploadPage() {
       <div className="max-w-5xl">
           {/* Subtitle */}
           <div className="mb-8">
-            <p className="text-muted-foreground">Upload URL lists from your old and new site to begin the redirect mapping process.</p>
+            <p className="text-muted-foreground">
+              {sampleTutorialActive
+                ? 'Sample CSV files are preloaded. Click Begin Matching to run the tutorial sample and continue to review.'
+                : 'Upload URL lists from your old and new site to begin the redirect mapping process.'}
+            </p>
           </div>
 
           {/* Pipeline Type Selector / Tier Banner */}
@@ -427,19 +571,31 @@ export function UploadPage() {
           )}
 
           {/* Upload Zones */}
+          {tutorialActive && showCoachmarks && (
+            <div className="mb-4 border border-[#26D99D] bg-[#26D99D]/16 dark:bg-[#26D99D]/24 p-3 text-sm text-[#064731] dark:text-[#E9FFF8] font-medium">
+              {sampleTutorialActive
+                ? <>Step 2 of 4: Sample CSV files are ready. Click Begin Matching to run the sample job. Press <kbd className="mx-1 rounded border border-[#26D99D]/70 px-1 py-0.5 text-xs font-semibold">Esc</kbd> to hide these hints.</>
+                : <>Step 2 of 4: Upload both CSV files, then run matching. Press <kbd className="mx-1 rounded border border-[#26D99D]/70 px-1 py-0.5 text-xs font-semibold">Esc</kbd> to hide these hints.</>
+              }
+            </div>
+          )}
           <div className="grid grid-cols-2 gap-6 mb-8">
-            <FileUploadZone
-              label="Old Site CSV"
-              onFileUpload={(file) => handleFileUpload(file, 'old')}
-              file={oldSiteFile}
-              validationError={oldFileValidation && !oldFileValidation.valid ? oldFileValidation.errors.join(', ') : null}
-            />
-            <FileUploadZone
-              label="New Site CSV"
-              onFileUpload={(file) => handleFileUpload(file, 'new')}
-              file={newSiteFile}
-              validationError={newFileValidation && !newFileValidation.valid ? newFileValidation.errors.join(', ') : null}
-            />
+            <div className={tutorialActive && showCoachmarks ? 'rounded-md ring-2 ring-[#26D99D]/75 p-2 bg-[#26D99D]/8 dark:bg-[#26D99D]/14' : ''}>
+              <FileUploadZone
+                label="Old Site CSV"
+                onFileUpload={(file) => handleFileUpload(file, 'old')}
+                file={oldSiteFile}
+                validationError={oldFileValidation && !oldFileValidation.valid ? oldFileValidation.errors.join(', ') : null}
+              />
+            </div>
+            <div className={tutorialActive && showCoachmarks ? 'rounded-md ring-2 ring-[#26D99D]/75 p-2 bg-[#26D99D]/8 dark:bg-[#26D99D]/14' : ''}>
+              <FileUploadZone
+                label="New Site CSV"
+                onFileUpload={(file) => handleFileUpload(file, 'new')}
+                file={newSiteFile}
+                validationError={newFileValidation && !newFileValidation.valid ? newFileValidation.errors.join(', ') : null}
+              />
+            </div>
           </div>
 
           {/* File Status */}
@@ -462,11 +618,18 @@ export function UploadPage() {
 
           {/* Begin Matching Button */}
           <div>
+            {tutorialActive && showCoachmarks && (
+              <p className="text-xs text-[#0B6B4C] dark:text-[#D8FFF2] mb-2 font-medium">
+                {sampleTutorialActive
+                  ? 'This runs the preloaded sample files and moves you into a short processing step before review.'
+                  : 'This button moves you to processing and marks the “Generate mappings” tutorial step complete.'}
+              </p>
+            )}
             <Button
               onClick={() => handleBeginMatching()}
               disabled={!bothFilesUploaded || hasValidationErrors || isUploading}
               size="lg"
-              className="w-full"
+              className={`w-full ${tutorialActive && showCoachmarks ? 'ring-2 ring-[#26D99D]/85 ring-offset-2 ring-offset-background' : ''}`}
             >
               {isUploading && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
               {isUploading

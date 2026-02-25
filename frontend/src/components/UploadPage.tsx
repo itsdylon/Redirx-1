@@ -22,6 +22,12 @@ interface QuotaError {
   limit: number;
 }
 
+interface BeginMatchingOptions {
+  force?: boolean;
+  skipWarningCheck?: boolean;
+  skipScrapingWarning?: boolean;
+}
+
 const SAMPLE_OLD_URLS = [
   "https://legacy-example.com/about",
   "https://legacy-example.com/services/seo-audit",
@@ -202,7 +208,11 @@ export function UploadPage() {
     }
   };
 
-  const handleBeginMatching = async (force: boolean = false, skipWarningCheck: boolean = false, skipScrapingWarning: boolean = false) => {
+  const handleBeginMatching = async ({
+    force = false,
+    skipWarningCheck = false,
+    skipScrapingWarning = false,
+  }: BeginMatchingOptions = {}) => {
     if (sampleTutorialActive) {
       setError(null);
       setQuotaError(null);
@@ -304,11 +314,11 @@ export function UploadPage() {
   };
 
   const handleProceedAnyway = () => {
-    handleBeginMatching(true, true);
+    handleBeginMatching({ force: true, skipWarningCheck: true, skipScrapingWarning: true });
   };
 
   const handleProceedWithWarnings = () => {
-    handleBeginMatching(false, true);
+    handleBeginMatching({ skipWarningCheck: true });
   };
 
   const handleCancelWarnings = () => {
@@ -317,7 +327,7 @@ export function UploadPage() {
 
   const handleConfirmScrapingWarning = () => {
     setShowScrapingWarning(false);
-    handleBeginMatching(false, true, true);
+    handleBeginMatching({ skipWarningCheck: true, skipScrapingWarning: true });
   };
 
   const handleCancelScrapingWarning = () => {

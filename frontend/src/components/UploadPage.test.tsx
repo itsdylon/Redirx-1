@@ -380,6 +380,56 @@ describe('UploadPage — API submission', () => {
     expect(mockUploadCSVs).not.toHaveBeenCalled();
   });
 
+  it('forces duplicate Deep Match rerun without re-showing scraping warning', async () => {
+    const user = userEvent.setup();
+    mockUploadCSVs
+      .mockResolvedValueOnce({ session_id: 'existing-session', is_duplicate: true })
+      .mockResolvedValueOnce({ session_id: 'new-run', is_duplicate: false });
+
+    render(<UploadPage />);
+
+    const oldCsv = textFile('https://old.com/page1\nhttps://old.com/page2\n', 'old.csv');
+    const newCsv = textFile('https://new.com/page1\nhttps://new.com/page2\n', 'new.csv');
+
+    uploadToZone('Old Site CSV', oldCsv);
+    uploadToZone('New Site CSV', newCsv);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Begin Deep Match/ })).not.toBeDisabled();
+    });
+
+    await user.click(screen.getByRole('button', { name: /Begin Deep Match/ }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/Disable Rate Limiting/)).toBeInTheDocument();
+    });
+
+    await user.click(
+      screen.getByRole('checkbox', { name: /I've disabled rate limiting and bot protection on my sites/i })
+    );
+    await user.click(screen.getByRole('button', { name: /Proceed with Deep Match/ }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/Duplicate Request Detected/)).toBeInTheDocument();
+    });
+
+    expect(mockUploadCSVs).toHaveBeenCalledTimes(1);
+    expect(mockUploadCSVs).toHaveBeenNthCalledWith(1, expect.any(File), expect.any(File), false, 'content');
+
+    await user.click(screen.getByRole('button', { name: /Proceed Anyway/ }));
+
+    await waitFor(() => {
+      expect(mockUploadCSVs).toHaveBeenCalledTimes(2);
+    });
+
+    expect(mockUploadCSVs).toHaveBeenNthCalledWith(2, expect.any(File), expect.any(File), true, 'content');
+
+    await waitFor(() => {
+      expect(screen.getByTestId('loading-screen')).toHaveTextContent('new-run');
+    });
+    expect(screen.queryByText(/Disable Rate Limiting/)).not.toBeInTheDocument();
+  });
+
   it('keeps the begin button disabled when one file has a validation error', async () => {
     render(<UploadPage />);
 

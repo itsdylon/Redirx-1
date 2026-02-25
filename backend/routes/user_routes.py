@@ -16,7 +16,7 @@ sys.path.insert(0, SRC_DIR)
 
 from services.auth_service import AuthService, require_auth
 from services.onboarding_samples import SAMPLE_TUTORIAL_MAPPINGS
-from redirx.database import MigrationSessionDB, URLMappingDB
+from redirx.database import MigrationSessionDB, SupabaseClient, URLMappingDB
 
 user_blueprint = Blueprint("user", __name__)
 
@@ -283,7 +283,9 @@ def delete_session(session_id):
     """
     Delete a migration session and all associated data.
     """
-    session_db = MigrationSessionDB()
+    # Use a fresh service-role client so delete calls are not affected by
+    # per-request auth state on the shared singleton client.
+    session_db = MigrationSessionDB(client=SupabaseClient.get_admin_client())
 
     try:
         existing = session_db.client.table("migration_sessions").select("*").eq(

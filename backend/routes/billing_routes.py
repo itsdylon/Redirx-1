@@ -55,7 +55,14 @@ def create_checkout_session():
     """
     Create a Stripe Checkout session for purchasing a plan.
 
-    Body: { price_id: string, success_url?: string, cancel_url?: string }
+    Body:
+      {
+        price_id: string,
+        success_url?: string,
+        cancel_url?: string,
+        context_source?: string,
+        source_session_id?: string
+      }
     Returns: { url: string }
     """
     data = request.get_json()
@@ -74,6 +81,13 @@ def create_checkout_session():
     origin = request.headers.get('Origin', 'http://localhost:3000')
     success_url = data.get('success_url', f'{origin}/settings?tab=subscription&status=success')
     cancel_url = data.get('cancel_url', f'{origin}/settings?tab=subscription&status=cancelled')
+    extra_metadata = {}
+    context_source = data.get('context_source')
+    source_session_id = data.get('source_session_id')
+    if context_source:
+        extra_metadata['context_source'] = str(context_source)[:100]
+    if source_session_id:
+        extra_metadata['source_session_id'] = str(source_session_id)[:100]
 
     try:
         service = _get_stripe_service()
@@ -83,6 +97,7 @@ def create_checkout_session():
             price_id=price_id,
             success_url=success_url,
             cancel_url=cancel_url,
+            extra_metadata=extra_metadata or None,
         )
         return jsonify({'url': url})
     except ValueError as e:

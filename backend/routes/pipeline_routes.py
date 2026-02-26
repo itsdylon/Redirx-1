@@ -4,9 +4,32 @@ import numpy as np
 from backend.services.pipeline_runner import run_pipeline
 from backend.services.results_formatter import format_results_response, calculate_path_similarity
 from backend.services.auth_service import require_auth
-from src.redirx.database import URLMappingDB, MigrationSessionDB, UserQuotaDB, WebPageEmbeddingDB
+from backend.services.deep_preview_service import DeepPreviewService
+from src.redirx.config import Config
+from src.redirx.database import (
+    URLMappingDB,
+    MigrationSessionDB,
+    UserQuotaDB,
+    WebPageEmbeddingDB,
+    DeepMatchPreviewDB,
+)
 
 pipeline_blueprint = Blueprint("pipeline", __name__)
+
+
+def _build_preview_copy(total_convincing_fixes: int, locked_count: int) -> dict[str, str]:
+    return {
+        'headline': 'Deep Match found redirect mistakes Quick Match missed.',
+        'subheadline': (
+            'We re-checked your riskiest URLs with content-level AI matching '
+            f'and found {total_convincing_fixes} higher-confidence fixes.'
+        ),
+        'cta_primary': 'Unlock Every High-Confidence Fix',
+        'cta_secondary': 'Compare Plans',
+        'lock_overlay': (
+            f'Unlock {locked_count} more high-confidence fixes and AI alternatives before launch.'
+        ),
+    }
 
 
 @pipeline_blueprint.route("/process", methods=["POST"])
@@ -197,6 +220,181 @@ def get_results(session_id: str):
         return jsonify({
             "success": False,
             "error": f"Failed to retrieve results: {str(e)}"
+        }), 500
+
+
+@pipeline_blueprint.route("/results/<session_id>/deep-preview", methods=["GET"])
+@require_auth
+def get_deep_preview(session_id: str):
+    """
+    Retrieve Deep Match conversion preview snapshot for a source url_only session.
+
+    Status values:
+      - queued | processing | completed | failed | skipped | not_applicable
+    """
+    try:
+        try:
+            session_uuid = UUID(session_id)
+        except ValueError:
+            return jsonify({
+                "success": False,
+                "error": f"Invalid session_id format: {session_id}"
+            }), 400
+
+        session_db = MigrationSessionDB()
+        try:
+            session = session_db.get_session(session_uuid)
+        except ValueError as e:
+            return jsonify({
+                "success": False,
+                "error": str(e)
+            }), 404
+
+        user_id = str(request.user.id)
+        if session.get('user_id') != user_id:
+            return jsonify({
+                "success": False,
+                "error": "Unauthorized: Session belongs to another user"
+            }), 403
+
+        def _not_applicable(reason: str):
+            return jsonify({
+                "success": True,
+                "status": "not_applicable",
+                "reason": reason,
+                "source_session_id": str(session_uuid),
+                "free_unlock_count": max(1, Config.PREVIEW_FREE_ROWS),
+                "total_convincing_fixes": 0,
+                "visible_items": [],
+                "locked_teasers": [],
+                **_build_preview_copy(total_convincing_fixes=0, locked_count=0),
+            }), 200
+
+        if not Config.ENABLE_DEEP_MATCH_PREVIEW:
+            return _not_applicable("feature_disabled")
+
+        if session.get('is_preview'):
+            return _not_applicable("preview_session_not_supported")
+
+        if session.get('pipeline_type') != 'url_only':
+            return _not_applicable("source_pipeline_not_url_only")
+
+        quota_db = UserQuotaDB()
+        if quota_db.get_plan(user_id) != 'launch':
+            return _not_applicable("plan_not_launch")
+
+        preview_db = DeepMatchPreviewDB()
+        preview = preview_db.get_by_source_session(session_uuid)
+        if not preview:
+            source_status = (session.get('status') or '').lower()
+            if source_status in ('completed', 'permanently_failed'):
+                # Backfill for idempotent/older sessions: try to queue preview on-demand.
+                try:
+                    preview_service = DeepPreviewService()
+                    kickoff = preview_service.maybe_queue_preview(
+                        source_session_id=session_uuid,
+                        user_id=user_id,
+                        old_urls=session.get('old_urls') or [],
+                        new_urls=session.get('new_urls') or [],
+                    )
+                except Exception as kickoff_error:
+                    return jsonify({
+                        "success": True,
+                        "status": "failed",
+                        "reason": "preview_backfill_failed",
+                        "source_session_id": str(session_uuid),
+                        "free_unlock_count": max(1, Config.PREVIEW_FREE_ROWS),
+                        "total_convincing_fixes": 0,
+                        "visible_items": [],
+                        "locked_teasers": [],
+                        "error_message": str(kickoff_error),
+                        **_build_preview_copy(total_convincing_fixes=0, locked_count=0),
+                    }), 200
+
+                preview = preview_db.get_by_source_session(session_uuid)
+                if not preview and kickoff.get('status') in ('skipped', 'not_applicable'):
+                    return jsonify({
+                        "success": True,
+                        "status": kickoff.get('status'),
+                        "reason": kickoff.get('reason'),
+                        "source_session_id": str(session_uuid),
+                        "free_unlock_count": max(1, Config.PREVIEW_FREE_ROWS),
+                        "total_convincing_fixes": 0,
+                        "visible_items": [],
+                        "locked_teasers": [],
+                        **_build_preview_copy(total_convincing_fixes=0, locked_count=0),
+                    }), 200
+
+                if not preview and kickoff.get('status') == 'not_applicable':
+                    return _not_applicable(kickoff.get('reason') or "not_applicable")
+
+            if not preview:
+                return jsonify({
+                    "success": True,
+                    "status": "queued",
+                    "source_session_id": str(session_uuid),
+                    "free_unlock_count": max(1, Config.PREVIEW_FREE_ROWS),
+                    "total_convincing_fixes": 0,
+                    "visible_items": [],
+                    "locked_teasers": [],
+                    **_build_preview_copy(total_convincing_fixes=0, locked_count=0),
+                }), 200
+
+        # Self-heal stale preview rows: if preview session already finished but
+        # snapshot status is still queued/processing, finalize from source data.
+        preview_status = (preview.get('status') or '').lower()
+        preview_session_id_raw = preview.get('preview_session_id')
+        if preview_status in ('queued', 'processing') and preview_session_id_raw:
+            try:
+                preview_session_uuid = UUID(str(preview_session_id_raw))
+                preview_session = session_db.get_session(preview_session_uuid)
+                preview_session_status = (preview_session.get('status') or '').lower()
+
+                if preview_session_status == 'completed':
+                    DeepPreviewService().finalize_preview(preview_session_uuid)
+                    refreshed = preview_db.get_by_source_session(session_uuid)
+                    if refreshed:
+                        preview = refreshed
+                elif preview_session_status == 'permanently_failed':
+                    preview_db.mark_failed_by_preview_session(
+                        preview_session_uuid,
+                        'Preview run failed before completion.',
+                    )
+                    refreshed = preview_db.get_by_source_session(session_uuid)
+                    if refreshed:
+                        preview = refreshed
+                elif preview_session_status == 'processing' and preview_status == 'queued':
+                    preview_db.mark_processing_by_preview_session(preview_session_uuid)
+                    refreshed = preview_db.get_by_source_session(session_uuid)
+                    if refreshed:
+                        preview = refreshed
+            except Exception:
+                # Non-blocking: if healing fails we still return current snapshot state.
+                pass
+
+        status = preview.get('status', 'queued')
+        total = int(preview.get('total_convincing_fixes') or 0)
+        visible_items = preview.get('visible_items') or []
+        locked_teasers = preview.get('locked_teasers') or []
+        free_unlock_count = int(preview.get('free_unlock_count') or max(1, Config.PREVIEW_FREE_ROWS))
+
+        payload = {
+            "success": True,
+            "status": status,
+            "source_session_id": str(session_uuid),
+            "free_unlock_count": free_unlock_count,
+            "total_convincing_fixes": total,
+            "visible_items": visible_items,
+            "locked_teasers": locked_teasers,
+            "error_message": preview.get('error_message'),
+            **_build_preview_copy(total_convincing_fixes=total, locked_count=len(locked_teasers)),
+        }
+        return jsonify(payload), 200
+
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": f"Failed to retrieve deep preview: {str(e)}"
         }), 500
 
 

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
+import { usePostHog } from '@posthog/react';
 import { User, Settings2, Bell, CreditCard, Check, Loader2, AlertTriangle, RefreshCw, ExternalLink, Crown, ArrowRight } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '../contexts/AuthContext';
@@ -36,6 +37,7 @@ import { ApiError, throwApiErrorFromResponse } from '../utils/errorHandler';
 
 export function Settings() {
   const { user, refreshSession } = useAuth();
+  const posthog = usePostHog();
   const navigate = useNavigate();
   const {
     resetOnboarding,
@@ -43,6 +45,9 @@ export function Settings() {
     setEntryModalOpen,
   } = useOnboarding();
   const [searchParams, setSearchParams] = useSearchParams();
+  const previewSource = searchParams.get('src');
+  const previewSourceSessionId = searchParams.get('session_id');
+  const isDeepPreviewSource = previewSource === 'deep_preview' && !!previewSourceSessionId;
 
   // Profile state
   const [fullName, setFullName] = useState(user?.full_name || '');
@@ -85,6 +90,7 @@ export function Settings() {
   const [replayLoading, setReplayLoading] = useState(false);
 
   const pollingRef = useRef(false);
+  const deepPreviewOpenedTrackedRef = useRef(false);
 
   const getErrorMessage = (err: unknown, fallback: string): string => {
     if (err instanceof ApiError) {
@@ -135,6 +141,14 @@ export function Settings() {
     };
     fetchPrefs();
   }, []);
+
+  useEffect(() => {
+    if (!isDeepPreviewSource || deepPreviewOpenedTrackedRef.current) return;
+    deepPreviewOpenedTrackedRef.current = true;
+    posthog?.capture('deep_preview_upgrade_flow_opened', {
+      source_session_id: previewSourceSessionId,
+    });
+  }, [isDeepPreviewSource, posthog, previewSourceSessionId]);
 
   // Profile save handler
   const handleProfileSave = async () => {
@@ -196,9 +210,13 @@ export function Settings() {
       const previousPlan = sessionStorage.getItem('pre_checkout_plan') || 'launch';
       const purchaseType = sessionStorage.getItem('checkout_purchase_type') || 'plan';
       const previousLifetimeCredits = parseInt(sessionStorage.getItem('pre_checkout_lifetime_credits') || '0', 10);
+      const checkoutContextSource = sessionStorage.getItem('checkout_context_source');
+      const checkoutContextSessionId = sessionStorage.getItem('checkout_context_session_id');
       sessionStorage.removeItem('pre_checkout_plan');
       sessionStorage.removeItem('checkout_purchase_type');
       sessionStorage.removeItem('pre_checkout_lifetime_credits');
+      sessionStorage.removeItem('checkout_context_source');
+      sessionStorage.removeItem('checkout_context_session_id');
 
       const isCredits = purchaseType === 'credits';
 
@@ -222,6 +240,13 @@ export function Settings() {
                 setSubscription(sub);
                 setPostCheckoutPolling(false);
                 toast.success(`You're now on the ${sub.plan.charAt(0).toUpperCase() + sub.plan.slice(1)} plan!`);
+                if (checkoutContextSource === 'deep_preview') {
+                  posthog?.capture('deep_preview_conversion_success', {
+                    source_session_id: checkoutContextSessionId,
+                    upgraded_plan: sub.plan,
+                    previous_plan: previousPlan,
+                  });
+                }
                 pollingRef.current = false;
                 return;
               }
@@ -244,6 +269,13 @@ export function Settings() {
             }
           } else if (sub.plan !== previousPlan) {
             toast.success(`You're now on the ${sub.plan.charAt(0).toUpperCase() + sub.plan.slice(1)} plan!`);
+            if (checkoutContextSource === 'deep_preview') {
+              posthog?.capture('deep_preview_conversion_success', {
+                source_session_id: checkoutContextSessionId,
+                upgraded_plan: sub.plan,
+                previous_plan: previousPlan,
+              });
+            }
           } else {
             toast.info('Your payment was received. Plan activation may take a moment — please refresh.');
           }
@@ -276,7 +308,14 @@ export function Settings() {
       if (isCredits && subscription) {
         sessionStorage.setItem('pre_checkout_lifetime_credits', String(subscription.lifetime_credits_total || 0));
       }
-      const url = await createCheckoutSession(priceId);
+      if (isDeepPreviewSource && previewSourceSessionId) {
+        sessionStorage.setItem('checkout_context_source', 'deep_preview');
+        sessionStorage.setItem('checkout_context_session_id', previewSourceSessionId);
+      }
+      const url = await createCheckoutSession(priceId, isDeepPreviewSource && previewSourceSessionId ? {
+        context_source: 'deep_preview',
+        source_session_id: previewSourceSessionId,
+      } : undefined);
       window.location.href = url;
       return; // Don't clear loading — page is navigating away
     } catch (err: unknown) {

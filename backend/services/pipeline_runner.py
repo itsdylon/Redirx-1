@@ -186,12 +186,12 @@ def run_pipeline(
         if existing_session:
             session_id = existing_session['id']
             status = existing_session['status']
-            print(f"[API] Found existing session {session_id} with status: {status}")
-            print(f"[API] Returning existing session (idempotency key matched)")
+            print(f"[API] Found existing session {session_id} with status: {status}", flush=True)
+            print(f"[API] Returning existing session (idempotency key matched)", flush=True)
             return str(session_id), True  # is_duplicate=True
 
     if force:
-        print(f"[API] Force=True, bypassing idempotency (key set to NULL)")
+        print(f"[API] Force=True, bypassing idempotency (key set to NULL)", flush=True)
 
     # Create new migration session with URLs stored for background processing
     session_id = session_db.create_session(
@@ -203,8 +203,8 @@ def run_pipeline(
         pipeline_type=pipeline_type,
     )
 
-    print(f"[API] Created job {session_id} with {len(old_urls)} old URLs and {len(new_urls)} new URLs")
-    print(f"[API] Job queued for background processing (status: pending)")
+    print(f"[API] Created job {session_id} with {len(old_urls)} old URLs and {len(new_urls)} new URLs", flush=True)
+    print(f"[API] Job queued for background processing (status: pending)", flush=True)
 
     # Return session_id immediately - worker will process the job
     return str(session_id), False  # is_duplicate=False

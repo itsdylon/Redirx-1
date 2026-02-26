@@ -7,6 +7,13 @@ _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 load_dotenv(os.path.join(_PROJECT_ROOT, '.env'))
 
 
+def _env_bool(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in ('1', 'true', 'yes', 'on')
+
+
 class Config:
     """
     Configuration management for Redirx.
@@ -52,6 +59,14 @@ class Config:
     HIGH_CONFIDENCE_THRESHOLD: float = float(os.getenv('HIGH_CONFIDENCE_THRESHOLD', '0.85'))
     MEDIUM_CONFIDENCE_THRESHOLD: float = float(os.getenv('MEDIUM_CONFIDENCE_THRESHOLD', '0.7'))
     AMBIGUITY_GAP_THRESHOLD: float = float(os.getenv('AMBIGUITY_GAP_THRESHOLD', '0.1'))
+
+    # Deep Match Preview Funnel
+    ENABLE_DEEP_MATCH_PREVIEW: bool = _env_bool('ENABLE_DEEP_MATCH_PREVIEW', False)
+    PREVIEW_MAX_OLD_CANDIDATES: int = int(os.getenv('PREVIEW_MAX_OLD_CANDIDATES', '12'))
+    PREVIEW_MAX_NEW_URLS_FULL_SCAN: int = int(os.getenv('PREVIEW_MAX_NEW_URLS_FULL_SCAN', '300'))
+    PREVIEW_MAX_NEW_URLS_CAPPED: int = int(os.getenv('PREVIEW_MAX_NEW_URLS_CAPPED', '180'))
+    PREVIEW_FREE_ROWS: int = int(os.getenv('PREVIEW_FREE_ROWS', '2'))
+    PREVIEW_MAX_JOBS_PER_USER_PER_DAY: int = int(os.getenv('PREVIEW_MAX_JOBS_PER_USER_PER_DAY', '2'))
 
     @classmethod
     def validate(cls) -> None:

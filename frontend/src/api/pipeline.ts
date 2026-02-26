@@ -122,3 +122,67 @@ export async function getResults(sessionId: string) {
     throw error;
   }
 }
+
+export interface DeepPreviewVisibleItem {
+  old_url: string;
+  current_target_url: string;
+  deep_target_url: string;
+  quick_confidence: number;
+  deep_confidence: number;
+  confidence_gain: number;
+  confidence_gain_points: number;
+  deep_gap: number;
+  quick_match_type: string;
+  deep_match_type: string;
+  conviction_score: number;
+}
+
+export interface DeepPreviewLockedTeaser {
+  old_url: string;
+  current_target_url: string;
+  confidence_gain_points: number;
+  deep_confidence: number;
+  teaser: string;
+}
+
+export interface DeepPreviewResponse {
+  success: boolean;
+  status: 'queued' | 'processing' | 'completed' | 'failed' | 'skipped' | 'not_applicable';
+  reason?: string;
+  source_session_id: string;
+  free_unlock_count: number;
+  total_convincing_fixes: number;
+  visible_items: DeepPreviewVisibleItem[];
+  locked_teasers: DeepPreviewLockedTeaser[];
+  error_message?: string | null;
+  headline: string;
+  subheadline: string;
+  cta_primary: string;
+  cta_secondary: string;
+  lock_overlay?: string;
+}
+
+export async function getDeepPreview(sessionId: string): Promise<DeepPreviewResponse> {
+  try {
+    const response = await fetch(
+      `${API_BASE_URL}/api/results/${sessionId}/deep-preview`,
+      {
+        method: "GET",
+        headers: getAuthHeaders()
+      }
+    );
+
+    if (!response.ok) {
+      const userError = await handleApiError(null, response);
+      throw new Error(userError.message);
+    }
+
+    return await response.json();
+  } catch (error: any) {
+    if (error instanceof TypeError || error.name === 'AbortError') {
+      const userError = await handleApiError(error);
+      throw new Error(userError.message);
+    }
+    throw error;
+  }
+}

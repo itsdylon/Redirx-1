@@ -23,6 +23,7 @@ from src.redirx.database import MigrationSessionDB, SupabaseClient, URLMappingDB
 from src.redirx.lib import Pipeline
 from uuid import UUID
 from src.redirx.config import Config
+from backend.services.deep_preview_service import DeepPreviewService
 
 # PostgreSQL direct connection for LISTEN/NOTIFY
 try:
@@ -53,6 +54,37 @@ class RedirxWorker:
         self.running = False
         self.jobs_processed = 0
         self.pg_conn = None
+        self.pg_claim_conn = None
+
+    def _apply_usage_accounting(
+        self,
+        user_id: Optional[str],
+        mapping_count: int,
+        pipeline_type: str,
+        is_preview: bool,
+    ) -> None:
+        """
+        Apply usage accounting after a successful job completion.
+
+        Rules:
+        - Preview jobs are always non-billable.
+        - url_only source jobs increment Quick Match usage.
+        - content source jobs increment Deep Match credits.
+        """
+        if not user_id or mapping_count <= 0:
+            return
+
+        if is_preview:
+            print(f"[Worker] Preview job is non-billable; skipped usage increment")
+            return
+
+        quota_db = UserQuotaDB()
+        if pipeline_type == 'url_only':
+            quota_db.increment_quick_match_usage(user_id, mapping_count)
+            print(f"[Worker] Incremented Quick Match usage for user {user_id} by {mapping_count}")
+        else:
+            quota_db.increment_credits(user_id, mapping_count)
+            print(f"[Worker] Incremented Deep Match credits for user {user_id} by {mapping_count}")
 
     def get_database_url(self) -> Optional[str]:
         """
@@ -97,9 +129,17 @@ class RedirxWorker:
         Returns:
             Job data if claimed, None if no jobs available.
         """
+        lease_expires_at = (datetime.now(timezone.utc) + timedelta(seconds=WORKER_LEASE_DURATION)).isoformat()
+
+        # Prefer direct PostgreSQL claim when available (LISTEN/NOTIFY mode).
+        # This avoids PostgREST/RPC visibility edge cases.
+        pg_claim = self._claim_job_via_postgres(lease_expires_at)
+        if pg_claim:
+            print(f"[Worker] Claimed job via PostgreSQL: {pg_claim['id']} (attempt {pg_claim['attempt_count']})", flush=True)
+            return pg_claim
+
         try:
             client = SupabaseClient.get_client()
-            lease_expires_at = (datetime.now(timezone.utc) + timedelta(seconds=WORKER_LEASE_DURATION)).isoformat()
 
             result = client.rpc('claim_next_job', {
                 'p_worker_id': self.worker_id,
@@ -110,13 +150,119 @@ class RedirxWorker:
                 job = result.data[0]
                 print(f"[Worker] Claimed job: {job['id']} (attempt {job['attempt_count']})", flush=True)
                 return job
-
-            return None
+            # Fallback: if RPC returns nothing, try direct claim for environments
+            # where claim_next_job is missing/misconfigured.
+            return self._claim_job_fallback(client, lease_expires_at)
 
         except Exception as e:
             print(f"[Worker] Error claiming job: {e}")
             traceback.print_exc()
+            try:
+                client = SupabaseClient.get_client()
+                return self._claim_job_fallback(client, lease_expires_at)
+            except Exception as fallback_error:
+                print(f"[Worker] Fallback claim also failed: {fallback_error}")
+                return None
+
+    def _claim_job_via_postgres(self, lease_expires_at: str) -> Optional[Dict[str, Any]]:
+        """
+        Claim a job directly through PostgreSQL to avoid RPC visibility/permission gaps.
+        Keeps backward compatibility with older claim_next_job return signatures.
+        """
+        if not self.pg_claim_conn:
             return None
+
+        try:
+            with self.pg_claim_conn.cursor() as cursor:
+                cursor.execute(
+                    "SELECT * FROM claim_next_job(%s, %s)",
+                    (self.worker_id, lease_expires_at),
+                )
+                row = cursor.fetchone()
+                if not row:
+                    return None
+
+                columns = [desc.name for desc in cursor.description]
+                claimed = dict(zip(columns, row))
+                claimed_id = claimed.get('id')
+                if isinstance(claimed_id, UUID):
+                    claimed_id = str(claimed_id)
+
+                claimed_source = claimed.get('source_session_id')
+                if isinstance(claimed_source, UUID):
+                    claimed_source = str(claimed_source)
+
+                job = {
+                    'id': claimed_id,
+                    'user_id': claimed.get('user_id'),
+                    'project_name': claimed.get('project_name'),
+                    'old_urls': claimed.get('old_urls') or [],
+                    'new_urls': claimed.get('new_urls') or [],
+                    'attempt_count': int(claimed.get('attempt_count') or 1),
+                    'pipeline_type': claimed.get('pipeline_type') or 'content',
+                    'is_preview': bool(claimed.get('is_preview', False)),
+                    'source_session_id': claimed_source,
+                }
+                return job
+        except Exception as e:
+            print(f"[Worker] PostgreSQL claim failed: {e}", flush=True)
+            return None
+
+    def _claim_job_fallback(self, client, lease_expires_at: str) -> Optional[Dict[str, Any]]:
+        """
+        Direct table-based claim fallback when claim_next_job RPC returns no row.
+        Uses optimistic status check for safe single-row claim.
+        """
+        pending = client.table('migration_sessions').select(
+            'id,user_id,project_name,old_urls,new_urls,attempt_count,pipeline_type,is_preview,source_session_id'
+        ).eq(
+            'status', 'pending'
+        ).order(
+            'created_at', desc=False
+        ).limit(1).execute()
+
+        if not pending.data:
+            return None
+
+        candidate = pending.data[0]
+        current_attempt = int(candidate.get('attempt_count') or 0)
+        new_attempt = current_attempt + 1
+
+        update_result = client.table('migration_sessions').update({
+            'status': 'processing',
+            'locked_at': datetime.now(timezone.utc).isoformat(),
+            'locked_by': self.worker_id,
+            'lease_expires_at': lease_expires_at,
+            'attempt_count': new_attempt,
+            'current_stage': None,
+            'stage_name': None,
+            'total_stages': None,
+        }).eq(
+            'id', candidate['id']
+        ).eq(
+            'status', 'pending'
+        ).execute()
+
+        if not update_result.data:
+            print("[Worker] Fallback claim saw pending row, but it was claimed concurrently", flush=True)
+            return None
+
+        job = {
+            'id': candidate['id'],
+            'user_id': candidate.get('user_id'),
+            'project_name': candidate.get('project_name'),
+            'old_urls': candidate.get('old_urls') or [],
+            'new_urls': candidate.get('new_urls') or [],
+            'attempt_count': new_attempt,
+            'pipeline_type': candidate.get('pipeline_type') or 'content',
+            'is_preview': bool(candidate.get('is_preview', False)),
+            'source_session_id': candidate.get('source_session_id'),
+        }
+        print(
+            f"[Worker] Claimed job via fallback: {job['id']} (attempt {job['attempt_count']})",
+            flush=True,
+        )
+        return job
 
     async def extend_lease(self, session_id: UUID) -> bool:
         """
@@ -186,11 +332,18 @@ class RedirxWorker:
         """
         session_id = UUID(job['id'])
         attempt_count = job.get('attempt_count', 1)
+        pipeline_type = job.get('pipeline_type', 'content')
+        is_preview = bool(job.get('is_preview', False))
 
-        print(f"[Worker] Processing job {session_id} (attempt {attempt_count})...", flush=True)
+        print(
+            f"[Worker] Processing job {session_id} (attempt {attempt_count}, "
+            f"pipeline={pipeline_type}, preview={is_preview})...",
+            flush=True
+        )
 
         # Start lease extension task
         lease_extension_task = asyncio.create_task(self._lease_extension_loop(session_id))
+        preview_service = DeepPreviewService()
 
         try:
             # Get URLs from job
@@ -199,15 +352,19 @@ class RedirxWorker:
 
             if not old_urls or not new_urls:
                 print(f"[Worker] Job {session_id} has no URLs")
+                if is_preview:
+                    preview_service.mark_failed(session_id, 'No URLs provided')
                 await self.release_lease(session_id, 'permanently_failed', 'No URLs provided')
                 return False
 
-            pipeline_type = job.get('pipeline_type', 'content')
             print(f"[Worker] Processing {len(old_urls)} old URLs and {len(new_urls)} new URLs (pipeline: {pipeline_type})")
 
             # Only validate OpenAI key for content pipeline (url_only doesn't need it)
             if pipeline_type == 'content':
                 Config.validate_embeddings()
+
+            if is_preview:
+                preview_service.mark_processing(session_id)
 
             # Run pipeline
             pipeline = Pipeline(input=(old_urls, new_urls), session_id=session_id, pipeline_type=pipeline_type)
@@ -233,56 +390,82 @@ class RedirxWorker:
 
             # Update user usage
             user_id = job.get('user_id')
+            mapping_count = 0
             if user_id:
                 mapping_db = URLMappingDB()
                 mappings = mapping_db.get_mappings_by_session(session_id)
-                mapping_count = len(mappings)
+                mapping_count = len(mappings or [])
 
-                if mapping_count > 0:
-                    quota_db = UserQuotaDB()
-                    quota_db.increment_usage(user_id, mapping_count)
-                    print(f"[Worker] Incremented usage for user {user_id} by {mapping_count}")
+                self._apply_usage_accounting(
+                    user_id=user_id,
+                    mapping_count=mapping_count,
+                    pipeline_type=pipeline_type,
+                    is_preview=is_preview,
+                )
+
+            # Queue preview job after successful source url_only completion.
+            if (not is_preview) and pipeline_type == 'url_only' and user_id:
+                try:
+                    preview_result = preview_service.maybe_queue_preview(
+                        source_session_id=session_id,
+                        user_id=user_id,
+                        old_urls=old_urls,
+                        new_urls=new_urls,
+                    )
+                    print(f"[Worker] Deep preview queue result for {session_id}: {preview_result}")
+                except Exception as preview_err:
+                    print(f"[Worker] Failed to queue deep preview for {session_id}: {preview_err}")
+
+            # Finalize preview snapshot after preview content job completes.
+            if is_preview:
+                try:
+                    finalize_result = preview_service.finalize_preview(session_id)
+                    print(f"[Worker] Deep preview finalize result for {session_id}: {finalize_result}")
+                except Exception as preview_err:
+                    print(f"[Worker] Failed to finalize deep preview for {session_id}: {preview_err}")
+                    preview_service.mark_failed(session_id, str(preview_err))
 
             # Success - release lease and mark completed
             await self.release_lease(session_id, 'completed')
             print(f"[Worker] Job {session_id} completed successfully")
 
             # Send completion email (fire-and-forget)
-            try:
-                from backend.services.email_service import EmailService
-                if user_id:
-                    client = SupabaseClient.get_client()
-                    profile = client.table('user_profiles').select(
-                        'email'
-                    ).eq('id', user_id).maybe_single().execute()
-                    if profile.data and profile.data.get('email'):
-                        project_name = job.get('project_name', 'Migration')
-                        old_domain = ""
-                        new_domain = ""
-                        if old_urls:
-                            try:
-                                from urllib.parse import urlparse
-                                old_domain = urlparse(old_urls[0]).netloc
-                            except Exception:
-                                pass
-                        if new_urls:
-                            try:
-                                from urllib.parse import urlparse
-                                new_domain = urlparse(new_urls[0]).netloc
-                            except Exception:
-                                pass
-                        email_svc = EmailService()
-                        email_svc.send_mapping_complete(
-                            user_id=user_id,
-                            to_email=profile.data['email'],
-                            project_name=project_name,
-                            total_mappings=mapping_count,
-                            session_id=str(session_id),
-                            old_site_domain=old_domain,
-                            new_site_domain=new_domain,
-                        )
-            except Exception:
-                print(f"[Worker] Completion email failed (non-blocking)")
+            if not is_preview:
+                try:
+                    from backend.services.email_service import EmailService
+                    if user_id:
+                        client = SupabaseClient.get_client()
+                        profile = client.table('user_profiles').select(
+                            'email'
+                        ).eq('id', user_id).maybe_single().execute()
+                        if profile.data and profile.data.get('email'):
+                            project_name = job.get('project_name', 'Migration')
+                            old_domain = ""
+                            new_domain = ""
+                            if old_urls:
+                                try:
+                                    from urllib.parse import urlparse
+                                    old_domain = urlparse(old_urls[0]).netloc
+                                except Exception:
+                                    pass
+                            if new_urls:
+                                try:
+                                    from urllib.parse import urlparse
+                                    new_domain = urlparse(new_urls[0]).netloc
+                                except Exception:
+                                    pass
+                            email_svc = EmailService()
+                            email_svc.send_mapping_complete(
+                                user_id=user_id,
+                                to_email=profile.data['email'],
+                                project_name=project_name,
+                                total_mappings=mapping_count,
+                                session_id=str(session_id),
+                                old_site_domain=old_domain,
+                                new_site_domain=new_domain,
+                            )
+                except Exception:
+                    print(f"[Worker] Completion email failed (non-blocking)")
 
             self.jobs_processed += 1
             return True
@@ -292,32 +475,39 @@ class RedirxWorker:
             print(f"[Worker] Job {session_id} failed: {e}")
             traceback.print_exc()
 
+            if is_preview:
+                try:
+                    preview_service.mark_failed(session_id, str(e))
+                except Exception:
+                    print(f"[Worker] Failed to persist preview failure status for {session_id}")
+
             # Check if we should retry or permanently fail
             if attempt_count >= WORKER_MAX_ATTEMPTS:
                 print(f"[Worker] Job {session_id} exceeded max attempts, marking as permanently failed")
                 await self.release_lease(session_id, 'permanently_failed', error_msg)
 
                 # Send failure email (fire-and-forget)
-                try:
-                    from backend.services.email_service import EmailService
-                    user_id = job.get('user_id')
-                    if user_id:
-                        client = SupabaseClient.get_client()
-                        profile = client.table('user_profiles').select(
-                            'email'
-                        ).eq('id', user_id).maybe_single().execute()
-                        if profile.data and profile.data.get('email'):
-                            project_name = job.get('project_name', 'Migration')
-                            email_svc = EmailService()
-                            email_svc.send_mapping_failed(
-                                user_id=user_id,
-                                to_email=profile.data['email'],
-                                project_name=project_name,
-                                error_summary=str(e),
-                                session_id=str(session_id),
-                            )
-                except Exception:
-                    print(f"[Worker] Failure email failed (non-blocking)")
+                if not is_preview:
+                    try:
+                        from backend.services.email_service import EmailService
+                        user_id = job.get('user_id')
+                        if user_id:
+                            client = SupabaseClient.get_client()
+                            profile = client.table('user_profiles').select(
+                                'email'
+                            ).eq('id', user_id).maybe_single().execute()
+                            if profile.data and profile.data.get('email'):
+                                project_name = job.get('project_name', 'Migration')
+                                email_svc = EmailService()
+                                email_svc.send_mapping_failed(
+                                    user_id=user_id,
+                                    to_email=profile.data['email'],
+                                    project_name=project_name,
+                                    error_summary=str(e),
+                                    session_id=str(session_id),
+                                )
+                    except Exception:
+                        print(f"[Worker] Failure email failed (non-blocking)")
             else:
                 print(f"[Worker] Job {session_id} will be retried")
                 await self.release_lease(session_id, 'pending', error_msg)
@@ -419,6 +609,7 @@ class RedirxWorker:
         print("[Worker] Starting LISTEN loop...", flush=True)
 
         self.pg_conn = self.connect_postgres()
+        self.pg_claim_conn = self.connect_postgres()
 
         # If connection failed, fall back to polling
         if not self.pg_conn:
@@ -453,6 +644,8 @@ class RedirxWorker:
                         if job:
                             print(f"[Worker] Claimed job via LISTEN notification: {job['id']}", flush=True)
                             await self.process_job(job)
+                        else:
+                            print("[Worker] LISTEN notification received but no pending job was claimable", flush=True)
                         break  # Exit inner loop after processing one notification
                 except TimeoutError:
                     # Timeout reached, do fallback polling
@@ -481,6 +674,9 @@ class RedirxWorker:
             if self.pg_conn:
                 self.pg_conn.close()
                 print("[Worker] PostgreSQL connection closed", flush=True)
+            if self.pg_claim_conn:
+                self.pg_claim_conn.close()
+                print("[Worker] PostgreSQL claim connection closed", flush=True)
 
     async def run(self) -> None:
         """

@@ -17,9 +17,11 @@ import {
 } from './ui/tooltip';
 import { toast } from 'sonner';
 import { Info } from 'lucide-react';
-import { getResults } from '../api/pipeline';
+import { getResults, getDeepPreview, type DeepPreviewResponse } from '../api/pipeline';
 import { isMac } from '../lib/keyboard';
 import { useOnboarding } from '../contexts/OnboardingContext';
+import { useAuth } from '../contexts/AuthContext';
+import { DeepMatchPreviewCard } from './DeepMatchPreviewCard';
 import {
   Dialog,
   DialogContent,
@@ -62,6 +64,7 @@ export interface RedirectMapping {
 export function ReviewInterface() {
   const { sessionId } = useParams<{ sessionId: string }>();
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [searchParams] = useSearchParams();
   const {
     onboarding,
@@ -83,10 +86,13 @@ export function ReviewInterface() {
   const [sortOption, setSortOption] = useState<string>('confidence-desc');
   const [showExactMatches, setShowExactMatches] = useState(true);
   const [pipelineType, setPipelineType] = useState<string>('content');
+  const [deepPreview, setDeepPreview] = useState<DeepPreviewResponse | null>(null);
+  const [deepPreviewError, setDeepPreviewError] = useState<string | null>(null);
   const [showTutorialSuccess, setShowTutorialSuccess] = useState(false);
   const [showCoachmarks, setShowCoachmarks] = useState(false);
   const [samplePreparationActive, setSamplePreparationActive] = useState(false);
   const PAGE_SIZE = 25;
+  const isLaunchUser = (user?.plan || 'launch') === 'launch';
 
   // Refs for keyboard shortcuts
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -131,6 +137,42 @@ export function ReviewInterface() {
 
     fetchResults();
   }, [sessionId]);
+
+  useEffect(() => {
+    if (!sessionId) return;
+    if (!(pipelineType === 'url_only' && isLaunchUser)) {
+      setDeepPreview(null);
+      setDeepPreviewError(null);
+      return;
+    }
+
+    let cancelled = false;
+    let timeoutId: number | null = null;
+
+    const pollPreview = async () => {
+      try {
+        const data = await getDeepPreview(sessionId);
+        if (cancelled) return;
+        setDeepPreview(data);
+        setDeepPreviewError(null);
+
+        if (data.status === 'queued' || data.status === 'processing') {
+          timeoutId = window.setTimeout(pollPreview, 4000);
+        }
+      } catch (err) {
+        if (cancelled) return;
+        setDeepPreviewError(err instanceof Error ? err.message : 'Unable to load Deep Match preview.');
+      }
+    };
+
+    pollPreview();
+    return () => {
+      cancelled = true;
+      if (timeoutId !== null) {
+        window.clearTimeout(timeoutId);
+      }
+    };
+  }, [sessionId, pipelineType, isLaunchUser]);
 
   useEffect(() => {
     if (!tutorialActive) {
@@ -429,6 +471,13 @@ export function ReviewInterface() {
                 These results use URL pattern matching. Upgrade for content-based deep matching with AI-powered semantic analysis and alternative suggestions.
               </p>
             </div>
+          )}
+
+          {pipelineType === 'url_only' && isLaunchUser && deepPreview && (
+            <DeepMatchPreviewCard preview={deepPreview} />
+          )}
+          {pipelineType === 'url_only' && isLaunchUser && deepPreviewError && (
+            <div className="mb-4 text-xs text-muted-foreground">{deepPreviewError}</div>
           )}
 
           {/* Stats Bar */}

@@ -128,6 +128,8 @@ def get_dashboard_stats():
             "user_id", str(request.user.id)
         ).eq(
             "is_tutorial", False
+        ).eq(
+            "is_preview", False
         ).order(
             "created_at", desc=True
         ).execute()
@@ -211,6 +213,8 @@ def get_user_sessions():
             "user_id", str(request.user.id)
         ).eq(
             "is_tutorial", False
+        ).eq(
+            "is_preview", False
         ).order(
             "created_at", desc=True
         ).execute()
@@ -602,4 +606,3 @@ def update_profile():
             "success": False,
             "error": str(exc),
         }), 500
-

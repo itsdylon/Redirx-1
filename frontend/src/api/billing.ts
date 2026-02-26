@@ -59,11 +59,18 @@ export async function getPlans(): Promise<PlanInfo[]> {
 
 export async function createCheckoutSession(
   priceId: string,
-  options?: { success_url?: string; cancel_url?: string },
+  options?: {
+    success_url?: string;
+    cancel_url?: string;
+    context_source?: string;
+    source_session_id?: string;
+  },
 ): Promise<string> {
   const body: Record<string, string> = { price_id: priceId };
   if (options?.success_url) body.success_url = options.success_url;
   if (options?.cancel_url) body.cancel_url = options.cancel_url;
+  if (options?.context_source) body.context_source = options.context_source;
+  if (options?.source_session_id) body.source_session_id = options.source_session_id;
 
   const res = await fetch(`${API_BASE_URL}/api/billing/create-checkout-session`, {
     method: 'POST',

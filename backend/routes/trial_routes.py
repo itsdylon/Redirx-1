@@ -288,6 +288,8 @@ def get_onboarding_report():
                 'user_id', stuck_user_ids
             ).eq(
                 'is_tutorial', False
+            ).eq(
+                'is_preview', False
             ).execute()
 
             for row in (sessions_result.data or []):

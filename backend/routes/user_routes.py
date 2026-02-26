@@ -3,7 +3,7 @@ User profile, onboarding, and session management endpoints.
 """
 from datetime import datetime, timezone
 from typing import Any, Dict
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, current_app
 import sys
 import os
 
@@ -291,6 +291,8 @@ def delete_session(session_id):
     # per-request auth state on the shared singleton client.
     session_db = MigrationSessionDB(client=SupabaseClient.get_admin_client())
 
+    step = "load-session"
+
     try:
         existing = session_db.client.table("migration_sessions").select("*").eq(
             "id", session_id
@@ -308,9 +310,25 @@ def delete_session(session_id):
                 "error": "Unauthorized: Session belongs to another user",
             }), 403
 
-        session_db.client.table("url_mappings").delete().eq("session_id", session_id).execute()
-        session_db.client.table("webpage_embeddings").delete().eq("session_id", session_id).execute()
-        session_db.client.table("migration_sessions").delete().eq("id", session_id).execute()
+        # Include any preview child sessions so dependent rows are removed before
+        # deleting migration_sessions (some environments do not use FK cascade).
+        step = "collect-related-sessions"
+        related_result = session_db.client.table("migration_sessions").select("id").eq(
+            "source_session_id", session_id
+        ).eq(
+            "user_id", str(request.user.id)
+        ).execute()
+        related_session_ids = [session_id] + [row["id"] for row in related_result.data or []]
+        related_session_ids = list(dict.fromkeys(related_session_ids))
+
+        step = "delete-url-mappings"
+        session_db.client.table("url_mappings").delete().in_("session_id", related_session_ids).execute()
+
+        step = "delete-webpage-embeddings"
+        session_db.client.table("webpage_embeddings").delete().in_("session_id", related_session_ids).execute()
+
+        step = "delete-migration-sessions"
+        session_db.client.table("migration_sessions").delete().in_("id", related_session_ids).execute()
 
         return jsonify({
             "success": True,
@@ -318,9 +336,16 @@ def delete_session(session_id):
         }), 200
 
     except Exception as exc:
+        current_app.logger.exception(
+            "Failed to delete session=%s user=%s step=%s",
+            session_id,
+            getattr(request.user, "id", None),
+            step,
+        )
         return jsonify({
             "success": False,
             "error": str(exc),
+            "step": step,
         }), 500
 
 

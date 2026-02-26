@@ -85,19 +85,21 @@ class UserSessionFilterTests(unittest.TestCase):
         migration_sessions_table.select.return_value = migration_sessions_table
         migration_sessions_table.delete.return_value = migration_sessions_table
         migration_sessions_table.eq.return_value = migration_sessions_table
+        migration_sessions_table.in_.return_value = migration_sessions_table
         migration_sessions_table.execute.side_effect = [
             SimpleNamespace(data=[{"id": "session-1", "user_id": self.user.id}]),
+            SimpleNamespace(data=[]),
             SimpleNamespace(data=[]),
         ]
 
         url_mappings_table = Mock()
         url_mappings_table.delete.return_value = url_mappings_table
-        url_mappings_table.eq.return_value = url_mappings_table
+        url_mappings_table.in_.return_value = url_mappings_table
         url_mappings_table.execute.return_value = SimpleNamespace(data=[])
 
         webpage_embeddings_table = Mock()
         webpage_embeddings_table.delete.return_value = webpage_embeddings_table
-        webpage_embeddings_table.eq.return_value = webpage_embeddings_table
+        webpage_embeddings_table.in_.return_value = webpage_embeddings_table
         webpage_embeddings_table.execute.return_value = SimpleNamespace(data=[])
 
         mock_admin_client = Mock()

@@ -150,7 +150,7 @@ export function AllProjects() {
       });
     } catch (err) {
       console.error('Failed to delete session:', err);
-      toast.error('Failed to delete project. Please try again.');
+      toast.error(err instanceof Error ? err.message : 'Failed to delete project. Please try again.');
       setDeletingSessionId(null);
     }
   };

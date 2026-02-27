@@ -1,8 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { DashboardLayout } from './DashboardLayout';
 import { Card } from './ui/card';
 import { Button } from './ui/button';
+import { Skeleton } from './ui/skeleton';
 import { Clock, Pencil, Check, X, Loader2, Trash2, RefreshCw, Plus, FolderOpen, FileUp, ArrowUpRight, CheckCircle2, BarChart3, Layers } from 'lucide-react';
 import { Progress } from './ui/progress';
 import { fetchDashboardData, DashboardData } from '../api/dashboard';
@@ -11,11 +13,18 @@ import { formatDate } from '../utils/date';
 import { toast } from 'sonner';
 import { useOnboarding } from '../contexts/OnboardingContext';
 import { OnboardingEntryModal } from './OnboardingEntryModal';
+import { queryKeys } from '../queries/queryKeys';
+import { handleUnauthorizedAndRedirect } from '../queries/auth';
+
+interface SessionsResponse {
+  sessions: DashboardData['recent_sessions'];
+}
 
 const POLL_INTERVAL = 5000; // 5 seconds
 
 export function Dashboard() {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
   const {
     onboarding,
@@ -27,20 +36,14 @@ export function Dashboard() {
     selectPath,
     dismissOnboarding,
   } = useOnboarding();
-  const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState('');
   const [recentlyCompleted, setRecentlyCompleted] = useState<Set<string>>(new Set());
   const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null);
-  const [isDeleting, setIsDeleting] = useState<boolean>(false);
   const previousProcessingRef = useRef<string[]>([]);
-  const [deletedSessionCache, setDeletedSessionCache] = useState<any>(null);
+  const [deletedSessionCache, setDeletedSessionCache] = useState<DashboardData['recent_sessions'][number] | null>(null);
   const undoTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [timeAgo, setTimeAgo] = useState<string>('');
-  const [isPolling, setIsPolling] = useState(false);
   const [isManualRefreshing, setIsManualRefreshing] = useState(false);
   const [isLaunchingTutorial, setIsLaunchingTutorial] = useState(false);
   const tutorialPromptedRef = useRef(false);
@@ -61,47 +64,179 @@ export function Dashboard() {
     return `${hours} hours ago`;
   };
 
-  const fetchDashboard = async () => {
-    setLoading(true);
-    setError('');
+  const dashboardQuery = useQuery({
+    queryKey: queryKeys.dashboard.summary,
+    queryFn: fetchDashboardData,
+    refetchInterval: (query) => {
+      const data = query.state.data as DashboardData | undefined;
+      const hasProcessingSessions = data?.recent_sessions?.some(
+        (session) => session.status === 'pending' || session.status === 'processing'
+      );
+      return hasProcessingSessions ? POLL_INTERVAL : false;
+    },
+  });
 
-    try {
-      const data = await fetchDashboardData();
-      setDashboardData(data);
-      setLastUpdated(new Date());
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Failed to load dashboard data';
-      setError(errorMessage);
+  const {
+    data: dashboardData,
+    isLoading: loading,
+    error: dashboardError,
+    refetch: refetchDashboard,
+    isFetching: isFetchingDashboard,
+    dataUpdatedAt,
+  } = dashboardQuery;
+  const error = dashboardError instanceof Error ? dashboardError.message : '';
+  const lastUpdated = dataUpdatedAt ? new Date(dataUpdatedAt) : null;
+  const isPolling = isFetchingDashboard && !isManualRefreshing && !!dashboardData;
 
-      // If unauthorized, redirect to login
-      if (errorMessage.includes('Unauthorized')) {
-        localStorage.removeItem('access_token');
-        localStorage.removeItem('refresh_token');
-        navigate('/login');
-      }
-    } finally {
-      setLoading(false);
-    }
+  const updateSessionsCache = (
+    updater: (sessions: DashboardData['recent_sessions']) => DashboardData['recent_sessions']
+  ) => {
+    queryClient.setQueryData<DashboardData>(queryKeys.dashboard.summary, (current) => {
+      if (!current) return current;
+      return { ...current, recent_sessions: updater(current.recent_sessions) };
+    });
+
+    queryClient.setQueryData<SessionsResponse>(queryKeys.sessions.all, (current) => {
+      if (!current) return current;
+      return { ...current, sessions: updater(current.sessions) };
+    });
   };
+
+  const updateSessionNameMutation = useMutation({
+    mutationFn: ({ sessionId, projectName }: { sessionId: string; projectName: string }) =>
+      updateSessionName(sessionId, projectName),
+    onMutate: async ({ sessionId, projectName }) => {
+      await Promise.all([
+        queryClient.cancelQueries({ queryKey: queryKeys.dashboard.summary }),
+        queryClient.cancelQueries({ queryKey: queryKeys.sessions.all }),
+      ]);
+
+      const previousDashboard = queryClient.getQueryData<DashboardData>(queryKeys.dashboard.summary);
+      const previousSessions = queryClient.getQueryData<SessionsResponse>(queryKeys.sessions.all);
+
+      updateSessionsCache((sessions) =>
+        sessions.map((session) =>
+          session.id === sessionId ? { ...session, project_name: projectName } : session
+        )
+      );
+
+      return { previousDashboard, previousSessions };
+    },
+    onError: (mutationError, _variables, context) => {
+      if (context?.previousDashboard) {
+        queryClient.setQueryData(queryKeys.dashboard.summary, context.previousDashboard);
+      }
+      if (context?.previousSessions) {
+        queryClient.setQueryData(queryKeys.sessions.all, context.previousSessions);
+      }
+
+      if (!handleUnauthorizedAndRedirect(mutationError, navigate)) {
+        console.error('Failed to update session name:', mutationError);
+        toast.error('Failed to update project name. Please try again.');
+      }
+    },
+    onSuccess: () => {
+      setEditingSessionId(null);
+      setEditingName('');
+      toast.success('Project name updated');
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.dashboard.summary });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.sessions.all });
+    },
+  });
+
+  const deleteSessionMutation = useMutation({
+    mutationFn: ({ sessionId }: { sessionId: string }) => deleteSession(sessionId),
+    onMutate: async ({ sessionId }) => {
+      await Promise.all([
+        queryClient.cancelQueries({ queryKey: queryKeys.dashboard.summary }),
+        queryClient.cancelQueries({ queryKey: queryKeys.sessions.all }),
+      ]);
+
+      const previousDashboard = queryClient.getQueryData<DashboardData>(queryKeys.dashboard.summary);
+      const previousSessions = queryClient.getQueryData<SessionsResponse>(queryKeys.sessions.all);
+      const sessionToDelete =
+        previousDashboard?.recent_sessions.find((session) => session.id === sessionId) ??
+        previousSessions?.sessions.find((session) => session.id === sessionId) ??
+        null;
+
+      updateSessionsCache((sessions) => sessions.filter((session) => session.id !== sessionId));
+
+      return { previousDashboard, previousSessions, sessionToDelete };
+    },
+    onError: (mutationError, _variables, context) => {
+      if (context?.previousDashboard) {
+        queryClient.setQueryData(queryKeys.dashboard.summary, context.previousDashboard);
+      }
+      if (context?.previousSessions) {
+        queryClient.setQueryData(queryKeys.sessions.all, context.previousSessions);
+      }
+
+      if (!handleUnauthorizedAndRedirect(mutationError, navigate)) {
+        console.error('Failed to delete session:', mutationError);
+        toast.error(
+          mutationError instanceof Error
+            ? mutationError.message
+            : 'Failed to delete project. Please try again.'
+        );
+      }
+      setDeletingSessionId(null);
+    },
+    onSuccess: (_data, _variables, context) => {
+      if (context?.sessionToDelete) {
+        setDeletedSessionCache(context.sessionToDelete);
+
+        if (undoTimeoutRef.current) {
+          clearTimeout(undoTimeoutRef.current);
+        }
+
+        undoTimeoutRef.current = setTimeout(() => {
+          setDeletedSessionCache(null);
+        }, 8000);
+
+        toast.success('Project deleted', {
+          duration: 8000,
+          action: {
+            label: 'Undo',
+            onClick: () => handleUndoDelete(context.sessionToDelete),
+          },
+        });
+      }
+
+      setDeletingSessionId(null);
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.dashboard.summary });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.sessions.all });
+    },
+  });
+
+  const isDeleting = deletingSessionId !== null && deleteSessionMutation.isPending;
+
+  useEffect(() => {
+    if (dashboardError) {
+      handleUnauthorizedAndRedirect(dashboardError, navigate);
+    }
+  }, [dashboardError, navigate]);
 
   const handleManualRefresh = async () => {
     setIsManualRefreshing(true);
     try {
-      const data = await fetchDashboardData();
-      setDashboardData(data);
-      setLastUpdated(new Date());
+      const result = await refetchDashboard();
+      if (result.error) {
+        throw result.error;
+      }
       toast.success('Dashboard refreshed');
     } catch (err) {
-      console.error('Error refreshing dashboard:', err);
-      toast.error('Failed to refresh dashboard');
+      if (!handleUnauthorizedAndRedirect(err, navigate)) {
+        console.error('Error refreshing dashboard:', err);
+        toast.error('Failed to refresh dashboard');
+      }
     } finally {
       setIsManualRefreshing(false);
     }
   };
-
-  useEffect(() => {
-    fetchDashboard();
-  }, []);
 
   // Update time ago every second
   useEffect(() => {
@@ -111,58 +246,37 @@ export function Dashboard() {
       setTimeAgo(formatTimeAgo(lastUpdated));
     };
 
-    updateTimeAgo(); // Initial update
+    updateTimeAgo();
     const interval = setInterval(updateTimeAgo, 1000);
 
     return () => clearInterval(interval);
   }, [lastUpdated]);
 
-  // Poll for status updates when there are processing sessions
+  // Track newly completed sessions based on query refreshes.
   useEffect(() => {
-    const hasProcessingSessions = dashboardData?.recent_sessions?.some(
-      s => s.status === 'pending' || s.status === 'processing'
-    );
-
-    if (!hasProcessingSessions) {
+    const sessions = dashboardData?.recent_sessions || [];
+    if (sessions.length === 0) {
       previousProcessingRef.current = [];
       return;
     }
 
-    const currentProcessing = dashboardData?.recent_sessions
-      ?.filter(s => s.status === 'pending' || s.status === 'processing')
-      .map(s => s.id) || [];
+    const currentProcessing = sessions
+      .filter((session) => session.status === 'pending' || session.status === 'processing')
+      .map((session) => session.id);
 
-    const pollInterval = setInterval(async () => {
-      setIsPolling(true);
-      try {
-        const data = await fetchDashboardData();
+    const newlyCompleted = previousProcessingRef.current.filter((id) => {
+      const session = sessions.find((item) => item.id === id);
+      return session && session.status === 'completed';
+    });
 
-        const newlyCompleted = previousProcessingRef.current.filter(id => {
-          const session = data.recent_sessions.find(s => s.id === id);
-          return session && session.status === 'completed';
-        });
-
-        if (newlyCompleted.length > 0) {
-          setRecentlyCompleted(new Set(newlyCompleted));
-          setTimeout(() => setRecentlyCompleted(new Set()), 3000);
-        }
-
-        previousProcessingRef.current = data.recent_sessions
-          ?.filter(s => s.status === 'pending' || s.status === 'processing')
-          .map(s => s.id) || [];
-
-        setDashboardData(data);
-        setLastUpdated(new Date());
-      } catch (err) {
-        console.error('Error polling dashboard:', err);
-      } finally {
-        setIsPolling(false);
-      }
-    }, POLL_INTERVAL);
+    if (newlyCompleted.length > 0) {
+      setRecentlyCompleted(new Set(newlyCompleted));
+      const timeoutId = setTimeout(() => setRecentlyCompleted(new Set()), 3000);
+      previousProcessingRef.current = currentProcessing;
+      return () => clearTimeout(timeoutId);
+    }
 
     previousProcessingRef.current = currentProcessing;
-
-    return () => clearInterval(pollInterval);
   }, [dashboardData?.recent_sessions]);
 
   // Auto-show onboarding entry modal for new users or forced replay.
@@ -262,97 +376,34 @@ export function Dashboard() {
     setEditingName('');
   };
 
-  const handleSaveEdit = async (sessionId: string) => {
-    try {
-      await updateSessionName(sessionId, editingName);
-
-      if (dashboardData) {
-        const updatedSessions = dashboardData.recent_sessions.map(session =>
-          session.id === sessionId ? { ...session, project_name: editingName } : session
-        );
-        setDashboardData({ ...dashboardData, recent_sessions: updatedSessions });
-      }
-
-      setEditingSessionId(null);
-      setEditingName('');
-      toast.success('Project name updated');
-    } catch (err) {
-      console.error('Failed to update session name:', err);
-      toast.error('Failed to update project name. Please try again.');
-    }
+  const handleSaveEdit = (sessionId: string) => {
+    updateSessionNameMutation.mutate({ sessionId, projectName: editingName });
   };
 
   const handleDeleteClick = (sessionId: string) => {
     setDeletingSessionId(sessionId);
   };
 
-  const handleConfirmDelete = async () => {
+  const handleConfirmDelete = () => {
     if (!deletingSessionId) return;
-
-    const sessionToDelete = dashboardData?.recent_sessions.find(
-      session => session.id === deletingSessionId
-    );
-
-    if (!sessionToDelete) {
-      setDeletingSessionId(null);
-      return;
-    }
-
-    setIsDeleting(true);
-    try {
-      await deleteSession(deletingSessionId);
-
-      if (dashboardData) {
-        const updatedSessions = dashboardData.recent_sessions.filter(
-          session => session.id !== deletingSessionId
-        );
-        setDashboardData({ ...dashboardData, recent_sessions: updatedSessions });
-      }
-
-      setDeletedSessionCache(sessionToDelete);
-
-      if (undoTimeoutRef.current) {
-        clearTimeout(undoTimeoutRef.current);
-      }
-
-      undoTimeoutRef.current = setTimeout(() => {
-        setDeletedSessionCache(null);
-      }, 8000);
-
-      setDeletingSessionId(null);
-
-      toast.success('Project deleted', {
-        duration: 8000,
-        action: {
-          label: 'Undo',
-          onClick: () => handleUndoDelete(sessionToDelete),
-        },
-      });
-    } catch (err) {
-      console.error('Failed to delete session:', err);
-      toast.error(err instanceof Error ? err.message : 'Failed to delete project. Please try again.');
-      setDeletingSessionId(null);
-    } finally {
-      setIsDeleting(false);
-    }
+    deleteSessionMutation.mutate({ sessionId: deletingSessionId });
   };
 
-  const handleUndoDelete = (session: any) => {
+  const handleUndoDelete = (session: DashboardData['recent_sessions'][number]) => {
     if (undoTimeoutRef.current) {
       clearTimeout(undoTimeoutRef.current);
       undoTimeoutRef.current = null;
     }
 
-    if (dashboardData) {
-      const updatedSessions = [...dashboardData.recent_sessions, session].sort(
+    updateSessionsCache((sessions) =>
+      [...sessions, session].sort(
         (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-      );
-      setDashboardData({ ...dashboardData, recent_sessions: updatedSessions });
-    }
+      )
+    );
 
     setDeletedSessionCache(null);
     toast.success('Project restored');
-    fetchDashboard();
+    void refetchDashboard();
   };
 
   const handleCancelDelete = () => {
@@ -387,7 +438,90 @@ export function Dashboard() {
   if (loading) {
     return (
       <DashboardLayout title="Dashboard">
-        <div className="text-center py-8 text-muted-foreground">Loading dashboard...</div>
+        <div>
+          <div className="grid grid-cols-4 gap-4 mb-6">
+            {Array.from({ length: 4 }).map((_, index) => (
+              <Card key={`stats-skeleton-${index}`} className="!gap-0 p-5 flex flex-col justify-between">
+                <div className="flex items-center justify-between">
+                  <Skeleton className="h-4 w-28" />
+                  <Skeleton className="h-4 w-4 rounded" />
+                </div>
+                <div className="mt-3">
+                  <Skeleton className="h-9 w-24" />
+                  <Skeleton className="h-3 w-36 mt-2" />
+                </div>
+              </Card>
+            ))}
+          </div>
+
+          <div className="flex justify-between items-center mb-4">
+            <div className="flex items-center gap-3">
+              <Skeleton className="h-6 w-28" />
+              <Skeleton className="h-4 w-24" />
+            </div>
+            <div className="flex items-center gap-2">
+              <Skeleton className="h-9 w-24" />
+              <Skeleton className="h-9 w-24" />
+            </div>
+          </div>
+
+          <Card>
+            <div className="overflow-hidden">
+              <table className="w-full">
+                <thead className="bg-muted border-b border-border">
+                  <tr>
+                    <th className="text-left p-4 text-muted-foreground text-sm">Project Name</th>
+                    <th className="text-left p-4 text-muted-foreground text-sm">Date</th>
+                    <th className="text-left p-4 text-muted-foreground text-sm">Redirects</th>
+                    <th className="text-left p-4 text-muted-foreground text-sm">Status</th>
+                    <th className="text-left p-4 text-muted-foreground text-sm">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {Array.from({ length: 6 }).map((_, index) => (
+                    <tr key={`job-row-skeleton-${index}`} className="border-b border-border">
+                      <td className="p-4">
+                        <div className="flex items-center gap-2">
+                          <Skeleton className="h-4 w-48" />
+                          <Skeleton className="h-3 w-3 rounded" />
+                        </div>
+                      </td>
+                      <td className="p-4">
+                        <Skeleton className="h-4 w-28" />
+                      </td>
+                      <td className="p-4">
+                        <Skeleton className="h-4 w-10" />
+                      </td>
+                      <td className="p-4">
+                        <Skeleton className="h-6 w-20" />
+                      </td>
+                      <td className="p-4">
+                        <div className="flex items-center gap-2">
+                          <Skeleton className="h-8 w-24" />
+                          <Skeleton className="h-8 w-8" />
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+
+          <Card className="!gap-0 p-5 mt-6">
+            <div className="flex items-center justify-between mb-4">
+              <Skeleton className="h-4 w-36" />
+              <Skeleton className="h-4 w-32" />
+            </div>
+            <Skeleton className="h-4 w-full rounded-full" />
+            <div className="flex items-center gap-6 mt-4">
+              <Skeleton className="h-4 w-28" />
+              <Skeleton className="h-4 w-28" />
+              <Skeleton className="h-4 w-28" />
+              <Skeleton className="h-4 w-28" />
+            </div>
+          </Card>
+        </div>
       </DashboardLayout>
     );
   }
@@ -398,7 +532,7 @@ export function Dashboard() {
         <div className="bg-destructive/10 border border-destructive/50 text-destructive px-4 py-3 rounded mb-4">
           {error}
         </div>
-        <Button onClick={fetchDashboard}>Retry</Button>
+        <Button onClick={() => { void refetchDashboard(); }}>Retry</Button>
       </DashboardLayout>
     );
   }

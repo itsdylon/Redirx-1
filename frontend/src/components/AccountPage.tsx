@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { Header } from './Header';
@@ -7,25 +8,12 @@ import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Separator } from './ui/separator';
 import { ArrowLeft, User, Building, Mail, CreditCard, BarChart3, Clock, Zap } from 'lucide-react';
-import { API_BASE_URL, getAuthHeaders } from '../api/config';
+import { fetchAllSessions } from '../api/sessions';
 import { formatDate } from '../utils/date';
 import { getSubscriptionStatus, type SubscriptionStatus } from '../api/billing';
-
-interface UserProfile {
-  id: string;
-  email: string;
-  full_name: string;
-  company: string;
-  plan: string;
-  credits_limit: number;
-  credits_used: number;
-  is_lifetime?: boolean;
-  lifetime_credits_total?: number;
-  lifetime_credits_used?: number;
-  quick_match_limit?: number | null;
-  quick_match_used?: number;
-  trial_expires_at?: string;
-}
+import { getUserProfile, updateUserProfile, type UserProfile } from '../api/user';
+import { queryKeys } from '../queries/queryKeys';
+import { handleUnauthorizedAndRedirect } from '../queries/auth';
 
 interface MigrationSession {
   id: string;
@@ -35,106 +23,90 @@ interface MigrationSession {
 }
 
 export function AccountPage() {
-  const { user } = useAuth();
+  const { user, refreshSession } = useAuth();
+  const queryClient = useQueryClient();
   const navigate = useNavigate();
 
-  const [profile, setProfile] = useState<UserProfile | null>(null);
-  const [sessions, setSessions] = useState<MigrationSession[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
-  const [subscription, setSubscription] = useState<SubscriptionStatus | null>(null);
 
   // Form state for editing
   const [editMode, setEditMode] = useState(false);
   const [fullName, setFullName] = useState('');
   const [company, setCompany] = useState('');
 
+  const profileQuery = useQuery({
+    queryKey: queryKeys.user.profile,
+    queryFn: getUserProfile,
+  });
+  const sessionsQuery = useQuery({
+    queryKey: queryKeys.sessions.all,
+    queryFn: fetchAllSessions,
+  });
+  const subscriptionQuery = useQuery({
+    queryKey: queryKeys.billing.subscription,
+    queryFn: getSubscriptionStatus,
+  });
 
-  const fetchProfileAndSessions = async () => {
-    setLoading(true);
-    setError('');
-    try {
-      // Fetch profile
-      const profileRes = await fetch(`${API_BASE_URL}/api/user/profile`, {
-        headers: getAuthHeaders()
-      });
+  const loading = profileQuery.isLoading || sessionsQuery.isLoading;
 
-      if (profileRes.ok) {
-        const profileData = await profileRes.json();
-        setProfile(profileData.profile);
-        setFullName(profileData.profile.full_name || '');
-        setCompany(profileData.profile.company || '');
-      } else {
-        // If profile fetch fails, use data from auth context
-        setProfile({
-          id: user?.id || '',
-          email: user?.email || '',
-          full_name: user?.full_name || '',
-          company: '',
-          plan: user?.plan || 'launch',
-          credits_limit: user?.credits_limit || 0,
-          credits_used: user?.credits_used || 0,
-        });
-        setFullName(user?.full_name || '');
-      }
+  const fallbackProfile = useMemo<UserProfile>(() => ({
+    id: user?.id || '',
+    email: user?.email || '',
+    full_name: user?.full_name || '',
+    company: '',
+    plan: user?.plan || 'launch',
+    credits_limit: user?.credits_limit || 0,
+    credits_used: user?.credits_used || 0,
+  }), [user]);
 
-      // Fetch sessions
-      const sessionsRes = await fetch(`${API_BASE_URL}/api/user/sessions`, {
-        headers: getAuthHeaders()
-      });
-
-      if (sessionsRes.ok) {
-        const sessionsData = await sessionsRes.json();
-        setSessions(sessionsData.sessions || []);
-      }
-
-      // Fetch subscription status
-      try {
-        const sub = await getSubscriptionStatus();
-        setSubscription(sub);
-      } catch {
-        // Non-critical - leave subscription as null
-      }
-    } catch (err) {
-      setError('Failed to load profile data');
-    } finally {
-      setLoading(false);
-    }
-  };
+  const profile = profileQuery.data?.profile ?? fallbackProfile;
+  const sessions = (sessionsQuery.data?.sessions as MigrationSession[] | undefined) || [];
+  const subscription: SubscriptionStatus | null = subscriptionQuery.data ?? null;
 
   useEffect(() => {
-    fetchProfileAndSessions();
-  }, []);
+    const queryErrors = [profileQuery.error, sessionsQuery.error, subscriptionQuery.error];
+    for (const queryError of queryErrors) {
+      if (!queryError) continue;
+      if (!handleUnauthorizedAndRedirect(queryError, navigate)) {
+        setError('Failed to load profile data');
+      }
+    }
+  }, [navigate, profileQuery.error, sessionsQuery.error, subscriptionQuery.error]);
+
+  useEffect(() => {
+    if (!profile) return;
+    if (editMode) return;
+    setFullName(profile.full_name || '');
+    setCompany(profile.company || '');
+  }, [editMode, profile]);
+
+  const updateProfileMutation = useMutation({
+    mutationFn: (payload: { full_name: string; company: string }) =>
+      updateUserProfile(payload),
+    onSuccess: async () => {
+      setSuccessMessage('Profile updated successfully');
+      setEditMode(false);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.user.profile }),
+        refreshSession(),
+      ]);
+    },
+    onError: (mutationError) => {
+      if (!handleUnauthorizedAndRedirect(mutationError, navigate)) {
+        setError('Failed to update profile');
+      }
+    },
+  });
 
   const handleSave = async () => {
-    setSaving(true);
     setError('');
     setSuccessMessage('');
 
     try {
-      const response = await fetch(`${API_BASE_URL}/api/user/profile`, {
-        method: 'PUT',
-        headers: getAuthHeaders(),
-        body: JSON.stringify({
-          full_name: fullName,
-          company: company
-        })
-      });
-
-      if (response.ok) {
-        setSuccessMessage('Profile updated successfully');
-        setEditMode(false);
-        await fetchProfileAndSessions();
-      } else {
-        const data = await response.json();
-        setError(data.error || 'Failed to update profile');
-      }
-    } catch (err) {
-      setError('Failed to update profile');
-    } finally {
-      setSaving(false);
+      await updateProfileMutation.mutateAsync({ full_name: fullName, company });
+    } catch {
+      // Error state is set in mutation onError.
     }
   };
 
@@ -211,8 +183,8 @@ export function AccountPage() {
                       />
                     </div>
                     <div className="flex gap-2">
-                      <Button onClick={handleSave} disabled={saving}>
-                        {saving ? 'Saving...' : 'Save Changes'}
+                      <Button onClick={handleSave} disabled={updateProfileMutation.isPending}>
+                        {updateProfileMutation.isPending ? 'Saving...' : 'Save Changes'}
                       </Button>
                       <Button variant="outline" onClick={handleCancel}>
                         Cancel

@@ -1,12 +1,16 @@
-import { useState, useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { DashboardLayout } from './DashboardLayout';
 import { Card } from './ui/card';
 import { Button } from './ui/button';
 import { Clock, Pencil, Check, X, Loader2, Trash2, Search } from 'lucide-react';
 import { fetchAllSessions, updateSessionName, deleteSession } from '../api/sessions';
+import { DashboardData } from '../api/dashboard';
 import { formatDate } from '../utils/date';
 import { toast } from 'sonner';
+import { queryKeys } from '../queries/queryKeys';
+import { handleUnauthorizedAndRedirect } from '../queries/auth';
 
 interface Session {
   id: string;
@@ -19,10 +23,7 @@ interface Session {
 
 export function AllProjects() {
   const navigate = useNavigate();
-  const [sessions, setSessions] = useState<Session[]>([]);
-  const [filteredSessions, setFilteredSessions] = useState<Session[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
+  const queryClient = useQueryClient();
   const [searchQuery, setSearchQuery] = useState('');
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState('');
@@ -30,45 +31,160 @@ export function AllProjects() {
   const [deletedSessionCache, setDeletedSessionCache] = useState<Session | null>(null);
   const undoTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  const fetchSessions = async () => {
-    setLoading(true);
-    setError('');
+  const sessionsQuery = useQuery({
+    queryKey: queryKeys.sessions.all,
+    queryFn: fetchAllSessions,
+  });
 
-    try {
-      const data = await fetchAllSessions();
-      setSessions(data.sessions);
-      setFilteredSessions(data.sessions);
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Failed to load projects';
-      setError(errorMessage);
+  const sessions = (sessionsQuery.data?.sessions as Session[] | undefined) || [];
+  const loading = sessionsQuery.isLoading;
+  const error = sessionsQuery.error instanceof Error ? sessionsQuery.error.message : '';
 
-      // If unauthorized, redirect to login
-      if (errorMessage.includes('Unauthorized')) {
-        localStorage.removeItem('access_token');
-        localStorage.removeItem('refresh_token');
-        navigate('/login');
-      }
-    } finally {
-      setLoading(false);
+  const filteredSessions = useMemo(() => {
+    if (searchQuery.trim() === '') {
+      return sessions;
     }
+
+    const query = searchQuery.toLowerCase();
+    return sessions.filter((session) =>
+      (session.project_name || 'Untitled Session').toLowerCase().includes(query) ||
+      session.status.toLowerCase().includes(query)
+    );
+  }, [searchQuery, sessions]);
+
+  const updateSessionsCache = (
+    updater: (currentSessions: Session[]) => Session[]
+  ) => {
+    queryClient.setQueryData<{ sessions: Session[] }>(queryKeys.sessions.all, (current) => {
+      if (!current) return current;
+      return { ...current, sessions: updater(current.sessions) };
+    });
+
+    queryClient.setQueryData<DashboardData>(queryKeys.dashboard.summary, (current) => {
+      if (!current) return current;
+      return { ...current, recent_sessions: updater(current.recent_sessions as Session[]) };
+    });
   };
 
   useEffect(() => {
-    fetchSessions();
-  }, []);
-
-  useEffect(() => {
-    if (searchQuery.trim() === '') {
-      setFilteredSessions(sessions);
-    } else {
-      const query = searchQuery.toLowerCase();
-      const filtered = sessions.filter(session =>
-        (session.project_name || 'Untitled Session').toLowerCase().includes(query) ||
-        session.status.toLowerCase().includes(query)
-      );
-      setFilteredSessions(filtered);
+    if (sessionsQuery.error) {
+      handleUnauthorizedAndRedirect(sessionsQuery.error, navigate);
     }
-  }, [searchQuery, sessions]);
+  }, [navigate, sessionsQuery.error]);
+
+  const updateSessionNameMutation = useMutation({
+    mutationFn: ({ sessionId, projectName }: { sessionId: string; projectName: string }) =>
+      updateSessionName(sessionId, projectName),
+    onMutate: async ({ sessionId, projectName }) => {
+      await Promise.all([
+        queryClient.cancelQueries({ queryKey: queryKeys.sessions.all }),
+        queryClient.cancelQueries({ queryKey: queryKeys.dashboard.summary }),
+      ]);
+
+      const previousSessions = queryClient.getQueryData<{ sessions: Session[] }>(queryKeys.sessions.all);
+      const previousDashboard = queryClient.getQueryData<DashboardData>(queryKeys.dashboard.summary);
+
+      updateSessionsCache((currentSessions) =>
+        currentSessions.map((session) =>
+          session.id === sessionId ? { ...session, project_name: projectName } : session
+        )
+      );
+
+      return { previousSessions, previousDashboard };
+    },
+    onError: (mutationError, _variables, context) => {
+      if (context?.previousSessions) {
+        queryClient.setQueryData(queryKeys.sessions.all, context.previousSessions);
+      }
+      if (context?.previousDashboard) {
+        queryClient.setQueryData(queryKeys.dashboard.summary, context.previousDashboard);
+      }
+
+      if (!handleUnauthorizedAndRedirect(mutationError, navigate)) {
+        console.error('Failed to update session name:', mutationError);
+        toast.error('Failed to update project name. Please try again.');
+      }
+    },
+    onSuccess: () => {
+      setEditingSessionId(null);
+      setEditingName('');
+      toast.success('Project name updated');
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.sessions.all });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.dashboard.summary });
+    },
+  });
+
+  const deleteSessionMutation = useMutation({
+    mutationFn: ({ sessionId }: { sessionId: string }) => deleteSession(sessionId),
+    onMutate: async ({ sessionId }) => {
+      await Promise.all([
+        queryClient.cancelQueries({ queryKey: queryKeys.sessions.all }),
+        queryClient.cancelQueries({ queryKey: queryKeys.dashboard.summary }),
+      ]);
+
+      const previousSessions = queryClient.getQueryData<{ sessions: Session[] }>(queryKeys.sessions.all);
+      const previousDashboard = queryClient.getQueryData<DashboardData>(queryKeys.dashboard.summary);
+      const sessionToDelete =
+        previousSessions?.sessions.find((session) => session.id === sessionId) ||
+        (previousDashboard?.recent_sessions.find((session) => session.id === sessionId) as Session | undefined) ||
+        null;
+
+      updateSessionsCache((currentSessions) =>
+        currentSessions.filter((session) => session.id !== sessionId)
+      );
+
+      return { previousSessions, previousDashboard, sessionToDelete };
+    },
+    onError: (mutationError, _variables, context) => {
+      if (context?.previousSessions) {
+        queryClient.setQueryData(queryKeys.sessions.all, context.previousSessions);
+      }
+      if (context?.previousDashboard) {
+        queryClient.setQueryData(queryKeys.dashboard.summary, context.previousDashboard);
+      }
+
+      if (!handleUnauthorizedAndRedirect(mutationError, navigate)) {
+        console.error('Failed to delete session:', mutationError);
+        toast.error(
+          mutationError instanceof Error
+            ? mutationError.message
+            : 'Failed to delete project. Please try again.'
+        );
+      }
+      setDeletingSessionId(null);
+    },
+    onSuccess: (_data, _variables, context) => {
+      if (context?.sessionToDelete) {
+        setDeletedSessionCache(context.sessionToDelete);
+
+        if (undoTimeoutRef.current) {
+          clearTimeout(undoTimeoutRef.current);
+        }
+
+        undoTimeoutRef.current = setTimeout(() => {
+          setDeletedSessionCache(null);
+        }, 8000);
+
+        toast.success('Project deleted', {
+          duration: 8000,
+          action: {
+            label: 'Undo',
+            onClick: () => handleUndoDelete(context.sessionToDelete),
+          },
+        });
+      }
+
+      setDeletingSessionId(null);
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.sessions.all });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.dashboard.summary });
+    },
+  });
+
+  const isDeleting = deletingSessionId !== null && deleteSessionMutation.isPending;
 
   const handleStartEdit = (sessionId: string, currentName: string) => {
     setEditingSessionId(sessionId);
@@ -80,79 +196,17 @@ export function AllProjects() {
     setEditingName('');
   };
 
-  const handleSaveEdit = async (sessionId: string) => {
-    try {
-      await updateSessionName(sessionId, editingName);
-
-      // Update local state optimistically
-      const updatedSessions = sessions.map(session =>
-        session.id === sessionId ? { ...session, project_name: editingName } : session
-      );
-      setSessions(updatedSessions);
-
-      setEditingSessionId(null);
-      setEditingName('');
-      toast.success('Project name updated');
-    } catch (err) {
-      console.error('Failed to update session name:', err);
-      toast.error('Failed to update project name. Please try again.');
-    }
+  const handleSaveEdit = (sessionId: string) => {
+    updateSessionNameMutation.mutate({ sessionId, projectName: editingName });
   };
 
   const handleDeleteClick = (sessionId: string) => {
     setDeletingSessionId(sessionId);
   };
 
-  const handleConfirmDelete = async () => {
+  const handleConfirmDelete = () => {
     if (!deletingSessionId) return;
-
-    // Cache the session data before deletion
-    const sessionToDelete = sessions.find(
-      session => session.id === deletingSessionId
-    );
-
-    if (!sessionToDelete) {
-      setDeletingSessionId(null);
-      return;
-    }
-
-    try {
-      await deleteSession(deletingSessionId);
-
-      // Update local state by removing the deleted session
-      const updatedSessions = sessions.filter(
-        session => session.id !== deletingSessionId
-      );
-      setSessions(updatedSessions);
-
-      // Cache the deleted session for undo
-      setDeletedSessionCache(sessionToDelete);
-
-      // Clear any existing undo timeout
-      if (undoTimeoutRef.current) {
-        clearTimeout(undoTimeoutRef.current);
-      }
-
-      // Set timeout to clear cache after 8 seconds
-      undoTimeoutRef.current = setTimeout(() => {
-        setDeletedSessionCache(null);
-      }, 8000);
-
-      setDeletingSessionId(null);
-
-      // Show toast with undo action
-      toast.success('Project deleted', {
-        duration: 8000,
-        action: {
-          label: 'Undo',
-          onClick: () => handleUndoDelete(sessionToDelete),
-        },
-      });
-    } catch (err) {
-      console.error('Failed to delete session:', err);
-      toast.error(err instanceof Error ? err.message : 'Failed to delete project. Please try again.');
-      setDeletingSessionId(null);
-    }
+    deleteSessionMutation.mutate({ sessionId: deletingSessionId });
   };
 
   const handleUndoDelete = (session: Session) => {
@@ -162,11 +216,11 @@ export function AllProjects() {
       undoTimeoutRef.current = null;
     }
 
-    // Restore the session to local state
-    const updatedSessions = [...sessions, session].sort(
-      (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+    updateSessionsCache((currentSessions) =>
+      [...currentSessions, session].sort(
+        (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+      )
     );
-    setSessions(updatedSessions);
 
     // Clear the cache
     setDeletedSessionCache(null);
@@ -174,8 +228,7 @@ export function AllProjects() {
     // Show success toast
     toast.success('Project restored');
 
-    // Refresh sessions data to ensure consistency
-    fetchSessions();
+    void sessionsQuery.refetch();
   };
 
   const handleCancelDelete = () => {
@@ -196,7 +249,7 @@ export function AllProjects() {
         <div className="bg-destructive/10 border border-destructive/50 text-destructive px-4 py-3 rounded mb-4">
           {error}
         </div>
-        <Button onClick={fetchSessions}>Retry</Button>
+        <Button onClick={() => { void sessionsQuery.refetch(); }}>Retry</Button>
       </DashboardLayout>
     );
   }
@@ -346,14 +399,16 @@ export function AllProjects() {
               redirect mappings and cannot be undone.
             </p>
             <div className="flex justify-end gap-3">
-              <Button variant="outline" onClick={handleCancelDelete}>
+              <Button variant="outline" onClick={handleCancelDelete} disabled={isDeleting}>
                 Cancel
               </Button>
               <Button
                 variant="destructive"
                 onClick={handleConfirmDelete}
+                disabled={isDeleting}
               >
-                Delete Project
+                {isDeleting && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+                {isDeleting ? 'Deleting...' : 'Delete Project'}
               </Button>
             </div>
           </Card>

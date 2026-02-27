@@ -2,9 +2,11 @@ import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 import { ThemeProvider } from "next-themes";
 import { PostHogProvider } from "@posthog/react";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { AuthProvider } from "./contexts/AuthContext";
 import { AppWithToaster } from "./App.tsx";
 import { OnboardingProvider } from "./contexts/OnboardingContext";
+import { appQueryClient } from "./queries/queryClient";
 import "./styles/globals.css";
 
 const posthogOptions = {
@@ -19,11 +21,13 @@ createRoot(document.getElementById("root")!).render(
   >
     <BrowserRouter>
       <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
-        <AuthProvider>
-          <OnboardingProvider>
-            <AppWithToaster />
-          </OnboardingProvider>
-        </AuthProvider>
+        <QueryClientProvider client={appQueryClient}>
+          <AuthProvider>
+            <OnboardingProvider>
+              <AppWithToaster />
+            </OnboardingProvider>
+          </AuthProvider>
+        </QueryClientProvider>
       </ThemeProvider>
     </BrowserRouter>
   </PostHogProvider>

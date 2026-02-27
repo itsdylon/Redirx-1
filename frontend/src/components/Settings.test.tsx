@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 // ---------------------------------------------------------------------------
 // Mocks — must come before importing the component
@@ -100,7 +101,17 @@ async function renderSettings(tab?: string) {
   if (tab) {
     mockSearchParams.set('tab', tab);
   }
-  const result = render(<Settings />);
+  const queryClient = new QueryClient({
+    defaultOptions: {
+      queries: { retry: false },
+      mutations: { retry: false },
+    },
+  });
+  const result = render(
+    <QueryClientProvider client={queryClient}>
+      <Settings />
+    </QueryClientProvider>
+  );
   // Wait for billing + email prefs fetches to complete
   await waitFor(() => {
     // The component should have finished at least one render cycle
@@ -337,7 +348,7 @@ describe('Settings — Notifications Tab', () => {
     mockGetEmailPreferences.mockReturnValue(new Promise(() => {}));
 
     const user = userEvent.setup();
-    render(<Settings />);
+    await renderSettings();
     await user.click(screen.getByRole('tab', { name: /Notifications/i }));
 
     expect(screen.getByText('Loading preferences...')).toBeInTheDocument();

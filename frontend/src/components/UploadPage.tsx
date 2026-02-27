@@ -9,6 +9,8 @@ import { LoadingScreen } from './LoadingScreen';
 import { Button } from './ui/button';
 import { AlertTriangle, Loader2, Zap, Search, Info, ShieldAlert } from 'lucide-react';
 import { validateFile, FileValidationResult } from '../utils/validation';
+import { appQueryClient } from '../queries/queryClient';
+import { queryKeys } from '../queries/queryKeys';
 
 interface FileData {
   name: string;
@@ -226,6 +228,8 @@ export function UploadPage() {
         if (sample.session_id) {
           setCurrentSessionId(sample.session_id);
         }
+        void appQueryClient.invalidateQueries({ queryKey: queryKeys.dashboard.summary });
+        void appQueryClient.invalidateQueries({ queryKey: queryKeys.sessions.all });
         await completeStep('generate_mappings');
         setIsUploading(false);
       } catch (err) {
@@ -287,6 +291,8 @@ export function UploadPage() {
       if (result.session_id) {
         setCurrentSessionId(result.session_id);
       }
+      void appQueryClient.invalidateQueries({ queryKey: queryKeys.dashboard.summary });
+      void appQueryClient.invalidateQueries({ queryKey: queryKeys.sessions.all });
       if (tutorialActive) {
         await completeStep('generate_mappings');
       }

@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { useHotkeys } from 'react-hotkeys-hook';
 import { DashboardLayout } from './DashboardLayout';
@@ -22,6 +23,8 @@ import { isMac } from '../lib/keyboard';
 import { useOnboarding } from '../contexts/OnboardingContext';
 import { useAuth } from '../contexts/AuthContext';
 import { DeepMatchPreviewCard } from './DeepMatchPreviewCard';
+import { queryKeys } from '../queries/queryKeys';
+import { handleUnauthorizedAndRedirect } from '../queries/auth';
 import {
   Dialog,
   DialogContent,
@@ -81,13 +84,10 @@ export function ReviewInterface() {
   const [currentPage, setCurrentPage] = useState(1);
   const [exportModalOpen, setExportModalOpen] = useState(false);
   const [keyboardShortcutsOpen, setKeyboardShortcutsOpen] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [sortOption, setSortOption] = useState<string>('confidence-desc');
   const [showExactMatches, setShowExactMatches] = useState(true);
   const [pipelineType, setPipelineType] = useState<string>('content');
-  const [deepPreview, setDeepPreview] = useState<DeepPreviewResponse | null>(null);
-  const [deepPreviewError, setDeepPreviewError] = useState<string | null>(null);
   const [showTutorialSuccess, setShowTutorialSuccess] = useState(false);
   const [showCoachmarks, setShowCoachmarks] = useState(false);
   const [samplePreparationActive, setSamplePreparationActive] = useState(false);
@@ -98,6 +98,7 @@ export function ReviewInterface() {
   const searchInputRef = useRef<HTMLInputElement>(null);
   const sampleGenerateMarkedRef = useRef(false);
   const tutorialReviewMarkedRef = useRef(false);
+  const hydratedSessionRef = useRef<string | null>(null);
   const tutorialFromQuery = searchParams.get('tutorial') === '1';
   const tutorialActive = !!onboarding &&
     onboarding.onboarding_status === 'in_progress' &&
@@ -105,74 +106,82 @@ export function ReviewInterface() {
   const isSampleTutorial = tutorialActive && onboarding?.onboarding_state.path === 'sample';
   const sampleTutorialBanner = tutorialFromQuery && onboarding?.onboarding_state.path === 'sample';
 
-  // Fetch results from backend when sessionId is available
+  const resultsQuery = useQuery({
+    queryKey: queryKeys.results.bySession(sessionId || ''),
+    queryFn: () => getResults(sessionId!),
+    enabled: !!sessionId,
+  });
+
+  const deepPreviewEnabled = !!sessionId && pipelineType === 'url_only' && isLaunchUser;
+  const deepPreviewQuery = useQuery({
+    queryKey: queryKeys.results.deepPreview(sessionId || ''),
+    queryFn: () => getDeepPreview(sessionId!),
+    enabled: deepPreviewEnabled,
+    refetchInterval: (query) => {
+      const data = query.state.data as DeepPreviewResponse | undefined;
+      if (data?.status === 'queued' || data?.status === 'processing') {
+        return 4000;
+      }
+      return false;
+    },
+  });
+
+  const deepPreview = deepPreviewEnabled ? deepPreviewQuery.data ?? null : null;
+  const deepPreviewError =
+    deepPreviewEnabled && deepPreviewQuery.error
+      ? (deepPreviewQuery.error instanceof Error
+          ? deepPreviewQuery.error.message
+          : 'Unable to load Deep Match preview.')
+      : null;
+
+  const isLoading =
+    resultsQuery.isLoading ||
+    (resultsQuery.isFetching && hydratedSessionRef.current !== sessionId);
+
   useEffect(() => {
-    async function fetchResults() {
-      if (!sessionId) {
-        setError("No session ID provided");
-        setIsLoading(false);
-        return;
-      }
-
-      try {
-        setIsLoading(true);
-        setError(null);
-        const data = await getResults(sessionId);
-
-        if (data.success && data.mappings) {
-          setRedirects(data.mappings);
-          if (data.session?.pipeline_type) {
-            setPipelineType(data.session.pipeline_type);
-          }
-        } else {
-          setError("Failed to load results");
-        }
-      } catch (err) {
-        console.error("Error fetching results:", err);
-        setError(err instanceof Error ? err.message : "Failed to fetch results");
-      } finally {
-        setIsLoading(false);
-      }
-    }
-
-    fetchResults();
+    hydratedSessionRef.current = null;
+    setRedirects([]);
+    setPipelineType('content');
+    setError(null);
   }, [sessionId]);
 
   useEffect(() => {
-    if (!sessionId) return;
-    if (!(pipelineType === 'url_only' && isLaunchUser)) {
-      setDeepPreview(null);
-      setDeepPreviewError(null);
+    if (!sessionId) {
+      setError('No session ID provided');
       return;
     }
 
-    let cancelled = false;
-    let timeoutId: number | null = null;
+    if (!resultsQuery.data || hydratedSessionRef.current === sessionId) {
+      return;
+    }
 
-    const pollPreview = async () => {
-      try {
-        const data = await getDeepPreview(sessionId);
-        if (cancelled) return;
-        setDeepPreview(data);
-        setDeepPreviewError(null);
-
-        if (data.status === 'queued' || data.status === 'processing') {
-          timeoutId = window.setTimeout(pollPreview, 4000);
-        }
-      } catch (err) {
-        if (cancelled) return;
-        setDeepPreviewError(err instanceof Error ? err.message : 'Unable to load Deep Match preview.');
+    if (resultsQuery.data.success && resultsQuery.data.mappings) {
+      setRedirects(resultsQuery.data.mappings);
+      if (resultsQuery.data.session?.pipeline_type) {
+        setPipelineType(resultsQuery.data.session.pipeline_type);
       }
-    };
+      setError(null);
+    } else {
+      setError('Failed to load results');
+    }
 
-    pollPreview();
-    return () => {
-      cancelled = true;
-      if (timeoutId !== null) {
-        window.clearTimeout(timeoutId);
-      }
-    };
-  }, [sessionId, pipelineType, isLaunchUser]);
+    hydratedSessionRef.current = sessionId;
+  }, [resultsQuery.data, sessionId]);
+
+  useEffect(() => {
+    if (!resultsQuery.error) return;
+    if (handleUnauthorizedAndRedirect(resultsQuery.error, navigate)) return;
+    setError(
+      resultsQuery.error instanceof Error
+        ? resultsQuery.error.message
+        : 'Failed to fetch results'
+    );
+  }, [resultsQuery.error, navigate]);
+
+  useEffect(() => {
+    if (!deepPreviewQuery.error) return;
+    handleUnauthorizedAndRedirect(deepPreviewQuery.error, navigate);
+  }, [deepPreviewQuery.error, navigate]);
 
   useEffect(() => {
     if (!tutorialActive) {

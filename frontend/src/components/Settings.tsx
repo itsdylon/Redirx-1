@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { usePostHog } from '@posthog/react';
 import { User, Settings2, Bell, CreditCard, Check, Loader2, AlertTriangle, RefreshCw, ExternalLink, Crown, ArrowRight } from 'lucide-react';
@@ -27,16 +28,16 @@ import {
   getPlans,
   createCheckoutSession,
   createPortalSession,
-
-  type SubscriptionStatus,
-  type PlanInfo,
 } from '../api/billing';
-import { API_BASE_URL, getAuthHeaders } from '../api/config';
 import { getEmailPreferences, updateEmailPreference } from '../api/email';
-import { ApiError, throwApiErrorFromResponse } from '../utils/errorHandler';
+import { updateUserProfile } from '../api/user';
+import { ApiError } from '../utils/errorHandler';
+import { queryKeys } from '../queries/queryKeys';
+import { handleUnauthorizedAndRedirect } from '../queries/auth';
 
 export function Settings() {
   const { user, refreshSession } = useAuth();
+  const queryClient = useQueryClient();
   const posthog = usePostHog();
   const navigate = useNavigate();
   const {
@@ -51,7 +52,6 @@ export function Settings() {
 
   // Profile state
   const [fullName, setFullName] = useState(user?.full_name || '');
-  const [profileSaving, setProfileSaving] = useState(false);
 
   // Defaults state (loaded from localStorage)
   const [exportFormat, setExportFormat] = useState(() =>
@@ -73,15 +73,8 @@ export function Settings() {
   // Notifications state
   const [emailJobCompleted, setEmailJobCompleted] = useState(true);
   const [emailJobFailed, setEmailJobFailed] = useState(true);
-  const [notificationsLoading, setNotificationsLoading] = useState(true);
-  const [notificationsSaving, setNotificationsSaving] = useState(false);
 
-  // Subscription state
-  const [subscription, setSubscription] = useState<SubscriptionStatus | null>(null);
-  const [plans, setPlans] = useState<PlanInfo[]>([]);
   const [billingCycle, setBillingCycle] = useState<'monthly' | 'annual'>('monthly');
-  const [loadingSubscription, setLoadingSubscription] = useState(true);
-  const [subscriptionError, setSubscriptionError] = useState<string | null>(null);
   const [checkoutLoading, setCheckoutLoading] = useState<string | null>(null);
   const [portalLoading, setPortalLoading] = useState(false);
   const [founderCheckoutLoading, setFounderCheckoutLoading] = useState(false);
@@ -102,45 +95,68 @@ export function Settings() {
     return fallback;
   };
 
+  const subscriptionQuery = useQuery({
+    queryKey: queryKeys.billing.subscription,
+    queryFn: getSubscriptionStatus,
+  });
+
+  const plansQuery = useQuery({
+    queryKey: queryKeys.billing.plans,
+    queryFn: getPlans,
+  });
+
+  const emailPreferencesQuery = useQuery({
+    queryKey: queryKeys.email.preferences,
+    queryFn: getEmailPreferences,
+  });
+
+  const subscription = subscriptionQuery.data ?? null;
+  const plans = plansQuery.data ?? [];
+  const loadingSubscription = subscriptionQuery.isLoading || plansQuery.isLoading;
+  const subscriptionError =
+    subscriptionQuery.error
+      ? getErrorMessage(subscriptionQuery.error, 'Unable to load subscription details right now.')
+      : plansQuery.error
+        ? getErrorMessage(plansQuery.error, 'Unable to load subscription details right now.')
+        : null;
+  const notificationsLoading = emailPreferencesQuery.isLoading;
+
   const fetchBillingData = useCallback(async () => {
-    setLoadingSubscription(true);
-    setSubscriptionError(null);
     try {
-      const [sub, planList] = await Promise.all([
-        getSubscriptionStatus(),
-        getPlans(),
+      await Promise.all([
+        subscriptionQuery.refetch(),
+        plansQuery.refetch(),
       ]);
-      setSubscription(sub);
-      setPlans(planList);
-    } catch (err: unknown) {
-      setSubscriptionError(getErrorMessage(err, 'Unable to load subscription details right now.'));
-    } finally {
-      setLoadingSubscription(false);
+    } catch {
+      // UI is already driven by query error state.
     }
-  }, []);
+  }, [plansQuery, subscriptionQuery]);
 
-  // Fetch subscription status and plans on mount
   useEffect(() => {
-    fetchBillingData();
-  }, [fetchBillingData]);
+    setFullName(user?.full_name || '');
+  }, [user?.full_name]);
 
-  // Fetch email preferences on mount
   useEffect(() => {
-    const fetchPrefs = async () => {
-      try {
-        const prefs = await getEmailPreferences();
-        for (const p of prefs) {
-          if (p.email_type === 'mapping_complete') setEmailJobCompleted(!p.opted_out);
-          if (p.email_type === 'mapping_failed') setEmailJobFailed(!p.opted_out);
-        }
-      } catch {
-        // Defaults remain true (opted-in) if fetch fails
-      } finally {
-        setNotificationsLoading(false);
+    if (!emailPreferencesQuery.data) return;
+    let completed = true;
+    let failed = true;
+    for (const preference of emailPreferencesQuery.data) {
+      if (preference.email_type === 'mapping_complete') completed = !preference.opted_out;
+      if (preference.email_type === 'mapping_failed') failed = !preference.opted_out;
+    }
+    setEmailJobCompleted(completed);
+    setEmailJobFailed(failed);
+  }, [emailPreferencesQuery.data]);
+
+  useEffect(() => {
+    const errors = [subscriptionQuery.error, plansQuery.error, emailPreferencesQuery.error];
+    for (const queryError of errors) {
+      if (queryError) {
+        handleUnauthorizedAndRedirect(queryError, navigate);
+        break;
       }
-    };
-    fetchPrefs();
-  }, []);
+    }
+  }, [emailPreferencesQuery.error, navigate, plansQuery.error, subscriptionQuery.error]);
 
   useEffect(() => {
     if (!isDeepPreviewSource || deepPreviewOpenedTrackedRef.current) return;
@@ -150,24 +166,46 @@ export function Settings() {
     });
   }, [isDeepPreviewSource, posthog, previewSourceSessionId]);
 
+  const profileMutation = useMutation({
+    mutationFn: (name: string) => updateUserProfile({ full_name: name }),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.user.profile }),
+        refreshSession(),
+      ]);
+      toast.success('Profile saved successfully.');
+    },
+    onError: (mutationError) => {
+      if (!handleUnauthorizedAndRedirect(mutationError, navigate)) {
+        toast.error(getErrorMessage(mutationError, 'Unable to save your profile right now.'));
+      }
+    },
+  });
+
+  const notificationsMutation = useMutation({
+    mutationFn: async () => {
+      await Promise.all([
+        updateEmailPreference('mapping_complete', !emailJobCompleted),
+        updateEmailPreference('mapping_failed', !emailJobFailed),
+      ]);
+    },
+    onSuccess: () => {
+      toast.success('Notification preferences saved successfully.');
+      void queryClient.invalidateQueries({ queryKey: queryKeys.email.preferences });
+    },
+    onError: (mutationError) => {
+      if (!handleUnauthorizedAndRedirect(mutationError, navigate)) {
+        toast.error(getErrorMessage(mutationError, 'Unable to save preferences right now.'));
+      }
+    },
+  });
+
   // Profile save handler
   const handleProfileSave = async () => {
-    setProfileSaving(true);
     try {
-      const res = await fetch(`${API_BASE_URL}/api/user/profile`, {
-        method: 'PUT',
-        headers: getAuthHeaders(),
-        body: JSON.stringify({ full_name: fullName }),
-      });
-      if (!res.ok) {
-        await throwApiErrorFromResponse(res, 'Unable to save your profile right now.');
-      }
-      await refreshSession();
-      toast.success('Profile saved successfully.');
-    } catch (err: unknown) {
-      toast.error(getErrorMessage(err, 'Unable to save your profile right now.'));
-    } finally {
-      setProfileSaving(false);
+      await profileMutation.mutateAsync(fullName);
+    } catch {
+      // Error toast handled in mutation onError.
     }
   };
 
@@ -183,17 +221,10 @@ export function Settings() {
 
   // Notifications save handler (email prefs API)
   const handleNotificationsSave = async () => {
-    setNotificationsSaving(true);
     try {
-      await Promise.all([
-        updateEmailPreference('mapping_complete', !emailJobCompleted),
-        updateEmailPreference('mapping_failed', !emailJobFailed),
-      ]);
-      toast.success('Notification preferences saved successfully.');
-    } catch (err: unknown) {
-      toast.error(getErrorMessage(err, 'Unable to save preferences right now.'));
-    } finally {
-      setNotificationsSaving(false);
+      await notificationsMutation.mutateAsync();
+    } catch {
+      // Error toast handled in mutation onError.
     }
   };
 
@@ -223,11 +254,13 @@ export function Settings() {
       const pollSubscription = async () => {
         for (let i = 0; i < 10; i++) {
           try {
-            const sub = await getSubscriptionStatus();
+            const sub = await queryClient.fetchQuery({
+              queryKey: queryKeys.billing.subscription,
+              queryFn: getSubscriptionStatus,
+            });
             if (isCredits) {
               // For credit purchases, check if lifetime_credits_total increased
               if (sub.lifetime_credits_total > previousLifetimeCredits) {
-                setSubscription(sub);
                 setPostCheckoutPolling(false);
                 const added = sub.lifetime_credits_total - previousLifetimeCredits;
                 toast.success(`${added.toLocaleString()} credits added to your account!`);
@@ -237,7 +270,6 @@ export function Settings() {
             } else {
               // For plan upgrades, check if plan changed
               if (sub.plan !== previousPlan) {
-                setSubscription(sub);
                 setPostCheckoutPolling(false);
                 toast.success(`You're now on the ${sub.plan.charAt(0).toUpperCase() + sub.plan.slice(1)} plan!`);
                 if (checkoutContextSource === 'deep_preview') {
@@ -258,8 +290,10 @@ export function Settings() {
         }
         // Final attempt — accept whatever state we get
         try {
-          const sub = await getSubscriptionStatus();
-          setSubscription(sub);
+          const sub = await queryClient.fetchQuery({
+            queryKey: queryKeys.billing.subscription,
+            queryFn: getSubscriptionStatus,
+          });
           if (isCredits) {
             if (sub.lifetime_credits_total > previousLifetimeCredits) {
               const added = sub.lifetime_credits_total - previousLifetimeCredits;
@@ -291,7 +325,7 @@ export function Settings() {
       searchParams.delete('status');
       setSearchParams(searchParams, { replace: true });
     }
-  }, [searchParams, setSearchParams]);
+  }, [posthog, queryClient, searchParams, setSearchParams]);
 
   // New subscribers: redirect to Stripe Checkout
   const handlePlanSelect = async (priceId: string) => {
@@ -480,9 +514,9 @@ export function Settings() {
                   </Button>
                   <Button
                     onClick={handleProfileSave}
-                    disabled={profileSaving}
+                    disabled={profileMutation.isPending}
                   >
-                    {profileSaving && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+                    {profileMutation.isPending && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
                     Save Changes
                   </Button>
                 </div>
@@ -658,9 +692,9 @@ export function Settings() {
                   <div className="flex justify-end">
                     <Button
                       onClick={handleNotificationsSave}
-                      disabled={notificationsSaving}
+                      disabled={notificationsMutation.isPending}
                     >
-                      {notificationsSaving && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+                      {notificationsMutation.isPending && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
                       Save Preferences
                     </Button>
                   </div>

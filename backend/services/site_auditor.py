@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 import json
+import os
 import xml.etree.ElementTree as ET
 from collections import defaultdict
 from urllib.parse import urlparse, urljoin
@@ -57,8 +58,41 @@ def _categorize(url: str) -> str:
 class SiteAuditor:
     """Crawl a site and yield SSE event dicts for real-time streaming."""
 
-    MAX_URLS = 50
-    SEMAPHORE_LIMIT = 10
+    DEFAULT_MAX_URLS = 50
+    MIN_MAX_URLS = 1
+    MAX_MAX_URLS = 200
+
+    DEFAULT_SCRAPE_CONCURRENCY = 10
+    MIN_SCRAPE_CONCURRENCY = 1
+    MAX_SCRAPE_CONCURRENCY = 30
+
+    def __init__(self, max_urls: int | None = None, scrape_concurrency: int | None = None):
+        if max_urls is None:
+            max_urls = self._bounded_env_int(
+                "SITE_AUDITOR_MAX_URLS",
+                self.DEFAULT_MAX_URLS,
+                self.MIN_MAX_URLS,
+                self.MAX_MAX_URLS,
+            )
+        if scrape_concurrency is None:
+            scrape_concurrency = self._bounded_env_int(
+                "SITE_AUDITOR_SCRAPE_MAX_CONCURRENT",
+                self.DEFAULT_SCRAPE_CONCURRENCY,
+                self.MIN_SCRAPE_CONCURRENCY,
+                self.MAX_SCRAPE_CONCURRENCY,
+            )
+
+        self.max_urls = max_urls
+        self.scrape_concurrency = scrape_concurrency
+
+    @staticmethod
+    def _bounded_env_int(name: str, default: int, minimum: int, maximum: int) -> int:
+        raw = os.getenv(name, str(default))
+        try:
+            value = int(raw)
+        except ValueError:
+            return default
+        return max(minimum, min(maximum, value))
 
     async def run_audit(self, url: str):
         """Async generator that yields SSE event dicts."""
@@ -120,17 +154,17 @@ class SiteAuditor:
                 yield {"event": "error", "data": {"message": f"Could not discover any pages on {parsed.netloc}", "code": "no_urls"}}
                 return
 
-            # Cap at MAX_URLS
-            urls_to_scrape = filtered_urls[:self.MAX_URLS]
+            # Cap at configured max URLs
+            urls_to_scrape = filtered_urls[:self.max_urls]
 
             yield {"event": "progress", "data": {
                 "phase": "discovery",
-                "message": f"Found {total_discovered} pages" + (f" (auditing first {self.MAX_URLS})" if total_discovered > self.MAX_URLS else ""),
+                "message": f"Found {total_discovered} pages" + (f" (auditing first {self.max_urls})" if total_discovered > self.max_urls else ""),
                 "urls_found": total_discovered
             }}
 
             # --- Page Analysis ---
-            semaphore = asyncio.Semaphore(self.SEMAPHORE_LIMIT)
+            semaphore = asyncio.Semaphore(self.scrape_concurrency)
             pages: list[dict] = []
             content_hashes: dict[int, list[str]] = defaultdict(list)
             issues_summary: dict[str, list[str]] = defaultdict(list)

@@ -34,8 +34,35 @@ except ImportError:
 
 
 # Worker configuration from environment
+def _bounded_env_int(name: str, default: int, minimum: int, maximum: int) -> int:
+    """Read an integer env var and clamp it into [minimum, maximum]."""
+    raw = os.getenv(name, str(default))
+    try:
+        value = int(raw)
+    except ValueError:
+        print(
+            f"[Worker] Invalid {name}={raw!r}; using default {default}",
+            flush=True,
+        )
+        value = default
+
+    if value < minimum:
+        print(
+            f"[Worker] {name}={value} below minimum {minimum}; clamping",
+            flush=True,
+        )
+        return minimum
+    if value > maximum:
+        print(
+            f"[Worker] {name}={value} above maximum {maximum}; clamping",
+            flush=True,
+        )
+        return maximum
+    return value
+
+
 WORKER_LEASE_DURATION = int(os.getenv('WORKER_LEASE_DURATION', '600'))  # 10 minutes
-WORKER_MAX_CONCURRENT = int(os.getenv('WORKER_MAX_CONCURRENT', '1'))  # Process one at a time
+WORKER_MAX_CONCURRENT = _bounded_env_int('WORKER_MAX_CONCURRENT', 1, 1, 32)
 WORKER_FALLBACK_INTERVAL = int(os.getenv('WORKER_FALLBACK_INTERVAL', '60'))  # 60 seconds
 WORKER_MAX_ATTEMPTS = int(os.getenv('WORKER_MAX_ATTEMPTS', '5'))  # Max retries
 
@@ -53,6 +80,8 @@ class RedirxWorker:
         self.session_db = MigrationSessionDB()
         self.running = False
         self.jobs_processed = 0
+        self.max_concurrent = WORKER_MAX_CONCURRENT
+        self.in_flight_tasks: set[asyncio.Task] = set()
         self.pg_conn = None
         self.pg_claim_conn = None
 
@@ -577,6 +606,73 @@ class RedirxWorker:
             print(f"[Worker] Error reclaiming expired leases: {e}")
             return 0
 
+    def _has_available_capacity(self) -> bool:
+        """Return True when this worker can accept another in-flight job."""
+        return len(self.in_flight_tasks) < self.max_concurrent
+
+    def _start_in_flight_job(self, job: Dict[str, Any], source: str) -> None:
+        """Start processing a claimed job as an in-flight task."""
+        task = asyncio.create_task(self.process_job(job))
+        self.in_flight_tasks.add(task)
+
+        print(
+            f"[Worker] Dispatched job {job.get('id')} via {source} "
+            f"({len(self.in_flight_tasks)}/{self.max_concurrent} in-flight)",
+            flush=True,
+        )
+
+    async def _reap_finished_jobs(
+        self,
+        wait_for_one: bool = False,
+        timeout: Optional[float] = None,
+    ) -> int:
+        """
+        Remove completed in-flight tasks and surface any unexpected exceptions.
+        """
+        if not self.in_flight_tasks:
+            return 0
+
+        if wait_for_one:
+            done, _ = await asyncio.wait(
+                self.in_flight_tasks,
+                timeout=timeout,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+        else:
+            done = {task for task in self.in_flight_tasks if task.done()}
+
+        if not done:
+            return 0
+
+        for task in done:
+            self.in_flight_tasks.discard(task)
+            try:
+                task.result()
+            except asyncio.CancelledError:
+                pass
+            except Exception as e:
+                print(f"[Worker] In-flight job task raised unexpectedly: {e}", flush=True)
+
+        return len(done)
+
+    async def _dispatch_until_capacity(self, source: str) -> int:
+        """
+        Claim and dispatch jobs until the worker reaches max in-flight capacity.
+        """
+        claimed = 0
+        while self.running and self._has_available_capacity():
+            job = await self.claim_job()
+            if not job:
+                break
+            self._start_in_flight_job(job, source)
+            claimed += 1
+        return claimed
+
+    async def _wait_for_in_flight_jobs(self) -> None:
+        """Drain in-flight jobs before shutdown."""
+        while self.in_flight_tasks:
+            await self._reap_finished_jobs(wait_for_one=True)
+
     async def polling_loop(self) -> None:
         """
         Fallback polling loop (when LISTEN/NOTIFY not available).
@@ -588,19 +684,24 @@ class RedirxWorker:
 
         try:
             while self.running:
-                # Try to claim a job
-                job = await self.claim_job()
+                await self._reap_finished_jobs(wait_for_one=False)
+                claimed = await self._dispatch_until_capacity("polling loop")
 
-                if job:
-                    print(f"[Worker] Claimed job: {job['id']}")
-                    await self.process_job(job)
+                if claimed > 0:
+                    continue
+
+                if self.in_flight_tasks:
+                    await self._reap_finished_jobs(wait_for_one=True, timeout=1.0)
                 else:
                     # No jobs, wait before polling again
                     print("[Worker] No pending jobs. Waiting...", end='\r')
                     await asyncio.sleep(WORKER_FALLBACK_INTERVAL)
 
         except KeyboardInterrupt:
+            self.running = False
             print("\n[Worker] Shutting down...")
+        finally:
+            await self._wait_for_in_flight_jobs()
 
     async def listen_loop(self) -> None:
         """
@@ -631,25 +732,10 @@ class RedirxWorker:
             self.pg_conn.autocommit = True
 
             while self.running:
-                # Wait for notifications with timeout
-                # In psycopg3, use notifies() generator with timeout
-                gen = self.pg_conn.notifies(timeout=WORKER_FALLBACK_INTERVAL)
+                await self._reap_finished_jobs(wait_for_one=False)
 
-                try:
-                    for notify in gen:
-                        print(f"[Worker] Received LISTEN notification: {notify.channel}", flush=True)
-
-                        # Try to claim and process a job
-                        job = await self.claim_job()
-                        if job:
-                            print(f"[Worker] Claimed job via LISTEN notification: {job['id']}", flush=True)
-                            await self.process_job(job)
-                        else:
-                            print("[Worker] LISTEN notification received but no pending job was claimable", flush=True)
-                        break  # Exit inner loop after processing one notification
-                except TimeoutError:
-                    # Timeout reached, do fallback polling
-                    pass
+                # Opportunistically fill all available capacity.
+                claimed = await self._dispatch_until_capacity("LISTEN dispatch")
 
                 # Fallback polling (in case we missed notifications or timeout occurred)
                 now = time.time()
@@ -660,17 +746,31 @@ class RedirxWorker:
                     # Reclaim expired leases
                     await self.reclaim_expired_leases()
 
-                    # Try to claim a job (in case notification was missed)
-                    job = await self.claim_job()
-                    if job:
-                        print(f"[Worker] Claimed job via fallback poll: {job['id']}", flush=True)
-                        await self.process_job(job)
-                    else:
-                        print("[Worker] No pending jobs", end='\r', flush=True)
+                    # Try to claim jobs (in case notifications were missed).
+                    claimed += await self._dispatch_until_capacity("fallback poll")
+
+                if claimed > 0:
+                    continue
+
+                if self.in_flight_tasks:
+                    # Keep the dispatch loop responsive while work is in progress.
+                    await self._reap_finished_jobs(wait_for_one=True, timeout=1.0)
+                    continue
+
+                # No in-flight work and nothing was claimable; block on LISTEN.
+                gen = self.pg_conn.notifies(timeout=WORKER_FALLBACK_INTERVAL)
+                try:
+                    for notify in gen:
+                        print(f"[Worker] Received LISTEN notification: {notify.channel}", flush=True)
+                        break
+                except TimeoutError:
+                    print("[Worker] No pending jobs", end='\r', flush=True)
 
         except KeyboardInterrupt:
+            self.running = False
             print("\n[Worker] Shutting down...", flush=True)
         finally:
+            await self._wait_for_in_flight_jobs()
             if self.pg_conn:
                 self.pg_conn.close()
                 print("[Worker] PostgreSQL connection closed", flush=True)
@@ -691,7 +791,7 @@ class RedirxWorker:
         print("=" * 60, flush=True)
         print(f"Worker ID: {self.worker_id}", flush=True)
         print(f"Lease duration: {WORKER_LEASE_DURATION}s", flush=True)
-        print(f"Max concurrent: {WORKER_MAX_CONCURRENT}", flush=True)
+        print(f"Max concurrent: {self.max_concurrent}", flush=True)
         print(f"Max attempts: {WORKER_MAX_ATTEMPTS}", flush=True)
         print(f"Poll interval: {WORKER_FALLBACK_INTERVAL}s", flush=True)
         if not database_url:

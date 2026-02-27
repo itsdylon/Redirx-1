@@ -160,9 +160,13 @@ DATABASE_URL=postgresql://postgres:[PASSWORD]@db.[REF].supabase.co:5432/postgres
 
 # Optional (defaults shown)
 WORKER_LEASE_DURATION=600      # 10 minutes
-WORKER_MAX_CONCURRENT=1        # One job at a time
+WORKER_MAX_CONCURRENT=1        # Max in-flight jobs per worker (bounded 1-32)
 WORKER_FALLBACK_INTERVAL=60    # Fallback poll every 60s
 WORKER_MAX_ATTEMPTS=5          # Max retries before permanent failure
+SCRAPER_MAX_CONCURRENT_TOTAL=12      # Per-job total scraper fanout (bounded 1-64)
+SCRAPER_MAX_CONCURRENT_PER_SITE=8    # Per old/new site scraper fanout (bounded 1-32)
+SITE_AUDITOR_MAX_URLS=50             # Demo audit URL cap (bounded 1-200)
+SITE_AUDITOR_SCRAPE_MAX_CONCURRENT=10  # Demo audit scraper fanout (bounded 1-30)
 ```
 
 ## Common Issues
@@ -303,9 +307,13 @@ Typical:
 
 ### Increasing Throughput
 
-1. Increase `WORKER_MAX_CONCURRENT` (process multiple jobs per worker)
-2. Deploy more workers
-3. Optimize pipeline stages (batch embeddings, cache DNS lookups)
+1. Increase `WORKER_MAX_CONCURRENT` (max in-flight jobs per worker)
+2. Tune `SCRAPER_MAX_CONCURRENT_TOTAL` and `SCRAPER_MAX_CONCURRENT_PER_SITE`
+3. Deploy more workers
+4. Optimize pipeline stages (batch embeddings, cache DNS lookups)
+
+Rule of thumb:
+`total concurrent scrape requests ≈ worker_instances * WORKER_MAX_CONCURRENT * SCRAPER_MAX_CONCURRENT_TOTAL`
 
 ## Useful SQL Queries
 

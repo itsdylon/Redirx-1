@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import aiohttp
 import asyncio
+import os
 from bs4 import BeautifulSoup
 from typing import Optional
 from uuid import UUID, uuid4
@@ -20,6 +21,26 @@ class Stage:
 
     async def execute(self, input: any) -> any:
         raise NotImplementedError("The stage must overwrite execute.")
+
+
+def _bounded_env_int(name: str, default: int, minimum: int, maximum: int) -> int:
+    """Read an integer env var and clamp it into [minimum, maximum]."""
+    raw = os.getenv(name, str(default))
+    try:
+        value = int(raw)
+    except ValueError:
+        print(f"⚠️  {name}={raw!r} is invalid; using default {default}", flush=True)
+        value = default
+
+    if value < minimum:
+        print(f"⚠️  {name}={value} below minimum {minimum}; clamping", flush=True)
+        return minimum
+    if value > maximum:
+        print(f"⚠️  {name}={value} above maximum {maximum}; clamping", flush=True)
+        return maximum
+    return value
+
+
 # =========================
 # URL Prune Stage
 # =========================
@@ -454,25 +475,75 @@ class WebScraperStage(Stage):
     Scrapes all URLs for their HTML content with comprehensive logging.
     """
     name = "Scraping webpages"
+    DEFAULT_TOTAL_CONCURRENCY = 12
+    DEFAULT_PER_SITE_CONCURRENCY = 8
+    MIN_CONCURRENCY = 1
+    MAX_TOTAL_CONCURRENCY = 64
+    MAX_PER_SITE_CONCURRENCY = 32
 
-    def __init__(self):
+    def __init__(
+        self,
+        max_total_concurrency: Optional[int] = None,
+        max_site_concurrency: Optional[int] = None,
+    ):
         super().__init__()
+        if max_total_concurrency is None:
+            total = _bounded_env_int(
+                "SCRAPER_MAX_CONCURRENT_TOTAL",
+                self.DEFAULT_TOTAL_CONCURRENCY,
+                self.MIN_CONCURRENCY,
+                self.MAX_TOTAL_CONCURRENCY,
+            )
+        else:
+            total = max(
+                self.MIN_CONCURRENCY,
+                min(self.MAX_TOTAL_CONCURRENCY, int(max_total_concurrency)),
+            )
+
+        if max_site_concurrency is None:
+            per_site = _bounded_env_int(
+                "SCRAPER_MAX_CONCURRENT_PER_SITE",
+                self.DEFAULT_PER_SITE_CONCURRENCY,
+                self.MIN_CONCURRENCY,
+                self.MAX_PER_SITE_CONCURRENCY,
+            )
+        else:
+            per_site = max(
+                self.MIN_CONCURRENCY,
+                min(self.MAX_PER_SITE_CONCURRENCY, int(max_site_concurrency)),
+            )
+
+        self.max_total_concurrency = total
+        self.max_site_concurrency = min(per_site, total)
 
     async def execute(self, input: tuple[list[str], list[str]]) -> tuple[list[WebPage], list[WebPage]]:
         old_urls, new_urls = input
 
-        print(f"\nWebScraperStage: Scraping {len(old_urls)} old + {len(new_urls)} new URLs...")
+        print(
+            f"\nWebScraperStage: Scraping {len(old_urls)} old + {len(new_urls)} new URLs "
+            f"(total concurrency={self.max_total_concurrency}, "
+            f"per-site concurrency={self.max_site_concurrency})...",
+            flush=True,
+        )
 
         async with aiohttp.ClientSession() as session:
+            total_semaphore = asyncio.Semaphore(self.max_total_concurrency)
+            old_site_semaphore = asyncio.Semaphore(self.max_site_concurrency)
+            new_site_semaphore = asyncio.Semaphore(self.max_site_concurrency)
+
+            async def scrape_with_limits(url: str, site_semaphore: asyncio.Semaphore):
+                async with total_semaphore:
+                    async with site_semaphore:
+                        return await WebPage.scrape(session, url)
 
             async def gather_old():
                 return await asyncio.gather(
-                    *[WebPage.scrape(session, url) for url in old_urls]
+                    *[scrape_with_limits(url, old_site_semaphore) for url in old_urls]
                 )
 
             async def gather_new():
                 return await asyncio.gather(
-                    *[WebPage.scrape(session, url) for url in new_urls]
+                    *[scrape_with_limits(url, new_site_semaphore) for url in new_urls]
                 )
 
             async with asyncio.TaskGroup() as group:

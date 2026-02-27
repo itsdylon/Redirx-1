@@ -103,6 +103,12 @@ WORKER_LEASE_DURATION=600  # 10 minutes
 WORKER_MAX_CONCURRENT=1    # Process one session at a time
 WORKER_FALLBACK_INTERVAL=60  # Fallback poll every 60 seconds
 WORKER_MAX_ATTEMPTS=5      # Max retries before permanent failure
+SCRAPER_MAX_CONCURRENT_TOTAL=12     # Per-job total scraper fanout (bounded 1-64)
+SCRAPER_MAX_CONCURRENT_PER_SITE=8   # Per old/new site scraper fanout (bounded 1-32)
+
+# Demo Site Auditor (optional, API service)
+SITE_AUDITOR_MAX_URLS=50                 # URL cap per demo audit (bounded 1-200)
+SITE_AUDITOR_SCRAPE_MAX_CONCURRENT=10    # Scrapes in parallel per audit (bounded 1-30)
 
 # Upload guards (optional)
 MAX_CONTENT_LENGTH=26214400      # 25MB request cap
@@ -159,6 +165,12 @@ Optional worker configuration:
 - `WORKER_MAX_CONCURRENT=1`
 - `WORKER_FALLBACK_INTERVAL=60`
 - `WORKER_MAX_ATTEMPTS=5`
+- `SCRAPER_MAX_CONCURRENT_TOTAL=12`
+- `SCRAPER_MAX_CONCURRENT_PER_SITE=8`
+
+Optional API demo auditor configuration:
+- `SITE_AUDITOR_MAX_URLS=50`
+- `SITE_AUDITOR_SCRAPE_MAX_CONCURRENT=10`
 
 ### 3.2 Deploy New Worker Code
 
@@ -196,6 +208,14 @@ Submit a test job via the production frontend and verify:
 - Job starts processing immediately (no 5-second delay)
 - Worker logs show notification received
 - Job completes successfully
+
+### 3.5 Concurrency Tuning Guidance
+
+- Effective scrape fanout per worker is approximately `WORKER_MAX_CONCURRENT * SCRAPER_MAX_CONCURRENT_TOTAL`.
+- Start with `WORKER_MAX_CONCURRENT=2`, `SCRAPER_MAX_CONCURRENT_TOTAL=12`, `SCRAPER_MAX_CONCURRENT_PER_SITE=8`.
+- If you see scrape timeouts, upstream rate limiting, or high worker memory, reduce scraper fanout first.
+- If queue wait time is high but workers are stable, increase `WORKER_MAX_CONCURRENT` gradually by 1.
+- Keep `SCRAPER_MAX_CONCURRENT_PER_SITE <= SCRAPER_MAX_CONCURRENT_TOTAL` (the worker enforces this automatically).
 
 ## Step 4: Monitoring
 

@@ -17,6 +17,7 @@ sys.path.insert(0, SRC_DIR)
 from services.auth_service import AuthService, require_auth
 from services.onboarding_samples import SAMPLE_TUTORIAL_MAPPINGS
 from redirx.database import MigrationSessionDB, SupabaseClient, URLMappingDB
+from backend.extensions import limiter
 
 user_blueprint = Blueprint("user", __name__)
 
@@ -35,6 +36,12 @@ STEP_EVENT_KEYS = {
     "open_review": "review_opened_at",
     "export_redirects": "export_downloaded_at",
 }
+
+
+@user_blueprint.record_once
+def _init_limiter(state):
+    if "limiter" not in state.app.extensions:
+        limiter.init_app(state.app)
 
 
 def _now_iso() -> str:
@@ -114,6 +121,7 @@ def _build_onboarding_response(profile: Dict[str, Any]) -> Dict[str, Any]:
 
 
 @user_blueprint.route("/dashboard", methods=["GET"])
+@limiter.limit("120 per minute")
 @require_auth
 def get_dashboard_stats():
     """
@@ -201,6 +209,7 @@ def get_dashboard_stats():
 
 
 @user_blueprint.route("/sessions", methods=["GET"])
+@limiter.limit("120 per minute")
 @require_auth
 def get_user_sessions():
     """
@@ -232,6 +241,7 @@ def get_user_sessions():
 
 
 @user_blueprint.route("/sessions/<session_id>", methods=["PUT"])
+@limiter.limit("60 per minute")
 @require_auth
 def update_session(session_id):
     """
@@ -282,6 +292,7 @@ def update_session(session_id):
 
 
 @user_blueprint.route("/sessions/<session_id>", methods=["DELETE"])
+@limiter.limit("30 per minute")
 @require_auth
 def delete_session(session_id):
     """
@@ -350,6 +361,7 @@ def delete_session(session_id):
 
 
 @user_blueprint.route("/sessions/<session_id>/status", methods=["GET"])
+@limiter.limit("240 per minute")
 @require_auth
 def get_session_status(session_id):
     """

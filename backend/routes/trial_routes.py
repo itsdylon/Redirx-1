@@ -9,7 +9,7 @@ from typing import Any, Dict, Optional
 from backend.services.auth_service import require_auth, require_admin
 from backend.services.trial_service import TrialService
 from backend.services.stripe_service import StripeService
-from backend.services.demo_rate_limiter import DemoRateLimiter
+from backend.extensions import limiter
 from backend.routes.error_utils import error_response
 from redirx.database import SupabaseClient
 
@@ -17,11 +17,11 @@ logger = logging.getLogger(__name__)
 
 trial_blueprint = Blueprint('trials', __name__)
 
-# Rate limiter: 5 redeem attempts per 10 minutes per IP
-_redeem_limiter = DemoRateLimiter(max_requests=5, window_seconds=600)
 
-# Rate limiter: 3 waitlist submissions per 10 minutes per IP
-_waitlist_limiter = DemoRateLimiter(max_requests=3, window_seconds=600)
+@trial_blueprint.record_once
+def _init_limiter(state):
+    if "limiter" not in state.app.extensions:
+        limiter.init_app(state.app)
 
 
 def _get_trial_service() -> TrialService:
@@ -741,21 +741,11 @@ def founder_checkout():
 
 
 @trial_blueprint.route('/trials/redeem', methods=['POST'])
+@limiter.limit("5 per 10 minutes")
 @require_auth
 def redeem_code():
     """Redeem an invite code for the authenticated user."""
-    # Rate limit
     ip = _get_client_ip()
-    allowed, retry_after = _redeem_limiter.check(ip)
-    if not allowed:
-        return error_response(
-            code="trial_redeem_rate_limited",
-            user_message="Too many redemption attempts. Please try again later.",
-            status=429,
-            retryable=True,
-            next_action="retry_later",
-            extra={'retry_after_seconds': retry_after},
-        )
 
     data = request.get_json()
     if not data or not data.get('code'):
@@ -812,19 +802,10 @@ def redeem_code():
 # ============================================================================
 
 @trial_blueprint.route('/founder/waitlist', methods=['POST'])
+@limiter.limit("3 per 10 minutes")
 def submit_waitlist():
     """Submit a founder waitlist request (no auth, rate-limited)."""
     ip = _get_client_ip()
-    allowed, retry_after = _waitlist_limiter.check(ip)
-    if not allowed:
-        return error_response(
-            code="trial_waitlist_rate_limited",
-            user_message="Too many requests. Please try again later.",
-            status=429,
-            retryable=True,
-            next_action="retry_later",
-            extra={'retry_after_seconds': retry_after},
-        )
 
     data = request.get_json()
     if not data:

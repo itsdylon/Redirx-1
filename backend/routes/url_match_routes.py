@@ -1,12 +1,51 @@
 from flask import Blueprint, request, jsonify, make_response
+import os
 from backend.services.pipeline_runner import run_pipeline
 from backend.services.auth_service import require_auth
+from backend.extensions import limiter
 from src.redirx.database import UserQuotaDB
 
 url_match_blueprint = Blueprint("url_match", __name__)
+MAX_UPLOAD_FILE_BYTES = int(os.getenv("MAX_UPLOAD_FILE_BYTES", str(10 * 1024 * 1024)))
+
+
+@url_match_blueprint.record_once
+def _init_limiter(state):
+    if "limiter" not in state.app.extensions:
+        limiter.init_app(state.app)
+
+
+def _get_upload_size(file_storage) -> int | None:
+    if file_storage.content_length is not None and file_storage.content_length > 0:
+        return int(file_storage.content_length)
+
+    stream = getattr(file_storage, "stream", None)
+    if not stream or not hasattr(stream, "seek") or not hasattr(stream, "tell"):
+        return None
+
+    try:
+        current = stream.tell()
+        stream.seek(0, os.SEEK_END)
+        size = stream.tell()
+        stream.seek(current, os.SEEK_SET)
+        return int(size)
+    except Exception:
+        return None
+
+
+def _reject_if_too_large(file_storage, field_name: str):
+    size = _get_upload_size(file_storage)
+    if size is not None and size > MAX_UPLOAD_FILE_BYTES:
+        return jsonify({
+            "success": False,
+            "error": f"{field_name} exceeds upload size limit",
+            "max_file_bytes": MAX_UPLOAD_FILE_BYTES,
+        }), 413
+    return None
 
 
 @url_match_blueprint.route("/process/url-only", methods=["POST"])
+@limiter.limit("20 per hour")
 @require_auth
 def process_url_only():
     """
@@ -32,6 +71,13 @@ def process_url_only():
 
     old_csv = request.files["old_csv"]
     new_csv = request.files["new_csv"]
+
+    too_large = _reject_if_too_large(old_csv, "old_csv")
+    if too_large:
+        return too_large
+    too_large = _reject_if_too_large(new_csv, "new_csv")
+    if too_large:
+        return too_large
 
     # Validate files are not empty
     if old_csv.filename == '':

@@ -4,10 +4,16 @@ from urllib.parse import urlparse
 
 from flask import Blueprint, Response, request, stream_with_context
 
-from backend.services.demo_rate_limiter import rate_limiter
+from backend.extensions import limiter
 from backend.services.site_auditor import SiteAuditor
 
 demo_blueprint = Blueprint("demo", __name__)
+
+
+@demo_blueprint.record_once
+def _init_limiter(state):
+    if "limiter" not in state.app.extensions:
+        limiter.init_app(state.app)
 
 
 def _validate_url(url: str) -> str | None:
@@ -24,19 +30,12 @@ def _validate_url(url: str) -> str | None:
     return None
 
 
-def _get_client_ip() -> str:
-    """Get the real client IP, respecting X-Forwarded-For behind a proxy."""
-    forwarded = request.headers.get("X-Forwarded-For", "")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-    return request.remote_addr or "unknown"
-
-
 def _sse_line(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data)}\n\n"
 
 
 @demo_blueprint.route("/audit", methods=["POST"])
+@limiter.limit("3 per 10 minutes")
 def audit():
     body = request.get_json(silent=True) or {}
     url = (body.get("url") or "").strip()
@@ -48,12 +47,6 @@ def audit():
     err = _validate_url(url)
     if err:
         return {"error": err}, 400
-
-    # Rate limit
-    ip = _get_client_ip()
-    allowed, retry_after = rate_limiter.check(ip)
-    if not allowed:
-        return {"error": "Rate limit exceeded", "retry_after_seconds": retry_after}, 429
 
     def generate():
         """Bridge async generator to sync Flask generator."""

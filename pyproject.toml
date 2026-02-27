@@ -12,6 +12,8 @@ dependencies = [
   "websockets>=15.0",
   "Flask==3.1.2",
   "flask-cors==6.0.1",
+  "flask-limiter>=3.8.0",
+  "redis>=5.0.0",
   "PyJWT==2.10.1"
 ]
 

@@ -22,9 +22,13 @@ from backend.routes.url_match_routes import url_match_blueprint
 from backend.routes.billing_routes import billing_blueprint
 from backend.routes.trial_routes import trial_blueprint
 from backend.routes.email_routes import email_blueprint
+from backend.extensions import limiter, register_error_handlers
 
 def create_app():
     app = Flask(__name__)
+    app.config["MAX_CONTENT_LENGTH"] = int(
+        os.getenv("MAX_CONTENT_LENGTH", str(25 * 1024 * 1024))
+    )
 
     # Configure CORS - restrict origins in production
     # Set CORS_ORIGINS env var to comma-separated list of allowed origins
@@ -33,6 +37,8 @@ def create_app():
     if cors_origins != '*':
         cors_origins = [origin.strip() for origin in cors_origins.split(',')]
     CORS(app, origins=cors_origins)
+    limiter.init_app(app)
+    register_error_handlers(app)
 
     app.register_blueprint(pipeline_blueprint, url_prefix="/api")
     app.register_blueprint(auth_blueprint, url_prefix="/api/auth")

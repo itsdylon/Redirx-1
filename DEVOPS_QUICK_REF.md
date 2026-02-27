@@ -185,6 +185,15 @@ OPENAI_API_KEY=sk-xxx
 
 # Production
 CORS_ORIGINS=https://redirx.onrender.com   # Set to frontend URL
+
+# Upload safeguards
+MAX_CONTENT_LENGTH=26214400      # 25MB request cap
+MAX_UPLOAD_FILE_BYTES=10485760   # 10MB per uploaded file
+
+# Shared API rate limits (required for multi-instance correctness)
+RATE_LIMIT_STORAGE_URI=redis://default:password@redis-host:6379/0
+# Optional global defaults (comma-separated), leave blank for route-only limits
+GLOBAL_DEFAULT_RATE_LIMITS=
 ```
 
 ### Frontend (frontend/.env)

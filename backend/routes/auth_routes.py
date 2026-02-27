@@ -13,6 +13,7 @@ sys.path.insert(0, BACKEND_DIR)
 
 from services.auth_service import AuthService, AuthServiceError, require_auth
 from routes.error_utils import error_response
+from backend.extensions import limiter
 
 auth_blueprint = Blueprint("auth", __name__)
 logger = logging.getLogger(__name__)
@@ -22,7 +23,14 @@ def _looks_like_email(email: str) -> bool:
     return "@" in email and "." in email and " " not in email
 
 
+@auth_blueprint.record_once
+def _init_limiter(state):
+    if "limiter" not in state.app.extensions:
+        limiter.init_app(state.app)
+
+
 @auth_blueprint.route("/register", methods=["POST"])
+@limiter.limit("10 per hour")
 def register():
     """
     Register a new user.
@@ -115,6 +123,7 @@ def register():
 
 
 @auth_blueprint.route("/login", methods=["POST"])
+@limiter.limit("60 per hour")
 def login():
     """
     Login user with email and password.
@@ -205,6 +214,7 @@ def login():
 
 
 @auth_blueprint.route("/resend-confirmation", methods=["POST"])
+@limiter.limit("6 per hour")
 def resend_confirmation():
     """
     Request a new signup confirmation email.
@@ -260,6 +270,7 @@ def logout():
 
 
 @auth_blueprint.route("/refresh", methods=["POST"])
+@limiter.limit("240 per hour")
 def refresh():
     """
     Refresh access token using refresh token.

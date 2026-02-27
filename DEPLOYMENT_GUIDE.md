@@ -103,6 +103,14 @@ WORKER_LEASE_DURATION=600  # 10 minutes
 WORKER_MAX_CONCURRENT=1    # Process one session at a time
 WORKER_FALLBACK_INTERVAL=60  # Fallback poll every 60 seconds
 WORKER_MAX_ATTEMPTS=5      # Max retries before permanent failure
+
+# Upload guards (optional)
+MAX_CONTENT_LENGTH=26214400      # 25MB request cap
+MAX_UPLOAD_FILE_BYTES=10485760   # 10MB per uploaded file
+
+# Shared rate limiting (recommended for multi-instance API)
+RATE_LIMIT_STORAGE_URI=redis://default:password@redis-host:6379/0
+GLOBAL_DEFAULT_RATE_LIMITS=
 ```
 
 ### 2.4 Test Locally

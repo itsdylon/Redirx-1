@@ -28,3 +28,12 @@ frontend/dist/
 .idea/
 *.sublime-*
 .claude
+
+# Benchmark artifacts
+.tmp_worst_case_runs/
+benchmark_results/*
+!benchmark_results/worst_case/
+benchmark_results/worst_case/*
+!benchmark_results/worst_case/baseline_2026-03-02.json
+!benchmark_results/worst_case/baseline_2026-03-02.csv
+!benchmark_results/worst_case/README.md

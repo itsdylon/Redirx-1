@@ -5,6 +5,7 @@ from urllib.parse import urlparse
 from datetime import datetime
 from werkzeug.datastructures import FileStorage
 from src.redirx.database import MigrationSessionDB
+from backend.services.job_limits import validate_content_job_url_counts
 
 
 def read_csv(file_storage: FileStorage) -> List[str]:
@@ -141,6 +142,8 @@ def run_pipeline(
     user_id: str = "default_user",
     force: bool = False,
     pipeline_type: str = 'content',
+    old_urls: Optional[List[str]] = None,
+    new_urls: Optional[List[str]] = None,
 ) -> tuple[Optional[str], bool]:
     """
     Queue a Redirx pipeline job for background processing.
@@ -158,6 +161,8 @@ def run_pipeline(
         user_id: User ID for tracking the migration session
         force: If True, bypass idempotency check and create a new job
         pipeline_type: 'content' (default) or 'url_only' (free tier)
+        old_urls: Optional pre-parsed old URL list (skips CSV parsing when provided)
+        new_urls: Optional pre-parsed new URL list (skips CSV parsing when provided)
 
     Returns:
         Tuple of (session_id, is_duplicate) where:
@@ -170,9 +175,14 @@ def run_pipeline(
     # Generate project name from new site URLs
     project_name = generate_project_name(new_csv_file)
 
-    # Validate and read CSV files
-    old_urls = read_csv(old_csv_file)
-    new_urls = read_csv(new_csv_file)
+    # Validate and read CSV files (or reuse pre-parsed lists)
+    if old_urls is None:
+        old_urls = read_csv(old_csv_file)
+    if new_urls is None:
+        new_urls = read_csv(new_csv_file)
+
+    # Hard-cap content jobs before idempotency/session creation.
+    validate_content_job_url_counts(old_urls, new_urls, pipeline_type)
 
     # Generate idempotency key (or None if force=True to bypass uniqueness constraint)
     idempotency_key = None if force else generate_deterministic_key(user_id, old_urls, new_urls, pipeline_type)

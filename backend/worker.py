@@ -24,6 +24,10 @@ from src.redirx.lib import Pipeline
 from uuid import UUID
 from src.redirx.config import Config
 from backend.services.deep_preview_service import DeepPreviewService
+from backend.services.job_limits import (
+    ContentJobUrlCapExceeded,
+    validate_content_job_url_counts,
+)
 
 # PostgreSQL direct connection for LISTEN/NOTIFY
 try:
@@ -384,6 +388,16 @@ class RedirxWorker:
                 if is_preview:
                     preview_service.mark_failed(session_id, 'No URLs provided')
                 await self.release_lease(session_id, 'permanently_failed', 'No URLs provided')
+                return False
+
+            try:
+                validate_content_job_url_counts(old_urls, new_urls, pipeline_type)
+            except ContentJobUrlCapExceeded as cap_error:
+                fail_message = cap_error.to_worker_error_message()
+                print(f"[Worker] Job {session_id} rejected before processing: {fail_message}")
+                if is_preview:
+                    preview_service.mark_failed(session_id, fail_message)
+                await self.release_lease(session_id, 'permanently_failed', fail_message)
                 return False
 
             print(f"[Worker] Processing {len(old_urls)} old URLs and {len(new_urls)} new URLs (pipeline: {pipeline_type})")

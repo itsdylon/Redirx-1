@@ -1,0 +1,15 @@
+{
+  "generated_at": "2026-03-02T21:20:41.646292+00:00",
+  "sources": {
+    "quotes": {
+      "source": "https://quotes.toscrape.com",
+      "url_count": 203,
+      "fixture_file": "tests/fixtures/worst_case_benchmark/quotes_urls.json"
+    },
+    "books": {
+      "source": "https://books.toscrape.com",
+      "url_count": 1100,
+      "fixture_file": "tests/fixtures/worst_case_benchmark/books_urls.json"
+    }
+  }
+}

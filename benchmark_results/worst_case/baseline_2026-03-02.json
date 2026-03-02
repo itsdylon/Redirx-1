@@ -1,0 +1,756 @@
+{
+  "generated_at": "2026-03-02T19:16:11.580207+00:00",
+  "config": {
+    "tiers": [
+      500,
+      1000,
+      2500,
+      5000
+    ],
+    "runs_per_tier": 3,
+    "seed": 20260302,
+    "fixtures_dir": "/Users/dylonshattuck/Documents/Redirx-1/tests/fixtures/worst_case_benchmark",
+    "embed_failure_rate": 0.0,
+    "thresholds": {
+      "stable_runtime_curve": {
+        "median_runtime_non_decreasing_tolerance": 0.85,
+        "max_per_url_runtime_ratio": 1.6
+      },
+      "no_runaway_memory": {
+        "max_growth_ratio": 4.0,
+        "max_peak_memory_mb": 4096
+      },
+      "low_false_positive_match_rate": {
+        "max_median_rate": 0.02,
+        "max_single_run_rate": 0.05
+      },
+      "acceptable_failure_retry_rate": {
+        "max_scraper_failure_rate": 0.1,
+        "max_scraper_timeout_rate": 0.05,
+        "max_embed_failure_rate": 0.02,
+        "max_retry_rate": 0.2
+      }
+    }
+  },
+  "runs": [
+    {
+      "timestamp": "2026-03-02T19:06:16.311169+00:00",
+      "tier": 500,
+      "run_index": 1,
+      "seed": 20260302,
+      "success": true,
+      "error_message": "",
+      "pipeline_type": "content",
+      "inputs": {
+        "old_url_count": 500,
+        "new_url_count": 500,
+        "old_seed_count": 203,
+        "new_seed_count": 1100
+      },
+      "timing": {
+        "total_seconds": 8.303758417023346,
+        "stages_seconds": {
+          "Filtering URLs": 0.0020100000547245145,
+          "Filtering blog posts": 0.001232209033332765,
+          "Matching exact URLs": 0.002772624953649938,
+          "Scraping webpages": 3.9280720420647413,
+          "Matching HTML content": 0.0088631670223549,
+          "Generating embeddings": 3.654597249929793,
+          "Pairing URLs": 0.7060408339602873
+        }
+      },
+      "resources": {
+        "peak_memory_mb": 200.3125
+      },
+      "metrics": {
+        "mappings_created": 0,
+        "orphan_count": 500,
+        "orphan_rate": 1.0,
+        "false_positive_rate": 0.0,
+        "scraper_failure_rate": 0.0,
+        "scraper_timeout_rate": 0.0,
+        "embed_failure_rate": 0.0,
+        "retry_rate": 0.0
+      },
+      "counters": {
+        "scraper_requests": 1000,
+        "scraper_failures": 0,
+        "scraper_timeouts": 0,
+        "scraper_connection_errors": 0,
+        "scraper_http_errors": 0,
+        "scraper_retries": 0,
+        "scraper_cache_hits": 413,
+        "embed_pages_attempted": 1000,
+        "embed_model_calls": 561,
+        "embed_failures": 0,
+        "embed_retries": 0,
+        "stage_errors": 0
+      },
+      "stage_errors": {}
+    },
+    {
+      "timestamp": "2026-03-02T19:06:25.483781+00:00",
+      "tier": 500,
+      "run_index": 2,
+      "seed": 20260302,
+      "success": true,
+      "error_message": "",
+      "pipeline_type": "content",
+      "inputs": {
+        "old_url_count": 500,
+        "new_url_count": 500,
+        "old_seed_count": 203,
+        "new_seed_count": 1100
+      },
+      "timing": {
+        "total_seconds": 8.492364999954589,
+        "stages_seconds": {
+          "Filtering URLs": 0.0020132919307798147,
+          "Filtering blog posts": 0.0013045420637354255,
+          "Matching exact URLs": 0.002606209018267691,
+          "Scraping webpages": 3.9914226250257343,
+          "Matching HTML content": 0.008711832924745977,
+          "Generating embeddings": 3.7923496670555323,
+          "Pairing URLs": 0.6938014579936862
+        }
+      },
+      "resources": {
+        "peak_memory_mb": 203.859375
+      },
+      "metrics": {
+        "mappings_created": 0,
+        "orphan_count": 500,
+        "orphan_rate": 1.0,
+        "false_positive_rate": 0.0,
+        "scraper_failure_rate": 0.0,
+        "scraper_timeout_rate": 0.0,
+        "embed_failure_rate": 0.0,
+        "retry_rate": 0.0
+      },
+      "counters": {
+        "scraper_requests": 1000,
+        "scraper_failures": 0,
+        "scraper_timeouts": 0,
+        "scraper_connection_errors": 0,
+        "scraper_http_errors": 0,
+        "scraper_retries": 0,
+        "scraper_cache_hits": 406,
+        "embed_pages_attempted": 1000,
+        "embed_model_calls": 563,
+        "embed_failures": 0,
+        "embed_retries": 0,
+        "stage_errors": 0
+      },
+      "stage_errors": {}
+    },
+    {
+      "timestamp": "2026-03-02T19:06:34.988426+00:00",
+      "tier": 500,
+      "run_index": 3,
+      "seed": 20260302,
+      "success": true,
+      "error_message": "",
+      "pipeline_type": "content",
+      "inputs": {
+        "old_url_count": 500,
+        "new_url_count": 500,
+        "old_seed_count": 203,
+        "new_seed_count": 1100
+      },
+      "timing": {
+        "total_seconds": 8.738858374999836,
+        "stages_seconds": {
+          "Filtering URLs": 0.002329000039026141,
+          "Filtering blog posts": 0.001346041914075613,
+          "Matching exact URLs": 0.0027830409817397594,
+          "Scraping webpages": 4.318939707940444,
+          "Matching HTML content": 0.009430167032405734,
+          "Generating embeddings": 3.7120700830128044,
+          "Pairing URLs": 0.6918061249889433
+        }
+      },
+      "resources": {
+        "peak_memory_mb": 206.828125
+      },
+      "metrics": {
+        "mappings_created": 0,
+        "orphan_count": 500,
+        "orphan_rate": 1.0,
+        "false_positive_rate": 0.0,
+        "scraper_failure_rate": 0.0,
+        "scraper_timeout_rate": 0.0,
+        "embed_failure_rate": 0.0,
+        "retry_rate": 0.0
+      },
+      "counters": {
+        "scraper_requests": 1000,
+        "scraper_failures": 0,
+        "scraper_timeouts": 0,
+        "scraper_connection_errors": 0,
+        "scraper_http_errors": 0,
+        "scraper_retries": 0,
+        "scraper_cache_hits": 389,
+        "embed_pages_attempted": 1000,
+        "embed_model_calls": 578,
+        "embed_failures": 0,
+        "embed_retries": 0,
+        "stage_errors": 0
+      },
+      "stage_errors": {}
+    },
+    {
+      "timestamp": "2026-03-02T19:06:52.024278+00:00",
+      "tier": 1000,
+      "run_index": 1,
+      "seed": 20260302,
+      "success": true,
+      "error_message": "",
+      "pipeline_type": "content",
+      "inputs": {
+        "old_url_count": 1000,
+        "new_url_count": 1000,
+        "old_seed_count": 203,
+        "new_seed_count": 1100
+      },
+      "timing": {
+        "total_seconds": 16.329097499954514,
+        "stages_seconds": {
+          "Filtering URLs": 0.00431312492582947,
+          "Filtering blog posts": 0.00250791700091213,
+          "Matching exact URLs": 0.005538083030842245,
+          "Scraping webpages": 5.903996375040151,
+          "Matching HTML content": 0.014256416005082428,
+          "Generating embeddings": 7.5391301669878885,
+          "Pairing URLs": 2.859176917001605
+        }
+      },
+      "resources": {
+        "peak_memory_mb": 261.65625
+      },
+      "metrics": {
+        "mappings_created": 0,
+        "orphan_count": 1000,
+        "orphan_rate": 1.0,
+        "false_positive_rate": 0.0,
+        "scraper_failure_rate": 0.0,
+        "scraper_timeout_rate": 0.0,
+        "embed_failure_rate": 0.0,
+        "retry_rate": 0.0
+      },
+      "counters": {
+        "scraper_requests": 2000,
+        "scraper_failures": 0,
+        "scraper_timeouts": 0,
+        "scraper_connection_errors": 0,
+        "scraper_http_errors": 0,
+        "scraper_retries": 0,
+        "scraper_cache_hits": 1109,
+        "embed_pages_attempted": 2000,
+        "embed_model_calls": 841,
+        "embed_failures": 0,
+        "embed_retries": 0,
+        "stage_errors": 0
+      },
+      "stage_errors": {}
+    },
+    {
+      "timestamp": "2026-03-02T19:07:09.489002+00:00",
+      "tier": 1000,
+      "run_index": 2,
+      "seed": 20260302,
+      "success": true,
+      "error_message": "",
+      "pipeline_type": "content",
+      "inputs": {
+        "old_url_count": 1000,
+        "new_url_count": 1000,
+        "old_seed_count": 203,
+        "new_seed_count": 1100
+      },
+      "timing": {
+        "total_seconds": 16.534640084020793,
+        "stages_seconds": {
+          "Filtering URLs": 0.004318124963901937,
+          "Filtering blog posts": 0.0025109590496867895,
+          "Matching exact URLs": 0.005659791990183294,
+          "Scraping webpages": 6.12895662500523,
+          "Matching HTML content": 0.013786208000965416,
+          "Generating embeddings": 7.4999925419688225,
+          "Pairing URLs": 2.8792497500544414
+        }
+      },
+      "resources": {
+        "peak_memory_mb": 266.28125
+      },
+      "metrics": {
+        "mappings_created": 0,
+        "orphan_count": 1000,
+        "orphan_rate": 1.0,
+        "false_positive_rate": 0.0,
+        "scraper_failure_rate": 0.0,
+        "scraper_timeout_rate": 0.0,
+        "embed_failure_rate": 0.0,
+        "retry_rate": 0.0
+      },
+      "counters": {
+        "scraper_requests": 2000,
+        "scraper_failures": 0,
+        "scraper_timeouts": 0,
+        "scraper_connection_errors": 0,
+        "scraper_http_errors": 0,
+        "scraper_retries": 0,
+        "scraper_cache_hits": 1112,
+        "embed_pages_attempted": 2000,
+        "embed_model_calls": 832,
+        "embed_failures": 0,
+        "embed_retries": 0,
+        "stage_errors": 0
+      },
+      "stage_errors": {}
+    },
+    {
+      "timestamp": "2026-03-02T19:07:26.471887+00:00",
+      "tier": 1000,
+      "run_index": 3,
+      "seed": 20260302,
+      "success": true,
+      "error_message": "",
+      "pipeline_type": "content",
+      "inputs": {
+        "old_url_count": 1000,
+        "new_url_count": 1000,
+        "old_seed_count": 203,
+        "new_seed_count": 1100
+      },
+      "timing": {
+        "total_seconds": 16.113075167057104,
+        "stages_seconds": {
+          "Filtering URLs": 0.0041158340172842145,
+          "Filtering blog posts": 0.00246545800473541,
+          "Matching exact URLs": 0.005440749926492572,
+          "Scraping webpages": 5.72346462495625,
+          "Matching HTML content": 0.013515416998416185,
+          "Generating embeddings": 7.492461916990578,
+          "Pairing URLs": 2.871449290891178
+        }
+      },
+      "resources": {
+        "peak_memory_mb": 250.71875
+      },
+      "metrics": {
+        "mappings_created": 0,
+        "orphan_count": 1000,
+        "orphan_rate": 1.0,
+        "false_positive_rate": 0.0,
+        "scraper_failure_rate": 0.0,
+        "scraper_timeout_rate": 0.0,
+        "embed_failure_rate": 0.0,
+        "retry_rate": 0.0
+      },
+      "counters": {
+        "scraper_requests": 2000,
+        "scraper_failures": 0,
+        "scraper_timeouts": 0,
+        "scraper_connection_errors": 0,
+        "scraper_http_errors": 0,
+        "scraper_retries": 0,
+        "scraper_cache_hits": 1116,
+        "embed_pages_attempted": 2000,
+        "embed_model_calls": 831,
+        "embed_failures": 0,
+        "embed_retries": 0,
+        "stage_errors": 0
+      },
+      "stage_errors": {}
+    },
+    {
+      "timestamp": "2026-03-02T19:08:12.608194+00:00",
+      "tier": 2500,
+      "run_index": 1,
+      "seed": 20260302,
+      "success": true,
+      "error_message": "",
+      "pipeline_type": "content",
+      "inputs": {
+        "old_url_count": 2500,
+        "new_url_count": 2500,
+        "old_seed_count": 203,
+        "new_seed_count": 1100
+      },
+      "timing": {
+        "total_seconds": 45.20306729199365,
+        "stages_seconds": {
+          "Filtering URLs": 0.010787833947688341,
+          "Filtering blog posts": 0.006333041004836559,
+          "Matching exact URLs": 0.013958833063952625,
+          "Scraping webpages": 7.942646999959834,
+          "Matching HTML content": 0.0194723749300465,
+          "Generating embeddings": 18.788433750043623,
+          "Pairing URLs": 18.421232208958827
+        }
+      },
+      "resources": {
+        "peak_memory_mb": 386.859375
+      },
+      "metrics": {
+        "mappings_created": 0,
+        "orphan_count": 2500,
+        "orphan_rate": 1.0,
+        "false_positive_rate": 0.0,
+        "scraper_failure_rate": 0.0,
+        "scraper_timeout_rate": 0.0,
+        "embed_failure_rate": 0.0,
+        "retry_rate": 0.0
+      },
+      "counters": {
+        "scraper_requests": 5000,
+        "scraper_failures": 0,
+        "scraper_timeouts": 0,
+        "scraper_connection_errors": 0,
+        "scraper_http_errors": 0,
+        "scraper_retries": 0,
+        "scraper_cache_hits": 3770,
+        "embed_pages_attempted": 5000,
+        "embed_model_calls": 1152,
+        "embed_failures": 0,
+        "embed_retries": 0,
+        "stage_errors": 0
+      },
+      "stage_errors": {}
+    },
+    {
+      "timestamp": "2026-03-02T19:08:58.577822+00:00",
+      "tier": 2500,
+      "run_index": 2,
+      "seed": 20260302,
+      "success": true,
+      "error_message": "",
+      "pipeline_type": "content",
+      "inputs": {
+        "old_url_count": 2500,
+        "new_url_count": 2500,
+        "old_seed_count": 203,
+        "new_seed_count": 1100
+      },
+      "timing": {
+        "total_seconds": 45.017026333953254,
+        "stages_seconds": {
+          "Filtering URLs": 0.010991374962031841,
+          "Filtering blog posts": 0.006178500014357269,
+          "Matching exact URLs": 0.013969624997116625,
+          "Scraping webpages": 7.764919915935025,
+          "Matching HTML content": 0.020225167041644454,
+          "Generating embeddings": 19.091381791047752,
+          "Pairing URLs": 18.109132583020255
+        }
+      },
+      "resources": {
+        "peak_memory_mb": 378.328125
+      },
+      "metrics": {
+        "mappings_created": 0,
+        "orphan_count": 2500,
+        "orphan_rate": 1.0,
+        "false_positive_rate": 0.0,
+        "scraper_failure_rate": 0.0,
+        "scraper_timeout_rate": 0.0,
+        "embed_failure_rate": 0.0,
+        "retry_rate": 0.0
+      },
+      "counters": {
+        "scraper_requests": 5000,
+        "scraper_failures": 0,
+        "scraper_timeouts": 0,
+        "scraper_connection_errors": 0,
+        "scraper_http_errors": 0,
+        "scraper_retries": 0,
+        "scraper_cache_hits": 3757,
+        "embed_pages_attempted": 5000,
+        "embed_model_calls": 1156,
+        "embed_failures": 0,
+        "embed_retries": 0,
+        "stage_errors": 0
+      },
+      "stage_errors": {}
+    },
+    {
+      "timestamp": "2026-03-02T19:09:45.188764+00:00",
+      "tier": 2500,
+      "run_index": 3,
+      "seed": 20260302,
+      "success": true,
+      "error_message": "",
+      "pipeline_type": "content",
+      "inputs": {
+        "old_url_count": 2500,
+        "new_url_count": 2500,
+        "old_seed_count": 203,
+        "new_seed_count": 1100
+      },
+      "timing": {
+        "total_seconds": 45.676560417050496,
+        "stages_seconds": {
+          "Filtering URLs": 0.010973957949317992,
+          "Filtering blog posts": 0.006331208045594394,
+          "Matching exact URLs": 0.01387145894113928,
+          "Scraping webpages": 8.239989582914859,
+          "Matching HTML content": 0.018899666029028594,
+          "Generating embeddings": 19.159470207989216,
+          "Pairing URLs": 18.226801082957536
+        }
+      },
+      "resources": {
+        "peak_memory_mb": 353.515625
+      },
+      "metrics": {
+        "mappings_created": 0,
+        "orphan_count": 2500,
+        "orphan_rate": 1.0,
+        "false_positive_rate": 0.0,
+        "scraper_failure_rate": 0.0,
+        "scraper_timeout_rate": 0.0,
+        "embed_failure_rate": 0.0,
+        "retry_rate": 0.0
+      },
+      "counters": {
+        "scraper_requests": 5000,
+        "scraper_failures": 0,
+        "scraper_timeouts": 0,
+        "scraper_connection_errors": 0,
+        "scraper_http_errors": 0,
+        "scraper_retries": 0,
+        "scraper_cache_hits": 3760,
+        "embed_pages_attempted": 5000,
+        "embed_model_calls": 1154,
+        "embed_failures": 0,
+        "embed_retries": 0,
+        "stage_errors": 0
+      },
+      "stage_errors": {}
+    },
+    {
+      "timestamp": "2026-03-02T19:11:50.887921+00:00",
+      "tier": 5000,
+      "run_index": 1,
+      "seed": 20260302,
+      "success": true,
+      "error_message": "",
+      "pipeline_type": "content",
+      "inputs": {
+        "old_url_count": 5000,
+        "new_url_count": 5000,
+        "old_seed_count": 203,
+        "new_seed_count": 1100
+      },
+      "timing": {
+        "total_seconds": 124.71378587500658,
+        "stages_seconds": {
+          "Filtering URLs": 0.021639709011651576,
+          "Filtering blog posts": 0.012433958007022738,
+          "Matching exact URLs": 0.02787287498358637,
+          "Scraping webpages": 8.65525395795703,
+          "Matching HTML content": 0.022831083042547107,
+          "Generating embeddings": 38.465824167011306,
+          "Pairing URLs": 77.50768079201225
+        }
+      },
+      "resources": {
+        "peak_memory_mb": 570.390625
+      },
+      "metrics": {
+        "mappings_created": 0,
+        "orphan_count": 5000,
+        "orphan_rate": 1.0,
+        "false_positive_rate": 0.0,
+        "scraper_failure_rate": 0.0,
+        "scraper_timeout_rate": 0.0,
+        "embed_failure_rate": 0.0,
+        "retry_rate": 0.0
+      },
+      "counters": {
+        "scraper_requests": 10000,
+        "scraper_failures": 0,
+        "scraper_timeouts": 0,
+        "scraper_connection_errors": 0,
+        "scraper_http_errors": 0,
+        "scraper_retries": 0,
+        "scraper_cache_hits": 8640,
+        "embed_pages_attempted": 10000,
+        "embed_model_calls": 1257,
+        "embed_failures": 0,
+        "embed_retries": 0,
+        "stage_errors": 0
+      },
+      "stage_errors": {}
+    },
+    {
+      "timestamp": "2026-03-02T19:14:05.497887+00:00",
+      "tier": 5000,
+      "run_index": 2,
+      "seed": 20260302,
+      "success": true,
+      "error_message": "",
+      "pipeline_type": "content",
+      "inputs": {
+        "old_url_count": 5000,
+        "new_url_count": 5000,
+        "old_seed_count": 203,
+        "new_seed_count": 1100
+      },
+      "timing": {
+        "total_seconds": 133.65333804197144,
+        "stages_seconds": {
+          "Filtering URLs": 0.02173583395779133,
+          "Filtering blog posts": 0.0124432920711115,
+          "Matching exact URLs": 0.02761308301705867,
+          "Scraping webpages": 15.694954167003743,
+          "Matching HTML content": 0.023426417028531432,
+          "Generating embeddings": 38.26285312499385,
+          "Pairing URLs": 79.61005283298437
+        }
+      },
+      "resources": {
+        "peak_memory_mb": 591.03125
+      },
+      "metrics": {
+        "mappings_created": 0,
+        "orphan_count": 5000,
+        "orphan_rate": 1.0,
+        "false_positive_rate": 0.0,
+        "scraper_failure_rate": 0.0,
+        "scraper_timeout_rate": 0.0,
+        "embed_failure_rate": 0.0,
+        "retry_rate": 0.0
+      },
+      "counters": {
+        "scraper_requests": 10000,
+        "scraper_failures": 0,
+        "scraper_timeouts": 0,
+        "scraper_connection_errors": 0,
+        "scraper_http_errors": 0,
+        "scraper_retries": 0,
+        "scraper_cache_hits": 8633,
+        "embed_pages_attempted": 10000,
+        "embed_model_calls": 1254,
+        "embed_failures": 0,
+        "embed_retries": 0,
+        "stage_errors": 0
+      },
+      "stage_errors": {}
+    },
+    {
+      "timestamp": "2026-03-02T19:16:11.403804+00:00",
+      "tier": 5000,
+      "run_index": 3,
+      "seed": 20260302,
+      "success": true,
+      "error_message": "",
+      "pipeline_type": "content",
+      "inputs": {
+        "old_url_count": 5000,
+        "new_url_count": 5000,
+        "old_seed_count": 203,
+        "new_seed_count": 1100
+      },
+      "timing": {
+        "total_seconds": 124.94831899995916,
+        "stages_seconds": {
+          "Filtering URLs": 0.02154120896011591,
+          "Filtering blog posts": 0.012673291028477252,
+          "Matching exact URLs": 0.028007499990053475,
+          "Scraping webpages": 8.960890874965116,
+          "Matching HTML content": 0.022377333021722734,
+          "Generating embeddings": 38.36974512494635,
+          "Pairing URLs": 77.53281112504192
+        }
+      },
+      "resources": {
+        "peak_memory_mb": 579.359375
+      },
+      "metrics": {
+        "mappings_created": 0,
+        "orphan_count": 5000,
+        "orphan_rate": 1.0,
+        "false_positive_rate": 0.0,
+        "scraper_failure_rate": 0.0,
+        "scraper_timeout_rate": 0.0,
+        "embed_failure_rate": 0.0,
+        "retry_rate": 0.0
+      },
+      "counters": {
+        "scraper_requests": 10000,
+        "scraper_failures": 0,
+        "scraper_timeouts": 0,
+        "scraper_connection_errors": 0,
+        "scraper_http_errors": 0,
+        "scraper_retries": 0,
+        "scraper_cache_hits": 8646,
+        "embed_pages_attempted": 10000,
+        "embed_model_calls": 1256,
+        "embed_failures": 0,
+        "embed_retries": 0,
+        "stage_errors": 0
+      },
+      "stage_errors": {}
+    }
+  ],
+  "summary": {
+    "tier_summary": [
+      {
+        "tier": 500,
+        "run_count": 3,
+        "median_total_seconds": 8.492364999954589,
+        "median_peak_memory_mb": 203.859375,
+        "median_false_positive_rate": 0.0,
+        "max_false_positive_rate": 0.0
+      },
+      {
+        "tier": 1000,
+        "run_count": 3,
+        "median_total_seconds": 16.329097499954514,
+        "median_peak_memory_mb": 261.65625,
+        "median_false_positive_rate": 0.0,
+        "max_false_positive_rate": 0.0
+      },
+      {
+        "tier": 2500,
+        "run_count": 3,
+        "median_total_seconds": 45.20306729199365,
+        "median_peak_memory_mb": 378.328125,
+        "median_false_positive_rate": 0.0,
+        "max_false_positive_rate": 0.0
+      },
+      {
+        "tier": 5000,
+        "run_count": 3,
+        "median_total_seconds": 124.94831899995916,
+        "median_peak_memory_mb": 579.359375,
+        "median_false_positive_rate": 0.0,
+        "max_false_positive_rate": 0.0
+      }
+    ],
+    "checks": {
+      "stable_runtime_curve": {
+        "pass": true,
+        "reason": "Median runtime scales smoothly across tiers."
+      },
+      "no_runaway_memory": {
+        "pass": true,
+        "reason": "Memory growth is controlled (2.84x, max 579.4 MB)."
+      },
+      "low_false_positive_match_rate": {
+        "pass": true,
+        "reason": "False-positive rate acceptable (median 0.0000, max 0.0000)."
+      },
+      "acceptable_failure_retry_rate": {
+        "pass": true,
+        "reason": "Failure/retry metrics are within limits (max scraper_fail=0.0000, max scraper_timeout=0.0000, max embed_fail=0.0000, max retry=0.0000)."
+      }
+    },
+    "overall_decision": "GO",
+    "successful_runs": 12,
+    "total_runs": 12,
+    "expected_runs": 12,
+    "all_runs_success": true
+  }
+}

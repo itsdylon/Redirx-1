@@ -2,10 +2,14 @@ from flask import Blueprint, request, jsonify
 import os
 from uuid import UUID
 import numpy as np
-from backend.services.pipeline_runner import run_pipeline
+from backend.services.pipeline_runner import run_pipeline, read_csv
 from backend.services.results_formatter import format_results_response, calculate_path_similarity
 from backend.services.auth_service import require_auth
 from backend.services.deep_preview_service import DeepPreviewService
+from backend.services.job_limits import (
+    ContentJobUrlCapExceeded,
+    validate_content_job_url_counts,
+)
 from backend.extensions import limiter
 from src.redirx.config import Config
 from src.redirx.database import (
@@ -53,6 +57,18 @@ def _reject_if_too_large(file_storage, field_name: str):
             "error": f"{field_name} exceeds upload size limit",
             "max_file_bytes": MAX_UPLOAD_FILE_BYTES,
         }), 413
+    return None
+
+
+def _reject_if_content_url_cap_exceeded(
+    old_urls: list[str],
+    new_urls: list[str],
+    pipeline_type: str,
+):
+    try:
+        validate_content_job_url_counts(old_urls, new_urls, pipeline_type)
+    except ContentJobUrlCapExceeded as e:
+        return jsonify(e.to_api_payload()), 422
     return None
 
 
@@ -145,6 +161,25 @@ def process_csv():
     if user_plan == 'launch':
         pipeline_type = 'url_only'
 
+    parsed_old_urls = None
+    parsed_new_urls = None
+    try:
+        parsed_old_urls = read_csv(old_csv)
+        parsed_new_urls = read_csv(new_csv)
+    except ValueError as e:
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 400
+
+    cap_error = _reject_if_content_url_cap_exceeded(
+        parsed_old_urls,
+        parsed_new_urls,
+        pipeline_type,
+    )
+    if cap_error:
+        return cap_error
+
     # Check credits quota for Deep Match pipeline
     if pipeline_type == 'content':
         has_credits, credits_used, credits_limit = quota_db.check_credits(user_id)
@@ -178,6 +213,8 @@ def process_csv():
             user_id=user_id,
             force=force,
             pipeline_type=pipeline_type,
+            old_urls=parsed_old_urls,
+            new_urls=parsed_new_urls,
         )
 
         return jsonify({
@@ -187,6 +224,9 @@ def process_csv():
             "is_duplicate": is_duplicate,
             "pipeline_type": pipeline_type
         }), 200
+
+    except ContentJobUrlCapExceeded as e:
+        return jsonify(e.to_api_payload()), 422
 
     except ValueError as e:
         # CSV parsing or validation errors

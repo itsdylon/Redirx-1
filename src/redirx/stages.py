@@ -839,6 +839,7 @@ class PairingStage(Stage):
         # Track which pages have been matched
         matched_old_pages = set()
         matched_new_pages = set()
+        matched_new_urls = set()
         all_mappings = set(existing_mappings)
 
         # First, process existing mappings from HtmlPruneStage (exact HTML matches)
@@ -855,10 +856,12 @@ class PairingStage(Stage):
             )
             matched_old_pages.add(mapping.old_page)
             matched_new_pages.add(mapping.new_page)
+            matched_new_urls.add(mapping.new_page.url)
 
         # Find remaining unmatched pages
         unmatched_old_pages = [p for p in old_pages if p not in matched_old_pages]
         unmatched_new_pages = [p for p in new_pages if p not in matched_new_pages]
+        unmatched_new_pages_by_url = {p.url: p for p in unmatched_new_pages}
 
         # Filter out root paths - homepage doesn't need redirect
         def is_root_path(url: str) -> bool:
@@ -920,7 +923,7 @@ class PairingStage(Stage):
             # Filter out already matched pages and root paths
             similar_pages = [
                 p for p in similar_pages
-                if not any(p['url'] == matched.url for matched in matched_new_pages)
+                if p['url'] not in matched_new_urls
                 and not is_root_path(p['url'])  # Don't redirect TO root/homepage
             ]
 
@@ -935,10 +938,7 @@ class PairingStage(Stage):
 
             if best_match:
                 # Find the corresponding WebPage object
-                new_page = next(
-                    (p for p in unmatched_new_pages if p.url == best_match['url']),
-                    None
-                )
+                new_page = unmatched_new_pages_by_url.get(best_match['url'])
 
                 if new_page:
                     # Create mapping with confidence scoring
@@ -963,6 +963,8 @@ class PairingStage(Stage):
                     all_mappings.add(mapping)
                     matched_old_pages.add(old_page)
                     matched_new_pages.add(new_page)
+                    matched_new_urls.add(new_page.url)
+                    unmatched_new_pages_by_url.pop(new_page.url, None)
                     matched_count += 1
 
                     review_flag = " [NEEDS REVIEW]" if mapping.needs_review else ""

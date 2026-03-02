@@ -9,6 +9,7 @@ Provides zero-API-cost URL matching through a cascading 3-pass approach:
 
 from __future__ import annotations
 
+import heapq
 import re
 from dataclasses import dataclass, field
 from typing import Optional
@@ -368,19 +369,45 @@ class UrlMatcher:
         old_matrix = tfidf_matrix[:len(old_texts)]
         new_matrix = tfidf_matrix[len(old_texts):]
 
-        # Compute cosine similarity
-        sim_matrix = cosine_similarity(old_matrix, new_matrix)
-
         matched_new: set[int] = set()
 
-        # For each old URL, find the best new URL above threshold
-        # Process in order of highest similarity first for greedy assignment
+        # For each old URL, keep only top-N candidates above threshold.
+        # Use chunks so we do not materialize the full old x new matrix at once.
         scored_pairs = []
-        for old_idx_local in range(len(old_texts)):
-            for new_idx_local in range(len(new_texts)):
-                score = float(sim_matrix[old_idx_local, new_idx_local])
-                if score >= cfg.tfidf_min_score:
-                    scored_pairs.append((score, old_idx_local, new_idx_local))
+        top_n = max(1, int(cfg.tfidf_top_n)) if cfg.tfidf_top_n else 0
+        chunk_size = 256
+
+        for chunk_start in range(0, len(old_texts), chunk_size):
+            chunk_end = min(chunk_start + chunk_size, len(old_texts))
+            sim_chunk = cosine_similarity(
+                old_matrix[chunk_start:chunk_end],
+                new_matrix,
+                dense_output=False,
+            ).tocsr()
+
+            for row_offset in range(sim_chunk.shape[0]):
+                row_start = sim_chunk.indptr[row_offset]
+                row_end = sim_chunk.indptr[row_offset + 1]
+                if row_start == row_end:
+                    continue
+
+                old_idx_local = chunk_start + row_offset
+                row_indices = sim_chunk.indices[row_start:row_end]
+                row_scores = sim_chunk.data[row_start:row_end]
+
+                row_candidates = []
+                for new_idx_local, score in zip(row_indices, row_scores):
+                    score = float(score)
+                    if score >= cfg.tfidf_min_score:
+                        row_candidates.append((score, old_idx_local, int(new_idx_local)))
+
+                if not row_candidates:
+                    continue
+
+                if top_n and len(row_candidates) > top_n:
+                    row_candidates = heapq.nlargest(top_n, row_candidates, key=lambda x: x[0])
+
+                scored_pairs.extend(row_candidates)
 
         # Sort by score descending for greedy best-first matching
         scored_pairs.sort(key=lambda x: x[0], reverse=True)

@@ -79,6 +79,17 @@ export function MainApp() {
   }
 };
 
+  const handleFileRemove = (type: 'old' | 'new') => {
+    if (type === 'old') {
+      setOldSiteFile(null);
+      setOldCsvFile(null);
+      return;
+    }
+
+    setNewSiteFile(null);
+    setNewCsvFile(null);
+  };
+
   const bothFilesUploaded = oldSiteFile && newSiteFile;
 
   const handleNavigate = (view: 'dashboard' | 'upload' | 'review') => {
@@ -151,11 +162,13 @@ export function MainApp() {
           <FileUploadZone
             label="Old Site CSV"
             onFileUpload={(file) => handleFileUpload(file, 'old')}
+            onFileRemove={() => handleFileRemove('old')}
             file={oldSiteFile}
           />
           <FileUploadZone
             label="New Site CSV"
             onFileUpload={(file) => handleFileUpload(file, 'new')}
+            onFileRemove={() => handleFileRemove('new')}
             file={newSiteFile}
           />
         </div>

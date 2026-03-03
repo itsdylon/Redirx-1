@@ -6,11 +6,12 @@ import { Alert, AlertDescription } from './ui/alert';
 interface FileUploadZoneProps {
   label: string;
   onFileUpload: (file: File) => void;
+  onFileRemove: () => void;
   file: { name: string; rowCount: number } | null;
   validationError?: string | null;
 }
 
-export function FileUploadZone({ label, onFileUpload, file, validationError }: FileUploadZoneProps) {
+export function FileUploadZone({ label, onFileUpload, onFileRemove, file, validationError }: FileUploadZoneProps) {
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -47,10 +48,12 @@ export function FileUploadZone({ label, onFileUpload, file, validationError }: F
 
   const handleRemove = (e: React.MouseEvent) => {
     e.stopPropagation();
-    // Reset file - in a real app, this would call a parent handler
+    e.preventDefault();
+    // Reset the native input so selecting the same file again triggers onChange.
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
+    onFileRemove();
   };
 
   return (

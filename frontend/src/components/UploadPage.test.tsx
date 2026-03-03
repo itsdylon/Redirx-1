@@ -124,6 +124,17 @@ function uploadToZone(label: string, file: File) {
   fireEvent.change(input, { target: { files: [file] } });
 }
 
+function removeFromZone(label: string) {
+  const labelEl = screen.getByText(label);
+  const container = labelEl.closest('div')!;
+  const buttons = container.querySelectorAll('button[type="button"]');
+  const removeButton = buttons[buttons.length - 1] as HTMLButtonElement | undefined;
+  if (!removeButton) {
+    throw new Error(`Remove button not found for zone "${label}"`);
+  }
+  fireEvent.click(removeButton);
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -558,6 +569,30 @@ describe('UploadPage — file replacement', () => {
     await waitFor(() => {
       expect(screen.queryByText(/does not appear to contain URLs/)).not.toBeInTheDocument();
       expect(screen.getAllByText('good.csv').length).toBeGreaterThanOrEqual(1);
+    });
+  });
+});
+
+describe('UploadPage — file removal', () => {
+  it('removes a selected file and disables begin matching', async () => {
+    render(<UploadPage />);
+
+    const oldCsv = textFile('https://old.com/page1\nhttps://old.com/page2\n', 'old.csv');
+    const newCsv = textFile('https://new.com/page1\nhttps://new.com/page2\n', 'new.csv');
+
+    uploadToZone('Old Site CSV', oldCsv);
+    uploadToZone('New Site CSV', newCsv);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Begin Deep Match/ })).not.toBeDisabled();
+    });
+
+    removeFromZone('Old Site CSV');
+
+    await waitFor(() => {
+      expect(screen.queryByText('old.csv')).not.toBeInTheDocument();
+      expect(screen.getAllByText('new.csv').length).toBeGreaterThanOrEqual(1);
+      expect(screen.getByRole('button', { name: /Begin Deep Match/ })).toBeDisabled();
     });
   });
 });

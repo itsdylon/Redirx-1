@@ -224,6 +224,27 @@ export function UploadPage() {
     }
   };
 
+  const handleFileRemove = (type: 'old' | 'new') => {
+    setContentCapApiError(null);
+    setPendingWarnings(null);
+    setError(null);
+    setQuotaError(null);
+    setDuplicateSessionId(null);
+    setShowScrapingWarning(false);
+    setScrapingWarningAcknowledged(false);
+
+    if (type === 'old') {
+      setOldSiteFile(null);
+      setOldCsvFile(null);
+      setOldFileValidation(null);
+      return;
+    }
+
+    setNewSiteFile(null);
+    setNewCsvFile(null);
+    setNewFileValidation(null);
+  };
+
   const handleBeginMatching = async ({
     force = false,
     skipWarningCheck = false,
@@ -703,6 +724,7 @@ export function UploadPage() {
               <FileUploadZone
                 label="Old Site CSV"
                 onFileUpload={(file) => handleFileUpload(file, 'old')}
+                onFileRemove={() => handleFileRemove('old')}
                 file={oldSiteFile}
                 validationError={oldFileValidation && !oldFileValidation.valid ? oldFileValidation.errors.join(', ') : null}
               />
@@ -716,6 +738,7 @@ export function UploadPage() {
               <FileUploadZone
                 label="New Site CSV"
                 onFileUpload={(file) => handleFileUpload(file, 'new')}
+                onFileRemove={() => handleFileRemove('new')}
                 file={newSiteFile}
                 validationError={newFileValidation && !newFileValidation.valid ? newFileValidation.errors.join(', ') : null}
               />

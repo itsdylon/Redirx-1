@@ -10,6 +10,7 @@ function renderZone(overrides: Partial<Parameters<typeof FileUploadZone>[0]> = {
   const defaults = {
     label: 'Old Site URLs',
     onFileUpload: vi.fn(),
+    onFileRemove: vi.fn(),
     file: null,
     validationError: null,
   };
@@ -175,6 +176,7 @@ describe('FileUploadZone — visual states', () => {
       <FileUploadZone
         label="Test"
         onFileUpload={vi.fn()}
+        onFileRemove={vi.fn()}
         file={null}
         validationError="Some error"
       />
@@ -188,11 +190,45 @@ describe('FileUploadZone — visual states', () => {
       <FileUploadZone
         label="Test"
         onFileUpload={vi.fn()}
+        onFileRemove={vi.fn()}
         file={{ name: 'urls.csv', rowCount: 5 }}
         validationError={null}
       />
     );
     const zone = container.querySelector('.bg-muted');
     expect(zone).toBeTruthy();
+  });
+});
+
+describe('FileUploadZone — removal', () => {
+  it('calls onFileRemove when the remove button is clicked', () => {
+    const onFileRemove = vi.fn();
+    const onFileUpload = vi.fn();
+    renderZone({
+      file: { name: 'urls.csv', rowCount: 5 },
+      onFileRemove,
+      onFileUpload,
+    });
+
+    const removeButton = screen.getByRole('button');
+    fireEvent.click(removeButton);
+
+    expect(onFileRemove).toHaveBeenCalledTimes(1);
+    expect(onFileUpload).not.toHaveBeenCalled();
+  });
+
+  it('does not trigger file input click when remove is clicked', () => {
+    const clickSpy = vi.spyOn(HTMLInputElement.prototype, 'click');
+    const onFileRemove = vi.fn();
+    renderZone({
+      file: { name: 'urls.csv', rowCount: 5 },
+      onFileRemove,
+    });
+
+    const removeButton = screen.getByRole('button');
+    fireEvent.click(removeButton);
+
+    expect(clickSpy).not.toHaveBeenCalled();
+    clickSpy.mockRestore();
   });
 });

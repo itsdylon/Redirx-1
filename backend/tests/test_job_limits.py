@@ -43,6 +43,10 @@ class ContentJobLimitTests(unittest.TestCase):
         self.assertEqual(payload["new_url_count"], 2)
         self.assertEqual(payload["max_old_urls"], 2)
         self.assertEqual(payload["max_new_urls"], 5)
+        self.assertEqual(payload["affected_file"], "old")
+        self.assertEqual(payload["next_action"], "reduce_csv_rows_or_switch_pipeline")
+        self.assertEqual(payload["retryable"], False)
+        self.assertIn("Deep Match has a per-file limit", payload["user_message"])
 
     def test_both_caps_violation_sets_both_reason_code(self):
         with patch("backend.services.job_limits.CONTENT_MAX_OLD_URLS", 1), patch(
@@ -57,6 +61,7 @@ class ContentJobLimitTests(unittest.TestCase):
 
         exc = err.exception
         self.assertEqual(exc.reason_code, "content_both_url_caps_exceeded")
+        self.assertEqual(exc.affected_file, "both")
         self.assertIn("content_both_url_caps_exceeded", exc.to_worker_error_message())
 
 

@@ -107,6 +107,11 @@ function xmlFile(urls: string[]): File {
   return new File([sitemapXml(urls)], 'sitemap.xml', { type: 'application/xml' });
 }
 
+function largeCsvFile(rows: number, host: string, name: string): File {
+  const lines = Array.from({ length: rows }, (_, i) => `https://${host}/page-${i + 1}`).join('\n');
+  return textFile(lines, name);
+}
+
 /**
  * Simulate uploading a file to a FileUploadZone identified by its label text.
  * Uses fireEvent.change instead of userEvent.upload because the file input
@@ -444,6 +449,91 @@ describe('UploadPage — API submission', () => {
     await waitFor(() => {
       const button = screen.getByRole('button', { name: /Begin/ });
       expect(button).toBeDisabled();
+    });
+  });
+
+  it('blocks Deep Match locally when file counts exceed the content URL cap', async () => {
+    render(<UploadPage />);
+
+    uploadToZone('Old Site CSV', largeCsvFile(5001, 'old.example.com', 'old-large.csv'));
+    uploadToZone('New Site CSV', largeCsvFile(5001, 'new.example.com', 'new-large.csv'));
+
+    await waitFor(() => {
+      expect(screen.getByText(/Deep Match URL Limit Reached/)).toBeInTheDocument();
+      expect(screen.getAllByText(/Old Site CSV has 5,001 URLs/).length).toBeGreaterThan(0);
+      expect(screen.getAllByText(/New Site CSV has 5,001 URLs/).length).toBeGreaterThan(0);
+    });
+
+    expect(screen.getByRole('button', { name: /Begin Deep Match/ })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /Switch to Quick Match/ })).toBeInTheDocument();
+  });
+
+  it('switches to Quick Match from cap panel and falls back to warning flow', async () => {
+    const user = userEvent.setup();
+    render(<UploadPage />);
+
+    uploadToZone('Old Site CSV', largeCsvFile(5001, 'old.example.com', 'old-large.csv'));
+    uploadToZone('New Site CSV', largeCsvFile(5001, 'new.example.com', 'new-large.csv'));
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Switch to Quick Match/ })).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole('button', { name: /Switch to Quick Match/ }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Begin Quick Match/ })).not.toBeDisabled();
+    });
+
+    await user.click(screen.getByRole('button', { name: /Begin Quick Match/ }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/File Warnings Detected/)).toBeInTheDocument();
+      expect(screen.getAllByText(/Large dataset detected/).length).toBeGreaterThan(0);
+    });
+  });
+
+  it('shows actionable cap details when API returns structured cap error', async () => {
+    const user = userEvent.setup();
+    mockUploadCSVs.mockRejectedValueOnce({
+      type: 'content_url_cap_exceeded',
+      message: 'Deep Match has a per-file limit of 5,000 URLs. Split your CSV or switch to Quick Match.',
+      reason_code: 'content_old_url_cap_exceeded',
+      old_url_count: 5001,
+      new_url_count: 42,
+      max_old_urls: 5000,
+      max_new_urls: 5000,
+      affected_file: 'old',
+      next_action: 'reduce_csv_rows_or_switch_pipeline',
+      retryable: false,
+    });
+
+    render(<UploadPage />);
+
+    const oldCsv = textFile('https://old.com/page1\nhttps://old.com/page2\n', 'old.csv');
+    const newCsv = textFile('https://new.com/page1\nhttps://new.com/page2\n', 'new.csv');
+    uploadToZone('Old Site CSV', oldCsv);
+    uploadToZone('New Site CSV', newCsv);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Begin Deep Match/ })).not.toBeDisabled();
+    });
+
+    await user.click(screen.getByRole('button', { name: /Begin Deep Match/ }));
+    await waitFor(() => {
+      expect(screen.getByText(/Disable Rate Limiting Before Scanning/)).toBeInTheDocument();
+    });
+    await user.click(
+      screen.getByRole('checkbox', { name: /I've disabled rate limiting and bot protection on my sites/i })
+    );
+    await user.click(screen.getByRole('button', { name: /Proceed with Deep Match/ }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/Deep Match URL Limit Reached/)).toBeInTheDocument();
+      expect(
+        screen.getAllByText(/Old Site CSV has 5,001 URLs; Deep Match allows up to 5,000/).length
+      ).toBeGreaterThan(0);
+      expect(screen.getByRole('button', { name: /Switch to Quick Match/ })).toBeInTheDocument();
     });
   });
 });

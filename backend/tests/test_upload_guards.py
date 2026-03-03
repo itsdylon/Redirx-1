@@ -81,6 +81,10 @@ class UploadGuardTests(unittest.TestCase):
         self.assertEqual(payload["new_url_count"], 1)
         self.assertEqual(payload["max_old_urls"], 2)
         self.assertEqual(payload["max_new_urls"], 2)
+        self.assertEqual(payload["affected_file"], "old")
+        self.assertEqual(payload["next_action"], "reduce_csv_rows_or_switch_pipeline")
+        self.assertEqual(payload["retryable"], False)
+        self.assertIn("split your csv or switch to quick match", payload["user_message"].lower())
 
     def test_pipeline_content_url_cap_guard_skips_url_only_jobs(self):
         with patch("backend.services.job_limits.CONTENT_MAX_OLD_URLS", 2), patch(
@@ -139,6 +143,9 @@ class UploadGuardTests(unittest.TestCase):
         self.assertEqual(payload["reason_code"], "content_old_url_cap_exceeded")
         self.assertEqual(payload["old_url_count"], 3)
         self.assertEqual(payload["new_url_count"], 1)
+        self.assertEqual(payload["affected_file"], "old")
+        self.assertEqual(payload["next_action"], "reduce_csv_rows_or_switch_pipeline")
+        self.assertEqual(payload["retryable"], False)
         quota_db.check_credits.assert_not_called()
 
 

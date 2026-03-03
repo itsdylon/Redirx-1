@@ -7,6 +7,19 @@
 export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
 
 /**
+ * Deep Match content-pipeline hard cap per uploaded file.
+ * Keep this aligned with backend CONTENT_MAX_URLS_PER_SITE.
+ */
+const _CONTENT_MAX_URLS_PER_SITE_RAW = Number.parseInt(
+  String(import.meta.env.VITE_CONTENT_MAX_URLS_PER_SITE ?? '5000'),
+  10
+);
+export const CONTENT_MAX_URLS_PER_SITE =
+  Number.isFinite(_CONTENT_MAX_URLS_PER_SITE_RAW) && _CONTENT_MAX_URLS_PER_SITE_RAW > 0
+    ? _CONTENT_MAX_URLS_PER_SITE_RAW
+    : 5000;
+
+/**
  * Get authorization headers for authenticated requests.
  */
 export function getAuthHeaders(): HeadersInit {

@@ -1,4 +1,4 @@
-import { uploadCSVs, QuotaExceededError } from "../api/pipeline";
+import { uploadCSVs, QuotaExceededError, type ContentUrlCapError } from "../api/pipeline";
 import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
@@ -11,6 +11,7 @@ import { AlertTriangle, Loader2, Zap, Search, Info, ShieldAlert } from 'lucide-r
 import { validateFile, FileValidationResult } from '../utils/validation';
 import { appQueryClient } from '../queries/queryClient';
 import { queryKeys } from '../queries/queryKeys';
+import { CONTENT_MAX_URLS_PER_SITE } from '../api/config';
 
 interface FileData {
   name: string;
@@ -56,6 +57,8 @@ function buildSampleCsv(urls: string[]): string {
   return ["url", ...urls].join("\n");
 }
 
+const LARGE_DATASET_WARNING_PREFIX = 'Large dataset detected';
+
 export function UploadPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -76,6 +79,7 @@ export function UploadPage() {
   const [newSiteFile, setNewSiteFile] = useState<FileData | null>(null);
   const [quotaError, setQuotaError] = useState<QuotaError | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [contentCapApiError, setContentCapApiError] = useState<ContentUrlCapError | null>(null);
   const [duplicateSessionId, setDuplicateSessionId] = useState<string | null>(null);
 
   // Raw file objects needed for API
@@ -96,6 +100,12 @@ export function UploadPage() {
     tutorialIntent &&
     (onboarding.onboarding_status === 'in_progress' || onboarding.onboarding_status === 'not_started');
   const sampleTutorialActive = tutorialActive && (sampleFromQuery || tutorialPath === 'sample');
+  const effectivePipelineType = isFreeUser ? 'url_only' : pipelineType;
+  const oldRowCount = oldFileValidation?.rowCount ?? oldSiteFile?.rowCount ?? 0;
+  const newRowCount = newFileValidation?.rowCount ?? newSiteFile?.rowCount ?? 0;
+  const oldContentCapExceeded = effectivePipelineType === 'content' && oldRowCount > CONTENT_MAX_URLS_PER_SITE;
+  const newContentCapExceeded = effectivePipelineType === 'content' && newRowCount > CONTENT_MAX_URLS_PER_SITE;
+  const hasLocalContentCapViolation = oldContentCapExceeded || newContentCapExceeded;
 
   useEffect(() => {
     if (!tutorialActive) {
@@ -167,6 +177,10 @@ export function UploadPage() {
   const [scrapingWarningAcknowledged, setScrapingWarningAcknowledged] = useState(false);
 
   const handleFileUpload = async (file: File, type: 'old' | 'new') => {
+    setContentCapApiError(null);
+    setPendingWarnings(null);
+    setError(null);
+
     // Clear previous errors for this file type
     if (type === 'old') {
       setOldFileValidation(null);
@@ -246,10 +260,19 @@ export function UploadPage() {
       return;
     }
 
+    if (effectivePipelineType === 'content' && hasLocalContentCapViolation) {
+      return;
+    }
+
     // Check for warnings if not already confirmed
     if (!skipWarningCheck) {
-      const oldWarnings = oldFileValidation?.warnings || [];
-      const newWarnings = newFileValidation?.warnings || [];
+      const suppressLargeDatasetWarnings = effectivePipelineType === 'content' && hasLocalContentCapViolation;
+      const oldWarnings = suppressLargeDatasetWarnings
+        ? (oldFileValidation?.warnings || []).filter((w) => !w.startsWith(LARGE_DATASET_WARNING_PREFIX))
+        : (oldFileValidation?.warnings || []);
+      const newWarnings = suppressLargeDatasetWarnings
+        ? (newFileValidation?.warnings || []).filter((w) => !w.startsWith(LARGE_DATASET_WARNING_PREFIX))
+        : (newFileValidation?.warnings || []);
 
       if (oldWarnings.length > 0 || newWarnings.length > 0) {
         setPendingWarnings({ old: oldWarnings, new: newWarnings });
@@ -258,7 +281,6 @@ export function UploadPage() {
     }
 
     // Show scraping warning for Deep Match (content pipeline)
-    const effectivePipelineType = isFreeUser ? 'url_only' : pipelineType;
     if (effectivePipelineType === 'content' && !skipScrapingWarning) {
       setShowScrapingWarning(true);
       setScrapingWarningAcknowledged(false);
@@ -268,13 +290,14 @@ export function UploadPage() {
     // Clear previous errors
     setError(null);
     setQuotaError(null);
+    setContentCapApiError(null);
     setDuplicateSessionId(null);
     setPendingWarnings(null);
     setIsUploading(true);
     setIsLoading(true);
 
     try {
-      const result = await uploadCSVs(oldCsvFile, newCsvFile, force, isFreeUser ? 'url_only' : pipelineType);
+      const result = await uploadCSVs(oldCsvFile, newCsvFile, force, effectivePipelineType);
 
       console.log("Pipeline Response:", result);
 
@@ -311,6 +334,9 @@ export function UploadPage() {
           current_usage: quotaErr.current_usage,
           limit: quotaErr.limit
         });
+      } else if (err && typeof err === 'object' && 'type' in err && (err as ContentUrlCapError).type === 'content_url_cap_exceeded') {
+        setContentCapApiError(err as ContentUrlCapError);
+        setError(null);
       } else if (err instanceof Error) {
         setError(err.message);
       } else {
@@ -341,8 +367,51 @@ export function UploadPage() {
     setScrapingWarningAcknowledged(false);
   };
 
+  const handlePipelineTypeChange = (nextType: 'content' | 'url_only') => {
+    setPipelineType(nextType);
+    setPendingWarnings(null);
+    setContentCapApiError(null);
+    setError(null);
+  };
+
+  const handleSwitchToQuickMatch = () => {
+    if (!isFreeUser) {
+      setPipelineType('url_only');
+    }
+    setPendingWarnings(null);
+    setContentCapApiError(null);
+    setError(null);
+  };
+
   const bothFilesUploaded = oldSiteFile && newSiteFile;
-  const hasValidationErrors = (oldFileValidation && !oldFileValidation.valid) || (newFileValidation && !newFileValidation.valid);
+  const hasValidationErrors =
+    (oldFileValidation && !oldFileValidation.valid) ||
+    (newFileValidation && !newFileValidation.valid) ||
+    hasLocalContentCapViolation;
+  const defaultContentCapMessage =
+    `Deep Match has a per-file limit of ${CONTENT_MAX_URLS_PER_SITE.toLocaleString()} URLs. ` +
+    'Split your CSV or switch to Quick Match.';
+  const contentCapPanelData = hasLocalContentCapViolation
+    ? {
+        message: defaultContentCapMessage,
+        oldCount: oldRowCount,
+        newCount: newRowCount,
+        maxOld: CONTENT_MAX_URLS_PER_SITE,
+        maxNew: CONTENT_MAX_URLS_PER_SITE,
+        showOld: oldContentCapExceeded,
+        showNew: newContentCapExceeded,
+      }
+    : contentCapApiError
+      ? {
+          message: contentCapApiError.message || defaultContentCapMessage,
+          oldCount: contentCapApiError.old_url_count,
+          newCount: contentCapApiError.new_url_count,
+          maxOld: contentCapApiError.max_old_urls,
+          maxNew: contentCapApiError.max_new_urls,
+          showOld: contentCapApiError.affected_file === 'old' || contentCapApiError.affected_file === 'both',
+          showNew: contentCapApiError.affected_file === 'new' || contentCapApiError.affected_file === 'both',
+        }
+      : null;
 
   // Show loading screen when processing
   if (isLoading) {
@@ -391,7 +460,7 @@ export function UploadPage() {
           ) : (
             <div className="mb-6 grid grid-cols-2 gap-4">
               <button
-                onClick={() => setPipelineType('content')}
+                onClick={() => handlePipelineTypeChange('content')}
                 className={`border p-4 text-left transition-colors ${
                   pipelineType === 'content'
                     ? 'border-primary bg-primary/5'
@@ -410,7 +479,7 @@ export function UploadPage() {
                 </p>
               </button>
               <button
-                onClick={() => setPipelineType('url_only')}
+                onClick={() => handlePipelineTypeChange('url_only')}
                 className={`border p-4 text-left transition-colors ${
                   pipelineType === 'url_only'
                     ? 'border-primary bg-primary/5'
@@ -426,6 +495,40 @@ export function UploadPage() {
                   URL pattern matching only. Fastest, no credits used, no scraping required.
                 </p>
               </button>
+            </div>
+          )}
+
+          {/* Content URL Cap Error */}
+          {contentCapPanelData && (
+            <div className="mb-6 border border-destructive bg-destructive/10 p-4 flex items-start gap-3">
+              <AlertTriangle className="h-5 w-5 text-destructive flex-shrink-0 mt-0.5" />
+              <div className="flex-1">
+                <div className="font-medium text-destructive">Deep Match URL Limit Reached</div>
+                <p className="text-sm text-muted-foreground mt-1">{contentCapPanelData.message}</p>
+
+                {contentCapPanelData.showOld && (
+                  <p className="text-sm text-foreground mt-2">
+                    Old Site CSV has {contentCapPanelData.oldCount.toLocaleString()} URLs; Deep Match allows up to {contentCapPanelData.maxOld.toLocaleString()}.
+                  </p>
+                )}
+                {contentCapPanelData.showNew && (
+                  <p className="text-sm text-foreground mt-1">
+                    New Site CSV has {contentCapPanelData.newCount.toLocaleString()} URLs; Deep Match allows up to {contentCapPanelData.maxNew.toLocaleString()}.
+                  </p>
+                )}
+
+                {!isFreeUser && effectivePipelineType === 'content' && (
+                  <div className="flex gap-3 mt-3">
+                    <Button
+                      variant="default"
+                      size="sm"
+                      onClick={handleSwitchToQuickMatch}
+                    >
+                      Switch to Quick Match
+                    </Button>
+                  </div>
+                )}
+              </div>
             </div>
           )}
 
@@ -493,7 +596,7 @@ export function UploadPage() {
               <div className="flex-1">
                 <div className="font-medium text-yellow-600 dark:text-yellow-400">File Warnings Detected</div>
                 <p className="text-sm text-muted-foreground mt-1">
-                  The following warnings were found in your files. You can proceed anyway, but processing may take longer or encounter issues.
+                  The following non-blocking warnings were found in your files. You can continue, but processing may take longer or encounter issues.
                 </p>
                 {pendingWarnings.old.length > 0 && (
                   <div className="mt-3">
@@ -603,6 +706,11 @@ export function UploadPage() {
                 file={oldSiteFile}
                 validationError={oldFileValidation && !oldFileValidation.valid ? oldFileValidation.errors.join(', ') : null}
               />
+              {contentCapPanelData?.showOld && effectivePipelineType === 'content' && (
+                <p className="mt-2 text-xs text-destructive">
+                  Old Site CSV has {contentCapPanelData.oldCount.toLocaleString()} URLs; Deep Match allows up to {contentCapPanelData.maxOld.toLocaleString()}.
+                </p>
+              )}
             </div>
             <div className={tutorialActive && showCoachmarks ? 'rounded-md ring-2 ring-[#26D99D]/75 p-2 bg-[#26D99D]/8 dark:bg-[#26D99D]/14' : ''}>
               <FileUploadZone
@@ -611,6 +719,11 @@ export function UploadPage() {
                 file={newSiteFile}
                 validationError={newFileValidation && !newFileValidation.valid ? newFileValidation.errors.join(', ') : null}
               />
+              {contentCapPanelData?.showNew && effectivePipelineType === 'content' && (
+                <p className="mt-2 text-xs text-destructive">
+                  New Site CSV has {contentCapPanelData.newCount.toLocaleString()} URLs; Deep Match allows up to {contentCapPanelData.maxNew.toLocaleString()}.
+                </p>
+              )}
             </div>
           </div>
 
@@ -659,7 +772,9 @@ export function UploadPage() {
             </Button>
             {hasValidationErrors && (
               <p className="text-sm text-destructive mt-2 text-center">
-                Please fix validation errors before proceeding
+                {hasLocalContentCapViolation && effectivePipelineType === 'content'
+                  ? 'Deep Match URL limit exceeded. Split your CSVs or switch to Quick Match.'
+                  : 'Please fix validation errors before proceeding'}
               </p>
             )}
           </div>

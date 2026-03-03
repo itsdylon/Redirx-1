@@ -28,6 +28,7 @@ class ContentJobUrlCapExceeded(ValueError):
         *,
         reason_code: str,
         user_message: str,
+        affected_file: str,
         old_url_count: int,
         new_url_count: int,
         max_old_urls: int,
@@ -37,6 +38,7 @@ class ContentJobUrlCapExceeded(ValueError):
         super().__init__(user_message)
         self.reason_code = reason_code
         self.user_message = user_message
+        self.affected_file = affected_file
         self.old_url_count = old_url_count
         self.new_url_count = new_url_count
         self.max_old_urls = max_old_urls
@@ -47,8 +49,12 @@ class ContentJobUrlCapExceeded(ValueError):
         return {
             "success": False,
             "error": self.user_message,
+            "user_message": self.user_message,
             "code": self.reason_code,
             "reason_code": self.reason_code,
+            "retryable": False,
+            "next_action": "reduce_csv_rows_or_switch_pipeline",
+            "affected_file": self.affected_file,
             "pipeline_type": self.pipeline_type,
             "old_url_count": self.old_url_count,
             "new_url_count": self.new_url_count,
@@ -85,27 +91,34 @@ def validate_content_job_url_counts(
 
     if exceeds_old and exceeds_new:
         reason_code = "content_both_url_caps_exceeded"
+        affected_file = "both"
         user_message = (
-            "Content pipeline URL cap exceeded for both old and new URL lists. "
-            f"Received {old_count} old URLs (max {CONTENT_MAX_OLD_URLS}) and "
-            f"{new_count} new URLs (max {CONTENT_MAX_NEW_URLS})."
+            f"Deep Match limits are {CONTENT_MAX_OLD_URLS:,} URLs for Old Site CSV "
+            f"and {CONTENT_MAX_NEW_URLS:,} URLs for New Site CSV. "
+            f"You uploaded {old_count:,} old URLs and {new_count:,} new URLs. "
+            "Split your CSVs or switch to Quick Match."
         )
     elif exceeds_old:
         reason_code = "content_old_url_cap_exceeded"
+        affected_file = "old"
         user_message = (
-            "Content pipeline URL cap exceeded for old URLs. "
-            f"Received {old_count}, max allowed is {CONTENT_MAX_OLD_URLS}."
+            f"Deep Match has a per-file limit of {CONTENT_MAX_OLD_URLS:,} URLs. "
+            f"Your Old Site CSV has {old_count:,} URLs. "
+            "Split your CSV or switch to Quick Match."
         )
     else:
         reason_code = "content_new_url_cap_exceeded"
+        affected_file = "new"
         user_message = (
-            "Content pipeline URL cap exceeded for new URLs. "
-            f"Received {new_count}, max allowed is {CONTENT_MAX_NEW_URLS}."
+            f"Deep Match has a per-file limit of {CONTENT_MAX_NEW_URLS:,} URLs. "
+            f"Your New Site CSV has {new_count:,} URLs. "
+            "Split your CSV or switch to Quick Match."
         )
 
     raise ContentJobUrlCapExceeded(
         reason_code=reason_code,
         user_message=user_message,
+        affected_file=affected_file,
         old_url_count=old_count,
         new_url_count=new_count,
         max_old_urls=CONTENT_MAX_OLD_URLS,

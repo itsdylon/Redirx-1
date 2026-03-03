@@ -1,9 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { LayoutDashboard, FolderOpen, Settings, ChevronLeft, ChevronRight, LogOut, Moon, Sun, Shield } from 'lucide-react';
-import { useTheme } from 'next-themes';
+import { LayoutDashboard, FolderOpen, Settings, ChevronLeft, ChevronRight, LogOut, Shield } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
-import { Button } from './ui/button';
 import faviconImg from '@/assets/favicon.png';
 
 interface SidebarProps {
@@ -13,7 +11,6 @@ interface SidebarProps {
 export function Sidebar({ onLogout }: SidebarProps) {
   const navigate = useNavigate();
   const location = useLocation();
-  const { theme, setTheme } = useTheme();
   const { user } = useAuth();
   const [isCollapsed, setIsCollapsed] = useState(false);
 
@@ -84,21 +81,7 @@ export function Sidebar({ onLogout }: SidebarProps) {
       </nav>
 
       {/* Bottom Actions */}
-      <div className="p-3 border-t border-border space-y-1">
-        <button
-          onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-          className={`w-full flex items-center gap-3 px-3 py-2 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition-colors ${
-            isCollapsed ? 'justify-center' : ''
-          }`}
-          title={isCollapsed ? `Switch to ${theme === 'dark' ? 'light' : 'dark'} mode` : ''}
-        >
-          {theme === 'dark' ? (
-            <Sun className="h-5 w-5 flex-shrink-0" />
-          ) : (
-            <Moon className="h-5 w-5 flex-shrink-0" />
-          )}
-          {!isCollapsed && <span className="text-sm font-medium">{theme === 'dark' ? 'Light Mode' : 'Dark Mode'}</span>}
-        </button>
+      <div className="p-3 border-t border-border">
         <button
           onClick={onLogout}
           className={`w-full flex items-center gap-3 px-3 py-2 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition-colors ${

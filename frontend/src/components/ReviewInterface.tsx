@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
+import { usePostHog } from '@posthog/react';
 import { useHotkeys } from 'react-hotkeys-hook';
 import { DashboardLayout } from './DashboardLayout';
 import { StatsBar } from './StatsBar';
@@ -67,6 +68,7 @@ export interface RedirectMapping {
 export function ReviewInterface() {
   const { sessionId } = useParams<{ sessionId: string }>();
   const navigate = useNavigate();
+  const posthog = usePostHog();
   const { user } = useAuth();
   const [searchParams] = useSearchParams();
   const {
@@ -99,6 +101,7 @@ export function ReviewInterface() {
   const sampleGenerateMarkedRef = useRef(false);
   const tutorialReviewMarkedRef = useRef(false);
   const hydratedSessionRef = useRef<string | null>(null);
+  const resultsViewedTrackedRef = useRef(false);
   const tutorialFromQuery = searchParams.get('tutorial') === '1';
   const tutorialActive = !!onboarding &&
     onboarding.onboarding_status === 'in_progress' &&
@@ -140,6 +143,7 @@ export function ReviewInterface() {
 
   useEffect(() => {
     hydratedSessionRef.current = null;
+    resultsViewedTrackedRef.current = false;
     setRedirects([]);
     setPipelineType('content');
     setError(null);
@@ -166,7 +170,16 @@ export function ReviewInterface() {
     }
 
     hydratedSessionRef.current = sessionId;
-  }, [resultsQuery.data, sessionId]);
+
+    if (!resultsViewedTrackedRef.current) {
+      resultsViewedTrackedRef.current = true;
+      posthog?.capture('results_page_viewed', {
+        session_id: sessionId,
+        pipeline_type: resultsQuery.data.session?.pipeline_type || 'content',
+        total_mappings: resultsQuery.data.mappings?.length ?? 0,
+      });
+    }
+  }, [resultsQuery.data, sessionId, posthog]);
 
   useEffect(() => {
     if (!resultsQuery.error) return;

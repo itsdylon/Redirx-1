@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { usePostHog } from '@posthog/react';
 import { API_BASE_URL } from '../api/config';
 import { supabase } from '../lib/supabase';
 import { ApiError, throwApiErrorFromResponse, toApiError } from '../utils/errorHandler';
@@ -42,6 +43,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
+  const posthog = usePostHog();
+
+  // Identify user in PostHog when auth state changes
+  useEffect(() => {
+    if (user) {
+      posthog?.identify(user.id, {
+        email: user.email,
+        plan: user.plan,
+        is_lifetime: user.is_lifetime,
+        trial_expires_at: user.trial_expires_at,
+        is_admin: user.is_admin,
+      });
+    }
+  }, [user, posthog]);
 
   // Initialize auth state from localStorage on mount
   useEffect(() => {
@@ -223,6 +238,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Clear local state
     localStorage.removeItem('access_token');
     localStorage.removeItem('refresh_token');
+    posthog?.reset();
     setUser(null);
   };
 

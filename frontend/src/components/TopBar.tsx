@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
-import { Bell, User, LogOut, Settings as SettingsIcon, Plus } from 'lucide-react';
+import { LogOut, Settings as SettingsIcon, Plus, Moon, Sun } from 'lucide-react';
 import { Button } from './ui/button';
 import { Card } from './ui/card';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import { useTheme } from 'next-themes';
 
 interface TopBarProps {
   title: string;
@@ -13,27 +14,15 @@ interface TopBarProps {
 export function TopBar({ title, onCreateJob }: TopBarProps) {
   const navigate = useNavigate();
   const { user, logout } = useAuth();
+  const { theme, setTheme } = useTheme();
   const userName = user?.full_name;
   const userEmail = user?.email;
-  const [showNotifications, setShowNotifications] = useState(false);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
-  const notificationsRef = useRef<HTMLDivElement>(null);
   const profileRef = useRef<HTMLDivElement>(null);
-
-  // Mock notifications - replace with real data later
-  const notifications = [
-    { id: 1, message: 'Job "Website Migration" completed', time: '2 min ago', unread: true },
-    { id: 2, message: 'New redirect mapping created', time: '1 hour ago', unread: false },
-  ];
-
-  const unreadCount = notifications.filter(n => n.unread).length;
 
   // Close dropdowns when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (notificationsRef.current && !notificationsRef.current.contains(event.target as Node)) {
-        setShowNotifications(false);
-      }
       if (profileRef.current && !profileRef.current.contains(event.target as Node)) {
         setShowProfileMenu(false);
       }
@@ -69,49 +58,6 @@ export function TopBar({ title, onCreateJob }: TopBarProps) {
           New Redirect Job
         </Button>
 
-        {/* Notifications */}
-        <div className="relative" ref={notificationsRef}>
-          <button
-            onClick={() => setShowNotifications(!showNotifications)}
-            className="relative p-2 rounded-md hover:bg-muted transition-colors"
-          >
-            <Bell className="h-5 w-5 text-muted-foreground" />
-            {unreadCount > 0 && (
-              <span className="absolute -top-1 -right-1 w-5 h-5 bg-destructive text-destructive-foreground text-xs rounded-full flex items-center justify-center">
-                {unreadCount}
-              </span>
-            )}
-          </button>
-
-          {/* Notifications Dropdown */}
-          {showNotifications && (
-            <Card className="absolute right-0 top-full mt-2 w-80 shadow-lg z-50">
-              <div className="p-4 border-b border-border">
-                <h3 className="font-semibold text-foreground">Notifications</h3>
-              </div>
-              <div className="max-h-96 overflow-y-auto">
-                {notifications.length > 0 ? (
-                  notifications.map(notification => (
-                    <div
-                      key={notification.id}
-                      className={`p-4 border-b border-border hover:bg-muted cursor-pointer ${
-                        notification.unread ? 'bg-muted/50' : ''
-                      }`}
-                    >
-                      <p className="text-sm text-foreground">{notification.message}</p>
-                      <p className="text-xs text-muted-foreground mt-1">{notification.time}</p>
-                    </div>
-                  ))
-                ) : (
-                  <div className="p-8 text-center text-muted-foreground text-sm">
-                    No notifications
-                  </div>
-                )}
-              </div>
-            </Card>
-          )}
-        </div>
-
         {/* Profile Menu */}
         <div className="relative" ref={profileRef}>
           <button
@@ -126,11 +72,7 @@ export function TopBar({ title, onCreateJob }: TopBarProps) {
           {/* Profile Dropdown */}
           {showProfileMenu && (
             <Card className="absolute right-0 top-full mt-2 w-56 shadow-lg z-50">
-              <div className="p-3 border-b border-border">
-                <p className="font-medium text-foreground text-sm">{userName || 'User'}</p>
-                <p className="text-xs text-muted-foreground truncate">{userEmail || ''}</p>
-              </div>
-              <div className="p-2">
+              <div className="p-2 space-y-1">
                 <button
                   onClick={() => {
                     navigate('/settings');
@@ -140,6 +82,17 @@ export function TopBar({ title, onCreateJob }: TopBarProps) {
                 >
                   <SettingsIcon className="h-4 w-4" />
                   Settings
+                </button>
+                <button
+                  onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+                  className="w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+                >
+                  {theme === 'dark' ? (
+                    <Sun className="h-4 w-4" />
+                  ) : (
+                    <Moon className="h-4 w-4" />
+                  )}
+                  {theme === 'dark' ? 'Light Mode' : 'Dark Mode'}
                 </button>
                 <button
                   onClick={async () => {

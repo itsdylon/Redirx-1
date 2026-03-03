@@ -1,5 +1,6 @@
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Settings, LogOut } from 'lucide-react';
+import { Settings, LogOut, Moon, Sun } from 'lucide-react';
+import { useTheme } from 'next-themes';
 import { useAuth } from '../contexts/AuthContext';
 import { Avatar, AvatarFallback } from './ui/avatar';
 import {
@@ -10,7 +11,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from './ui/dropdown-menu';
-import { ThemeToggle } from './ThemeToggle';
 
 interface HeaderProps {
   currentView?: 'dashboard' | 'upload' | 'review' | 'loading' | 'account';
@@ -18,6 +18,7 @@ interface HeaderProps {
 
 export function Header({ currentView }: HeaderProps) {
   const { user, logout } = useAuth();
+  const { theme, setTheme } = useTheme();
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -97,7 +98,6 @@ export function Header({ currentView }: HeaderProps) {
             </nav>
           </div>
           <div className="flex items-center gap-4">
-            <ThemeToggle />
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <button className="flex items-center gap-2 hover:bg-accent rounded-lg px-3 py-2">
@@ -115,13 +115,24 @@ export function Header({ currentView }: HeaderProps) {
                 <DropdownMenuLabel>
                   <div className="flex flex-col">
                     <span className="font-medium">{user?.full_name || 'User'}</span>
-                    <span className="text-xs text-muted-foreground font-normal">{user?.email}</span>
+                    {user?.email && (
+                      <span className="text-xs text-muted-foreground font-normal">{user.email}</span>
+                    )}
                   </div>
                 </DropdownMenuLabel>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={() => navigate('/account')}>
                   <Settings className="mr-2 h-4 w-4" />
                   Account Settings
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>
+                  {theme === 'dark' ? (
+                    <Sun className="mr-2 h-4 w-4" />
+                  ) : (
+                    <Moon className="mr-2 h-4 w-4" />
+                  )}
+                  {theme === 'dark' ? 'Light Mode' : 'Dark Mode'}
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={handleLogout} className="text-destructive">

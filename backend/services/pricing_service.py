@@ -126,9 +126,9 @@ class PricingService:
 
         session_result = self.client.table("migration_sessions").select(
             "id,user_id,old_urls,new_urls,status,is_preview,pipeline_type"
-        ).eq("id", source_session_id).single().execute()
+        ).eq("id", source_session_id).maybe_single().execute()
 
-        session = session_result.data
+        session = session_result.data if session_result else None
         if not session:
             raise ValueError("Source session not found")
         if session.get("user_id") != user_id:
@@ -244,7 +244,7 @@ class PricingService:
             "id,user_id,status"
         ).eq("id", source_session_id).maybe_single().execute()
 
-        if not session.data:
+        if not session or not session.data:
             raise ValueError("Source session not found")
         if session.data.get("user_id") != user_id:
             raise ValueError("Source session does not belong to this user")

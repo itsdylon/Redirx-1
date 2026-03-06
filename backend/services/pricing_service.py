@@ -169,21 +169,22 @@ class PricingService:
             "id,status,deep_session_id"
         ).eq("source_session_id", source_session_id).maybe_single().execute()
 
-        if existing.data:
+        existing_data = existing.data if existing else None
+        if existing_data:
             # Preserve paid state / linked deep session if quote already completed.
-            if existing.data.get("status") == "paid":
+            if existing_data.get("status") == "paid":
                 payload["status"] = "paid"
-            if existing.data.get("deep_session_id"):
-                payload["deep_session_id"] = existing.data["deep_session_id"]
+            if existing_data.get("deep_session_id"):
+                payload["deep_session_id"] = existing_data["deep_session_id"]
 
             result = self.client.table("project_pricing_quotes").update(payload).eq(
                 "source_session_id", source_session_id
             ).execute()
-            return result.data[0] if result.data else {**payload, "id": existing.data["id"]}
+            return result.data[0] if (result and result.data) else {**payload, "id": existing_data["id"]}
 
         payload["created_at"] = _now_iso()
         result = self.client.table("project_pricing_quotes").insert(payload).execute()
-        return result.data[0]
+        return result.data[0] if (result and result.data) else payload
 
     def get_quote_for_source(self, source_session_id: UUID | str, user_id: str) -> dict[str, Any] | None:
         result = self.client.table("project_pricing_quotes").select("*").eq(

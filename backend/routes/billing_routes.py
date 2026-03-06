@@ -193,7 +193,7 @@ def create_or_refresh_quote():
             next_action=next_action,
         )
     except Exception as e:
-        logger.error("Pricing quote generation failed: %s", e)
+        logger.error("Pricing quote generation failed: %s", e, exc_info=True)
         return error_response(
             code="pricing_quote_failed",
             user_message="Unable to create your project quote right now.",

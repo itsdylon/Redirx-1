@@ -20,6 +20,7 @@ import {
 import { toast } from 'sonner';
 import { Info } from 'lucide-react';
 import { getResults, getDeepPreview, type DeepPreviewResponse } from '../api/pipeline';
+import { getProjectUnlockStatus } from '../api/billing';
 import { isMac } from '../lib/keyboard';
 import { useOnboarding } from '../contexts/OnboardingContext';
 import { useAuth } from '../contexts/AuthContext';
@@ -94,7 +95,7 @@ export function ReviewInterface() {
   const [showCoachmarks, setShowCoachmarks] = useState(false);
   const [samplePreparationActive, setSamplePreparationActive] = useState(false);
   const PAGE_SIZE = 25;
-  const isLaunchUser = (user?.plan || 'launch') === 'launch';
+  const isFreeUser = (user?.plan || 'free') === 'free';
 
   // Refs for keyboard shortcuts
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -115,7 +116,7 @@ export function ReviewInterface() {
     enabled: !!sessionId,
   });
 
-  const deepPreviewEnabled = !!sessionId && pipelineType === 'url_only' && isLaunchUser;
+  const deepPreviewEnabled = !!sessionId && pipelineType === 'url_only' && isFreeUser;
   const deepPreviewQuery = useQuery({
     queryKey: queryKeys.results.deepPreview(sessionId || ''),
     queryFn: () => getDeepPreview(sessionId!),
@@ -136,6 +137,25 @@ export function ReviewInterface() {
           ? deepPreviewQuery.error.message
           : 'Unable to load Deep Match preview.')
       : null;
+
+  const unlockStatusEnabled = !!sessionId && pipelineType === 'url_only';
+  const unlockStatusQuery = useQuery({
+    queryKey: queryKeys.billing.unlockStatus(sessionId || ''),
+    queryFn: () => getProjectUnlockStatus(sessionId!),
+    enabled: unlockStatusEnabled,
+    refetchInterval: (query) => {
+      const data = query.state.data;
+      if (!data) return false;
+      if (data.quote_status === 'checkout_created') return 4000;
+      if (
+        data.is_unlocked &&
+        (data.deep_session_status === 'pending' || data.deep_session_status === 'processing')
+      ) {
+        return 4000;
+      }
+      return false;
+    },
+  });
 
   const isLoading =
     resultsQuery.isLoading ||
@@ -195,6 +215,11 @@ export function ReviewInterface() {
     if (!deepPreviewQuery.error) return;
     handleUnauthorizedAndRedirect(deepPreviewQuery.error, navigate);
   }, [deepPreviewQuery.error, navigate]);
+
+  useEffect(() => {
+    if (!unlockStatusQuery.error) return;
+    handleUnauthorizedAndRedirect(unlockStatusQuery.error, navigate);
+  }, [unlockStatusQuery.error, navigate]);
 
   useEffect(() => {
     if (!tutorialActive) {
@@ -485,20 +510,87 @@ export function ReviewInterface() {
             </div>
           )}
 
-          {/* URL-only upgrade banner */}
+          {/* URL-only pricing banner */}
           {pipelineType === 'url_only' && (
             <div className="mb-4 border border-blue-500/30 bg-blue-500/5 p-3 flex items-center gap-3">
               <Info className="h-4 w-4 text-blue-500 flex-shrink-0" />
               <p className="text-sm text-muted-foreground">
-                These results use URL pattern matching. Upgrade for content-based deep matching with AI-powered semantic analysis and alternative suggestions.
+                These results use Quick Match. Unlock Deep Match for semantic content analysis and alternative suggestions.
               </p>
             </div>
           )}
 
-          {pipelineType === 'url_only' && isLaunchUser && deepPreview && (
+          {pipelineType === 'url_only' && unlockStatusEnabled && (
+            <div className="mb-4 border border-border bg-card p-4">
+              {unlockStatusQuery.isLoading ? (
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Loading project unlock status...
+                </div>
+              ) : unlockStatusQuery.data ? (
+                <div className="space-y-3">
+                  {!unlockStatusQuery.data.has_quote && (
+                    <>
+                      <p className="text-sm text-muted-foreground">
+                        Get a one-time Deep Match quote for this project.
+                      </p>
+                      <Button onClick={() => navigate(`/pricing?source_session_id=${sessionId}`)}>
+                        View Project Pricing
+                      </Button>
+                    </>
+                  )}
+
+                  {unlockStatusQuery.data.has_quote && !unlockStatusQuery.data.is_unlocked && !unlockStatusQuery.data.contact_required && (
+                    <>
+                      <p className="text-sm text-muted-foreground">
+                        Deep Match is locked for this project.
+                      </p>
+                      <Button onClick={() => navigate(`/pricing?source_session_id=${sessionId}`)}>
+                        Unlock Deep Match
+                      </Button>
+                    </>
+                  )}
+
+                  {unlockStatusQuery.data.quote_status === 'checkout_created' && !unlockStatusQuery.data.is_unlocked && (
+                    <p className="text-sm text-muted-foreground">
+                      Payment submitted. Waiting for confirmation and deep-run queueing...
+                    </p>
+                  )}
+
+                  {unlockStatusQuery.data.contact_required && (
+                    <p className="text-sm text-muted-foreground">
+                      This project requires enterprise pricing. Contact sales from the pricing page.
+                    </p>
+                  )}
+
+                  {unlockStatusQuery.data.is_unlocked && (
+                    <>
+                      <p className="text-sm text-foreground">Deep Match unlocked.</p>
+                      {unlockStatusQuery.data.deep_session_status === 'completed' &&
+                        unlockStatusQuery.data.deep_session_id && (
+                          <Button
+                            onClick={() => navigate(`/review/${unlockStatusQuery.data.deep_session_id}`)}
+                          >
+                            Open Deep Match Results
+                          </Button>
+                        )}
+                      {(unlockStatusQuery.data.deep_session_status === 'pending' ||
+                        unlockStatusQuery.data.deep_session_status === 'processing') && (
+                        <p className="text-sm text-muted-foreground">
+                          Deep Match is processing in the background. This page will refresh status automatically.
+                        </p>
+                      )}
+                    </>
+                  )}
+                </div>
+              ) : null}
+            </div>
+          )}
+
+          {pipelineType === 'url_only' && isFreeUser && deepPreview && (
             <DeepMatchPreviewCard preview={deepPreview} />
           )}
-          {pipelineType === 'url_only' && isLaunchUser && deepPreviewError && (
+          {pipelineType === 'url_only' && isFreeUser && deepPreviewError && (
             <div className="mb-4 text-xs text-muted-foreground">{deepPreviewError}</div>
           )}
 

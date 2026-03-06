@@ -315,11 +315,14 @@ class WebPageEmbeddingDB:
 
 class UserQuotaDB:
     """
-    Database operations for user credit quotas.
+    Backward-compatible plan/access helper.
+
+    Legacy credit/quota methods now resolve to no-op semantics after
+    the pricing v2 cutover. Keep method signatures stable so older call-sites
+    do not crash while routes/services are migrated.
     """
 
-    # Plans that get unlimited Quick Match (no quota check)
-    PAID_PLANS = ('starter', 'growth', 'scale', 'enterprise', 'founder')
+    PAID_PLANS = ('agency', 'enterprise')
 
     def __init__(self, client: Optional[Client] = None):
         self.client = client or SupabaseClient.get_client()
@@ -327,9 +330,7 @@ class UserQuotaDB:
     def _get_profile(self, user_id: str) -> Optional[Dict[str, Any]]:
         """Fetch user profile row. Returns None if not found."""
         result = self.client.table('user_profiles').select(
-            'plan, credits_limit, credits_used, is_lifetime, '
-            'lifetime_credits_total, lifetime_credits_used, '
-            'quick_match_limit, quick_match_used, max_concurrent_projects'
+            'plan, stripe_subscription_id, stripe_subscription_status'
         ).eq('id', user_id).execute()
         return result.data[0] if result.data else None
 
@@ -338,123 +339,65 @@ class UserQuotaDB:
         Get the user's current plan.
 
         Returns:
-            Plan string ('launch', 'starter', 'growth', 'scale', 'enterprise', 'founder').
-            Defaults to 'launch'.
+            Plan string ('free', 'agency', 'enterprise').
+            Defaults to 'free'.
         """
         result = self.client.table('user_profiles').select(
             'plan'
         ).eq('id', user_id).execute()
 
         if not result.data:
-            return 'launch'
+            return 'free'
 
-        return result.data[0].get('plan') or 'launch'
+        return result.data[0].get('plan') or 'free'
 
     def check_credits(self, user_id: str) -> tuple[bool, int, int]:
         """
-        Check if user has remaining Deep Match credits.
+        Legacy API compatibility: Deep Match credits no longer exist.
 
         Returns:
-            Tuple of (has_credits, credits_used, credits_limit).
+            Tuple of (allowed, used, limit). Always unlimited for paid plans.
         """
-        profile = self._get_profile(user_id)
-
-        if not profile:
-            return False, 0, 0
-
-        # Founder / lifetime plan
-        if profile.get('is_lifetime') and profile.get('lifetime_credits_total') is not None:
-            used = profile.get('lifetime_credits_used') or 0
-            total = profile['lifetime_credits_total']
-            return used < total, used, total
-
-        used = profile.get('credits_used') or 0
-        limit = profile.get('credits_limit') or 0
-        return used < limit, used, limit
+        plan = self.get_plan(user_id)
+        if plan in self.PAID_PLANS:
+            return True, 0, 0
+        return False, 0, 0
 
     def check_quick_match_quota(self, user_id: str) -> tuple[bool, int, Optional[int]]:
         """
-        Check if user has remaining Quick Match quota.
+        Quick Match is unlimited for all plans in pricing v2.
 
         Returns:
             Tuple of (has_quota, quick_match_used, quick_match_limit).
-            quick_match_limit is None for paid plans (unlimited).
+            quick_match_limit is always None (unlimited).
         """
-        profile = self._get_profile(user_id)
-
-        if not profile:
-            return True, 0, 2500
-
-        plan = profile.get('plan') or 'launch'
-
-        # Paid plans get unlimited Quick Match
-        if plan in self.PAID_PLANS:
-            return True, 0, None
-
-        used = profile.get('quick_match_used') or 0
-        limit = profile.get('quick_match_limit') or 2500
-        return used < limit, used, limit
+        _ = user_id
+        return True, 0, None
 
     def increment_credits(self, user_id: str, count: int) -> None:
         """
-        Increment the user's Deep Match credit usage.
-        Routes to lifetime_credits_used for founder plan.
+        Legacy no-op (credits removed in pricing v2).
         """
-        profile = self._get_profile(user_id)
-
-        if profile and profile.get('is_lifetime'):
-            try:
-                self.client.rpc('increment_lifetime_usage', {
-                    'target_user_id': user_id,
-                    'amount': count
-                }).execute()
-                return
-            except Exception:
-                pass
-
-        try:
-            self.client.rpc('increment_user_usage', {
-                'target_user_id': user_id,
-                'amount': count
-            }).execute()
-        except Exception:
-            result = self.client.table('user_profiles').select(
-                'credits_used'
-            ).eq('id', user_id).execute()
-
-            if result.data:
-                current = result.data[0].get('credits_used') or 0
-                self.client.table('user_profiles').update({
-                    'credits_used': current + count
-                }).eq('id', user_id).execute()
+        _ = (user_id, count)
+        return None
 
     def increment_quick_match_usage(self, user_id: str, count: int) -> None:
         """
-        Increment the user's Quick Match usage count.
-        Only relevant for free-tier users (paid plans skip quota checks).
+        Legacy no-op (Quick Match quota removed in pricing v2).
         """
-        try:
-            self.client.rpc('increment_quick_match_usage', {
-                'target_user_id': user_id,
-                'amount': count
-            }).execute()
-        except Exception:
-            result = self.client.table('user_profiles').select(
-                'quick_match_used'
-            ).eq('id', user_id).execute()
-
-            if result.data:
-                current = result.data[0].get('quick_match_used') or 0
-                self.client.table('user_profiles').update({
-                    'quick_match_used': current + count
-                }).eq('id', user_id).execute()
+        _ = (user_id, count)
+        return None
 
     def get_remaining_credits(self, user_id: str) -> int:
         """
-        Get remaining Deep Match credits for a user.
+        Legacy compatibility shim.
         """
-        has_credits, used, limit = self.check_credits(user_id)
-        return max(0, limit - used)
+        _ = user_id
+        return 0
+
+    def can_run_deep_match(self, user_id: str) -> bool:
+        """Return True for plans that can run Deep Match directly."""
+        return self.get_plan(user_id) in self.PAID_PLANS
 
     # Backward-compatible aliases
     def check_quota(self, user_id: str) -> tuple[bool, int, int]:

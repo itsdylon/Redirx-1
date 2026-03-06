@@ -53,25 +53,22 @@ describe('uploadCSVs', () => {
     });
   });
 
-  it('keeps quota exceeded handling unchanged', async () => {
+  it('maps non-cap API errors through centralized handler', async () => {
     mockFetch.mockReturnValueOnce(
       jsonResponse(
         {
-          message: 'Usage limit exceeded',
-          current_usage: 100,
-          limit: 100,
+          user_message: 'Free accounts can only start Quick Match from upload.',
+          code: 'deep_match_requires_project_checkout',
         },
-        429
+        403
       )
     );
 
     const oldFile = new File(['https://old.example.com/a'], 'old.csv', { type: 'text/csv' });
     const newFile = new File(['https://new.example.com/a'], 'new.csv', { type: 'text/csv' });
 
-    await expect(uploadCSVs(oldFile, newFile)).rejects.toMatchObject({
-      type: 'quota_exceeded',
-      current_usage: 100,
-      limit: 100,
-    });
+    await expect(uploadCSVs(oldFile, newFile)).rejects.toThrow(
+      'Free accounts can only start Quick Match from upload.'
+    );
   });
 });

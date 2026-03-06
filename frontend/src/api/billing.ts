@@ -1,78 +1,142 @@
 import { API_BASE_URL, getAuthHeaders } from './config';
 import { throwApiErrorFromResponse } from '../utils/errorHandler';
 
-export interface SubscriptionStatus {
-  plan: string;
-  has_subscription: boolean;
-  credits_limit: number;
-  credits_used: number;
-  credits_remaining: number;
-  is_lifetime: boolean;
-  lifetime_credits_total: number;
-  lifetime_credits_used: number;
-  lifetime_credits_remaining: number;
-  quick_match_limit: number;
-  quick_match_used: number;
-  quick_match_unlimited: boolean;
-  max_concurrent_projects: number;
-  current_period_end: number | null;
-  cancel_at_period_end: boolean;
-  cancel_at: number | null;
-  trial_expires_at: string | null;
+export interface PricingLineItem {
+  from_page: number;
+  to_page: number;
+  pages: number;
+  unit_price_usd: string;
+  amount_usd: string;
+  amount_cents: number;
 }
 
-export interface PlanInfo {
+export interface PricingEstimate {
+  pricing_version: string;
+  currency: string;
+  contact_required: boolean;
+  billable_pages: number;
+  line_items: PricingLineItem[];
+  subtotal_usd: string | null;
+  subtotal_cents: number | null;
+  effective_rate_usd: string | null;
+}
+
+export interface ProjectQuote {
   id: string;
-  name: string;
-  description: string;
-  monthly_price: number | null;
-  annual_price: number | null;
-  credits_limit: number;
-  lifetime_credits_total: number;
-  quick_match_limit: number | null;
-  max_concurrent_projects: number;
-  price_id_monthly?: string;
-  price_id_annual?: string;
-  price_id?: string; // for one-time plans like founder
-  credits_price_id?: string;
-  founder_price_id?: string;
+  source_session_id: string;
+  user_id: string;
+  old_url_count: number;
+  new_url_count: number;
+  billable_pages: number;
+  pricing_version: string;
+  currency: string;
+  line_items: PricingLineItem[];
+  subtotal_cents: number | null;
+  status: 'draft' | 'contact_required' | 'checkout_created' | 'paid' | 'cancelled' | 'expired';
+  stripe_checkout_session_id?: string | null;
+  deep_session_id?: string | null;
+  checkout_created_at?: string | null;
+  paid_at?: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
-export async function getSubscriptionStatus(): Promise<SubscriptionStatus> {
-  const res = await fetch(`${API_BASE_URL}/api/billing/subscription`, {
+export interface BillingStatus {
+  plan: 'free' | 'agency' | 'enterprise' | string;
+  pricing_version: string;
+  manage_portal_available: boolean;
+  agency: {
+    has_subscription: boolean;
+    subscription_id: string | null;
+    status: string | null;
+    current_period_start: string | null;
+    current_period_end: string | null;
+    cancel_at_period_end: boolean;
+    usage_pages: number;
+    overage_enabled: boolean;
+  };
+}
+
+export interface ProjectUnlockStatus {
+  source_session_id: string;
+  has_quote: boolean;
+  quote_id?: string;
+  quote_status: string | null;
+  contact_required: boolean;
+  billable_pages: number | null;
+  subtotal_cents: number | null;
+  currency?: string;
+  pricing_version?: string;
+  is_unlocked: boolean;
+  deep_session_id: string | null;
+  deep_session_status: string | null;
+}
+
+export async function getPricingEstimate(pageCount: number): Promise<PricingEstimate> {
+  const res = await fetch(`${API_BASE_URL}/api/pricing/estimate?page_count=${encodeURIComponent(String(pageCount))}`);
+  if (!res.ok) {
+    await throwApiErrorFromResponse(res, 'Unable to generate pricing estimate right now.');
+  }
+  const data = await res.json();
+  return data;
+}
+
+export async function createProjectQuote(sourceSessionId: string): Promise<ProjectQuote> {
+  const res = await fetch(`${API_BASE_URL}/api/pricing/quote`, {
+    method: 'POST',
     headers: getAuthHeaders(),
+    body: JSON.stringify({ source_session_id: sourceSessionId }),
   });
   if (!res.ok) {
-    await throwApiErrorFromResponse(res, 'Unable to load subscription details right now.');
+    await throwApiErrorFromResponse(res, 'Unable to create your project quote right now.');
   }
+  const data = await res.json();
+  return data.quote;
+}
+
+export async function createProjectCheckout(params: {
+  sourceSessionId?: string;
+  quoteId?: string;
+  successUrl?: string;
+  cancelUrl?: string;
+}): Promise<{
+  success: boolean;
+  already_paid?: boolean;
+  quote_id: string;
+  deep_session_id?: string | null;
+  url?: string;
+  checkout_session_id?: string;
+}> {
+  const body: Record<string, string> = {};
+  if (params.sourceSessionId) body.source_session_id = params.sourceSessionId;
+  if (params.quoteId) body.quote_id = params.quoteId;
+  if (params.successUrl) body.success_url = params.successUrl;
+  if (params.cancelUrl) body.cancel_url = params.cancelUrl;
+
+  const res = await fetch(`${API_BASE_URL}/api/billing/project/checkout`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    await throwApiErrorFromResponse(res, 'Unable to start checkout right now. Please try again.');
+  }
+
   return res.json();
 }
 
-export async function getPlans(): Promise<PlanInfo[]> {
-  const res = await fetch(`${API_BASE_URL}/api/billing/plans`);
-  if (!res.ok) {
-    await throwApiErrorFromResponse(res, 'Unable to load billing plans right now.');
-  }
-  const data = await res.json();
-  return data.plans;
-}
+export async function createAgencyCheckout(params?: {
+  billingCycle?: 'monthly' | 'annual';
+  successUrl?: string;
+  cancelUrl?: string;
+}): Promise<{ success: boolean; url: string; checkout_session_id: string }> {
+  const body: Record<string, string> = {};
+  if (params?.billingCycle) body.billing_cycle = params.billingCycle;
+  if (params?.successUrl) body.success_url = params.successUrl;
+  if (params?.cancelUrl) body.cancel_url = params.cancelUrl;
 
-export async function createCheckoutSession(
-  priceId: string,
-  options?: {
-    success_url?: string;
-    cancel_url?: string;
-    context_source?: string;
-    source_session_id?: string;
-  },
-): Promise<string> {
-  const body: Record<string, string> = { price_id: priceId };
-  if (options?.success_url) body.success_url = options.success_url;
-  if (options?.cancel_url) body.cancel_url = options.cancel_url;
-  if (options?.context_source) body.context_source = options.context_source;
-  if (options?.source_session_id) body.source_session_id = options.source_session_id;
-
-  const res = await fetch(`${API_BASE_URL}/api/billing/create-checkout-session`, {
+  const res = await fetch(`${API_BASE_URL}/api/billing/agency/checkout`, {
     method: 'POST',
     headers: getAuthHeaders(),
     body: JSON.stringify(body),
@@ -80,18 +144,29 @@ export async function createCheckoutSession(
   if (!res.ok) {
     await throwApiErrorFromResponse(res, 'Unable to start checkout right now. Please try again.');
   }
-  const data = await res.json();
-  return data.url;
+  return res.json();
 }
 
-export async function reactivateSubscription(): Promise<void> {
-  const res = await fetch(`${API_BASE_URL}/api/billing/reactivate-subscription`, {
-    method: 'POST',
+export async function getBillingStatus(): Promise<BillingStatus> {
+  const res = await fetch(`${API_BASE_URL}/api/billing/status`, {
     headers: getAuthHeaders(),
   });
   if (!res.ok) {
-    await throwApiErrorFromResponse(res, 'Unable to reactivate your subscription right now.');
+    await throwApiErrorFromResponse(res, 'Unable to load billing details right now.');
   }
+  const data = await res.json();
+  return data;
+}
+
+export async function getProjectUnlockStatus(sourceSessionId: string): Promise<ProjectUnlockStatus> {
+  const res = await fetch(`${API_BASE_URL}/api/projects/${sourceSessionId}/unlock-status`, {
+    headers: getAuthHeaders(),
+  });
+  if (!res.ok) {
+    await throwApiErrorFromResponse(res, 'Unable to load project unlock status right now.');
+  }
+  const data = await res.json();
+  return data;
 }
 
 export async function createPortalSession(): Promise<string> {

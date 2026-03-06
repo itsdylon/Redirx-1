@@ -1,7 +1,8 @@
 # Redirx Pricing Reference
 
-> This document is the single source of truth for the Redirx pricing model.
-> It is intended for use by the landing page agent and any other system that needs pricing details.
+> Deprecated (Pricing V1): this file describes the retired credit/trial/founder model.
+> Do not use this file for current product, billing, or deployment decisions.
+> Use `RedirX_Pricing_Strategy.docx`, `docs/PRICING_V2_RELEASE_RUNBOOK.md`, and `docs/PRICING_V2_DEPLOYMENT_AGENT_HANDOFF.md` instead.
 
 ---
 

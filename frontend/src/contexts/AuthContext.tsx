@@ -10,15 +10,6 @@ interface User {
   email: string;
   full_name?: string;
   plan?: string;
-  credits_limit?: number;
-  credits_used?: number;
-  is_lifetime?: boolean;
-  lifetime_credits_total?: number;
-  lifetime_credits_used?: number;
-  quick_match_limit?: number | null;
-  quick_match_used?: number;
-  max_concurrent_projects?: number;
-  trial_expires_at?: string;
   is_admin?: boolean;
 }
 
@@ -51,8 +42,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       posthog?.identify(user.id, {
         email: user.email,
         plan: user.plan,
-        is_lifetime: user.is_lifetime,
-        trial_expires_at: user.trial_expires_at,
         is_admin: user.is_admin,
       });
     }
@@ -92,7 +81,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 setUser(meData.user);
               }
 
-              // Check for pending redirect (trial invite flow)
+              // Check for pending redirect
               const redirect = localStorage.getItem('auth_redirect');
               if (redirect) {
                 localStorage.removeItem('auth_redirect');
@@ -160,7 +149,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     localStorage.setItem('access_token', data.access_token);
     localStorage.setItem('refresh_token', data.refresh_token);
 
-    // Fetch full profile (including plan and credits)
+    // Fetch full profile (including current plan)
     try {
       const meResponse = await fetch(`${API_BASE_URL}/api/auth/me`, {
         headers: { 'Authorization': `Bearer ${data.access_token}` }
@@ -201,7 +190,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     localStorage.setItem('access_token', data.access_token);
     localStorage.setItem('refresh_token', data.refresh_token);
 
-    // Fetch full profile (including plan and credits)
+    // Fetch full profile (including current plan)
     try {
       const meResponse = await fetch(`${API_BASE_URL}/api/auth/me`, {
         headers: { 'Authorization': `Bearer ${data.access_token}` }

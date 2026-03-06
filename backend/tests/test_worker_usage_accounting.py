@@ -1,6 +1,7 @@
 import os
 import sys
 import unittest
+from uuid import UUID
 from unittest.mock import Mock, patch
 
 
@@ -14,62 +15,107 @@ from backend.worker import RedirxWorker
 
 class WorkerUsageAccountingTests(unittest.TestCase):
     def setUp(self):
-        # Avoid constructor side effects (DB client init) and test the pure helper.
         self.worker = RedirxWorker.__new__(RedirxWorker)
+        self.session_id = UUID("11111111-1111-1111-1111-111111111111")
 
-    def test_preview_jobs_never_increment_usage(self):
-        with patch("backend.worker.UserQuotaDB") as mock_quota_cls:
+    def test_preview_jobs_never_emit_metering(self):
+        with patch("backend.worker.UserQuotaDB") as mock_quota_cls, patch(
+            "backend.services.stripe_service.StripeService"
+        ) as mock_stripe_cls:
             self.worker._apply_usage_accounting(
                 user_id="user-1",
-                mapping_count=25,
+                session_id=self.session_id,
                 pipeline_type="content",
                 is_preview=True,
+                old_urls=["https://old.example.com/a"],
+                new_urls=["https://new.example.com/a"],
             )
 
         mock_quota_cls.assert_not_called()
+        mock_stripe_cls.assert_not_called()
 
-    def test_url_only_non_preview_increments_quick_match_usage(self):
-        quota = Mock()
-        with patch("backend.worker.UserQuotaDB", return_value=quota):
+    def test_url_only_jobs_never_emit_metering(self):
+        with patch("backend.worker.UserQuotaDB") as mock_quota_cls, patch(
+            "backend.services.stripe_service.StripeService"
+        ) as mock_stripe_cls:
             self.worker._apply_usage_accounting(
                 user_id="user-1",
-                mapping_count=10,
+                session_id=self.session_id,
                 pipeline_type="url_only",
                 is_preview=False,
+                old_urls=["https://old.example.com/a"],
+                new_urls=["https://new.example.com/a"],
             )
 
-        quota.increment_quick_match_usage.assert_called_once_with("user-1", 10)
-        quota.increment_credits.assert_not_called()
+        mock_quota_cls.assert_not_called()
+        mock_stripe_cls.assert_not_called()
 
-    def test_content_non_preview_increments_deep_match_credits(self):
+    def test_non_agency_content_jobs_skip_metering(self):
         quota = Mock()
-        with patch("backend.worker.UserQuotaDB", return_value=quota):
+        quota.get_plan.return_value = "free"
+
+        with patch("backend.worker.UserQuotaDB", return_value=quota), patch(
+            "backend.services.stripe_service.StripeService"
+        ) as mock_stripe_cls:
             self.worker._apply_usage_accounting(
                 user_id="user-1",
-                mapping_count=8,
+                session_id=self.session_id,
                 pipeline_type="content",
                 is_preview=False,
+                old_urls=["https://old.example.com/a"],
+                new_urls=["https://new.example.com/a"],
             )
 
-        quota.increment_credits.assert_called_once_with("user-1", 8)
-        quota.increment_quick_match_usage.assert_not_called()
+        quota.get_plan.assert_called_once_with("user-1")
+        mock_stripe_cls.assert_not_called()
 
-    def test_missing_user_or_zero_mappings_noops(self):
-        with patch("backend.worker.UserQuotaDB") as mock_quota_cls:
+    def test_agency_content_jobs_emit_metering_once_with_billable_pages(self):
+        quota = Mock()
+        quota.get_plan.return_value = "agency"
+
+        stripe_service = Mock()
+        with patch("backend.worker.UserQuotaDB", return_value=quota), patch(
+            "backend.services.stripe_service.StripeService",
+            return_value=stripe_service,
+        ):
+            self.worker._apply_usage_accounting(
+                user_id="user-1",
+                session_id=self.session_id,
+                pipeline_type="content",
+                is_preview=False,
+                old_urls=[
+                    "https://old.example.com/a",
+                    "https://old.example.com/b",
+                    "https://old.example.com/c",
+                ],
+                new_urls=["https://new.example.com/a"],
+            )
+
+        stripe_service.record_agency_usage.assert_called_once_with(
+            session_id=str(self.session_id),
+            user_id="user-1",
+            billable_pages=3,
+            metadata={
+                "source": "worker_completion",
+                "pipeline_type": "content",
+            },
+        )
+
+    def test_missing_user_noops(self):
+        with patch("backend.worker.UserQuotaDB") as mock_quota_cls, patch(
+            "backend.services.stripe_service.StripeService"
+        ) as mock_stripe_cls:
             self.worker._apply_usage_accounting(
                 user_id=None,
-                mapping_count=8,
+                session_id=self.session_id,
                 pipeline_type="content",
                 is_preview=False,
-            )
-            self.worker._apply_usage_accounting(
-                user_id="user-1",
-                mapping_count=0,
-                pipeline_type="url_only",
-                is_preview=False,
+                old_urls=["https://old.example.com/a"],
+                new_urls=["https://new.example.com/a"],
             )
 
         mock_quota_cls.assert_not_called()
+        mock_stripe_cls.assert_not_called()
 
 
 if __name__ == "__main__":

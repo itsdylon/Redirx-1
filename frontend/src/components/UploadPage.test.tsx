@@ -30,9 +30,7 @@ vi.mock('../contexts/AuthContext', () => ({
     user: {
       id: 'user-1',
       email: 'test@example.com',
-      plan: 'pro',
-      credits_limit: 1000,
-      credits_used: 50,
+      plan: 'agency',
     },
     loading: false,
   }),

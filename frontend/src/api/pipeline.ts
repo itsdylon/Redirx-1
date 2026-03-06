@@ -1,13 +1,6 @@
 import { API_BASE_URL, getAuthHeadersMultipart, getAuthHeaders } from './config';
 import { handleApiError } from '../utils/errorHandler';
 
-export interface QuotaExceededError {
-  type: 'quota_exceeded';
-  message: string;
-  current_usage: number;
-  limit: number;
-}
-
 export interface ContentUrlCapError {
   type: 'content_url_cap_exceeded';
   message: string;
@@ -48,17 +41,6 @@ export async function uploadCSVs(oldFile: File, newFile: File, force: boolean = 
     if (!response.ok) {
       const data = await response.json().catch(() => ({}));
 
-      // Handle quota exceeded (429) - preserve existing special handling
-      if (response.status === 429) {
-        const error: QuotaExceededError = {
-          type: 'quota_exceeded',
-          message: data.message || 'Usage limit exceeded',
-          current_usage: data.current_usage || 0,
-          limit: data.limit || 1000
-        };
-        throw error;
-      }
-
       // Handle content URL cap exceeded (422) with structured payload
       if (response.status === 422 && CONTENT_CAP_REASON_CODES.has(String(data.reason_code || ''))) {
         const reasonCode = String(data.reason_code) as ContentUrlCapError['reason_code'];
@@ -95,10 +77,6 @@ export async function uploadCSVs(oldFile: File, newFile: File, force: boolean = 
 
     return await response.json();
   } catch (error: any) {
-    // If it's a QuotaExceededError, re-throw it as-is
-    if (error.type === 'quota_exceeded') {
-      throw error;
-    }
     if (error.type === 'content_url_cap_exceeded') {
       throw error;
     }

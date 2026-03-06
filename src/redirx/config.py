@@ -36,14 +36,9 @@ class Config:
     STRIPE_WEBHOOK_SECRET: Optional[str] = os.getenv('STRIPE_WEBHOOK_SECRET')
 
     # Stripe Price IDs (set in .env, created in Stripe Dashboard)
-    STRIPE_PRICE_ID_STARTER_MONTHLY: Optional[str] = os.getenv('STRIPE_PRICE_ID_STARTER_MONTHLY')
-    STRIPE_PRICE_ID_STARTER_ANNUAL: Optional[str] = os.getenv('STRIPE_PRICE_ID_STARTER_ANNUAL')
-    STRIPE_PRICE_ID_GROWTH_MONTHLY: Optional[str] = os.getenv('STRIPE_PRICE_ID_GROWTH_MONTHLY')
-    STRIPE_PRICE_ID_GROWTH_ANNUAL: Optional[str] = os.getenv('STRIPE_PRICE_ID_GROWTH_ANNUAL')
-    STRIPE_PRICE_ID_SCALE_MONTHLY: Optional[str] = os.getenv('STRIPE_PRICE_ID_SCALE_MONTHLY')
-    STRIPE_PRICE_ID_SCALE_ANNUAL: Optional[str] = os.getenv('STRIPE_PRICE_ID_SCALE_ANNUAL')
-    STRIPE_PRICE_ID_FOUNDER: Optional[str] = os.getenv('STRIPE_PRICE_ID_FOUNDER')
-    STRIPE_PRICE_ID_CREDITS: Optional[str] = os.getenv('STRIPE_PRICE_ID_CREDITS')
+    STRIPE_PRICE_ID_AGENCY_MONTHLY: Optional[str] = os.getenv('STRIPE_PRICE_ID_AGENCY_MONTHLY')
+    STRIPE_PRICE_ID_AGENCY_ANNUAL: Optional[str] = os.getenv('STRIPE_PRICE_ID_AGENCY_ANNUAL')
+    STRIPE_PRICE_ID_AGENCY_OVERAGE: Optional[str] = os.getenv('STRIPE_PRICE_ID_AGENCY_OVERAGE')
 
     # Trial Invite System
     TRIAL_INVITE_PEPPER: Optional[str] = os.getenv('TRIAL_INVITE_PEPPER')
@@ -67,6 +62,7 @@ class Config:
     PREVIEW_MAX_NEW_URLS_CAPPED: int = int(os.getenv('PREVIEW_MAX_NEW_URLS_CAPPED', '180'))
     PREVIEW_FREE_ROWS: int = int(os.getenv('PREVIEW_FREE_ROWS', '2'))
     PREVIEW_MAX_JOBS_PER_USER_PER_DAY: int = int(os.getenv('PREVIEW_MAX_JOBS_PER_USER_PER_DAY', '2'))
+    DEEP_MATCH_BACKGROUND_MIN_PAGES: int = int(os.getenv('DEEP_MATCH_BACKGROUND_MIN_PAGES', '50'))
 
     @classmethod
     def validate(cls) -> None:

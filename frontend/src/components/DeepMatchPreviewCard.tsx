@@ -54,7 +54,7 @@ export function DeepMatchPreviewCard({ preview }: DeepMatchPreviewCardProps) {
     }
   }, [posthog, preview]);
 
-  const settingsHref = `/settings?tab=subscription&src=deep_preview&session_id=${encodeURIComponent(preview.source_session_id)}`;
+  const pricingHref = `/pricing?source_session_id=${encodeURIComponent(preview.source_session_id)}`;
 
   const goToUpgrade = (eventName: 'deep_preview_cta_primary_clicked' | 'deep_preview_cta_secondary_clicked') => {
     posthog?.capture(eventName, {
@@ -62,7 +62,7 @@ export function DeepMatchPreviewCard({ preview }: DeepMatchPreviewCardProps) {
       total_convincing_fixes: preview.total_convincing_fixes,
       locked_count: preview.locked_teasers.length,
     });
-    navigate(settingsHref);
+    navigate(pricingHref);
   };
 
   if (preview.status === 'not_applicable') {

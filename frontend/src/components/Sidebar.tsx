@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { LayoutDashboard, FolderOpen, Settings, ChevronLeft, ChevronRight, LogOut, Shield } from 'lucide-react';
-import { useAuth } from '../contexts/AuthContext';
+import { LayoutDashboard, FolderOpen, Settings, ChevronLeft, ChevronRight, LogOut, CreditCard } from 'lucide-react';
 import faviconImg from '@/assets/favicon.png';
 
 interface SidebarProps {
@@ -11,7 +10,6 @@ interface SidebarProps {
 export function Sidebar({ onLogout }: SidebarProps) {
   const navigate = useNavigate();
   const location = useLocation();
-  const { user } = useAuth();
   const [isCollapsed, setIsCollapsed] = useState(false);
 
   // Load collapsed state from localStorage
@@ -32,8 +30,8 @@ export function Sidebar({ onLogout }: SidebarProps) {
   const navItems = [
     { icon: LayoutDashboard, label: 'Dashboard', path: '/dashboard' },
     { icon: FolderOpen, label: 'All Projects', path: '/projects' },
+    { icon: CreditCard, label: 'Pricing', path: '/pricing' },
     { icon: Settings, label: 'Settings', path: '/settings' },
-    ...(user?.is_admin ? [{ icon: Shield, label: 'Admin', path: '/admin/trials' }] : []),
   ];
 
   return (

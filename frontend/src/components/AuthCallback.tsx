@@ -33,7 +33,7 @@ export function AuthCallback() {
             localStorage.setItem('access_token', data.session.access_token);
             localStorage.setItem('refresh_token', data.session.refresh_token);
 
-            // Check for pending redirect (e.g. trial invite flow)
+            // Check for pending redirect
             const redirect = localStorage.getItem('auth_redirect');
             if (redirect) {
               localStorage.removeItem('auth_redirect');

@@ -10,8 +10,10 @@ export const queryKeys = {
     deepPreview: (sessionId: string) => ['results', 'deep-preview', sessionId] as const,
   },
   billing: {
-    subscription: ['billing', 'subscription'] as const,
-    plans: ['billing', 'plans'] as const,
+    status: ['billing', 'status'] as const,
+    quote: (sourceSessionId: string) => ['billing', 'quote', sourceSessionId] as const,
+    unlockStatus: (sourceSessionId: string) => ['billing', 'unlock-status', sourceSessionId] as const,
+    estimate: (pageCount: number) => ['billing', 'estimate', pageCount] as const,
   },
   email: {
     preferences: ['email', 'preferences'] as const,

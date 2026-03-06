@@ -56,7 +56,7 @@ class DeepPreviewRouteTests(unittest.TestCase):
             "is_preview": False,
         }
         quota_db = Mock()
-        quota_db.get_plan.return_value = "launch"
+        quota_db.get_plan.return_value = "free"
 
         preview_db = Mock()
         preview_db.get_by_source_session.return_value = {
@@ -136,7 +136,7 @@ class DeepPreviewRouteTests(unittest.TestCase):
             "is_preview": False,
         }
         quota_db = Mock()
-        quota_db.get_plan.return_value = "starter"
+        quota_db.get_plan.return_value = "agency"
 
         with patch("backend.services.auth_service.AuthService.verify_token", return_value=self.user):
             with patch.object(Config, "ENABLE_DEEP_MATCH_PREVIEW", True):
@@ -152,7 +152,7 @@ class DeepPreviewRouteTests(unittest.TestCase):
         payload = response.get_json()
         self.assertTrue(payload["success"])
         self.assertEqual(payload["status"], "not_applicable")
-        self.assertEqual(payload["reason"], "plan_not_launch")
+        self.assertEqual(payload["reason"], "plan_not_free")
         self.assertEqual(payload["visible_items"], [])
         self.assertEqual(payload["locked_teasers"], [])
 
@@ -167,7 +167,7 @@ class DeepPreviewRouteTests(unittest.TestCase):
             "status": "processing",
         }
         quota_db = Mock()
-        quota_db.get_plan.return_value = "launch"
+        quota_db.get_plan.return_value = "free"
         preview_db = Mock()
         preview_db.get_by_source_session.return_value = None
 
@@ -201,7 +201,7 @@ class DeepPreviewRouteTests(unittest.TestCase):
             "new_urls": ["https://new.example.com/a"],
         }
         quota_db = Mock()
-        quota_db.get_plan.return_value = "launch"
+        quota_db.get_plan.return_value = "free"
         preview_db = Mock()
         preview_db.get_by_source_session.return_value = None
 
@@ -242,7 +242,7 @@ class DeepPreviewRouteTests(unittest.TestCase):
             "new_urls": ["https://new.example.com/a"],
         }
         quota_db = Mock()
-        quota_db.get_plan.return_value = "launch"
+        quota_db.get_plan.return_value = "free"
 
         completed_row = {
             "status": "completed",
@@ -314,7 +314,7 @@ class DeepPreviewRouteTests(unittest.TestCase):
             },
         ]
         quota_db = Mock()
-        quota_db.get_plan.return_value = "launch"
+        quota_db.get_plan.return_value = "free"
 
         processing_row = {
             "status": "processing",

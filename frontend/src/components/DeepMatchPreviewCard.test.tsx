@@ -97,7 +97,7 @@ describe('DeepMatchPreviewCard', () => {
     await user.click(screen.getByRole('button', { name: 'Unlock Every High-Confidence Fix' }));
 
     expect(mockNavigate).toHaveBeenCalledWith(
-      '/settings?tab=subscription&src=deep_preview&session_id=session-123',
+      '/pricing?source_session_id=session-123',
     );
     expect(mockCapture).toHaveBeenCalledWith(
       'deep_preview_cta_primary_clicked',

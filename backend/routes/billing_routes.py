@@ -1,25 +1,40 @@
 """
-Billing routes for Stripe checkout, portal, and webhook handling.
+Pricing and billing routes for RedirX pricing v2.
 """
-from flask import Blueprint, request, jsonify
-import logging
+from __future__ import annotations
 
-from backend.services.auth_service import require_auth
-from backend.services.stripe_service import StripeService
+import logging
+from uuid import UUID
+
+from flask import Blueprint, jsonify, request
+
 from backend.routes.error_utils import error_response
-from redirx.config import Config
+from backend.services.auth_service import require_auth
+from backend.services.pricing_service import (
+    CONTACT_REQUIRED_PAGE_THRESHOLD,
+    PricingService,
+)
+from backend.services.stripe_service import StripeService
 
 logger = logging.getLogger(__name__)
 
-billing_blueprint = Blueprint('billing', __name__)
+pricing_blueprint = Blueprint("pricing", __name__)
+billing_blueprint = Blueprint("billing", __name__)
+
+
+def _get_pricing_service() -> PricingService:
+    return PricingService()
 
 
 def _get_stripe_service() -> StripeService:
-    """Lazily create StripeService (only when billing endpoints are called)."""
     return StripeService()
 
 
-def _map_billing_value_error(exc: Exception):
+def _default_origin() -> str:
+    return request.headers.get("Origin", "http://localhost:3000")
+
+
+def _map_value_error(exc: Exception):
     message = str(exc).lower()
 
     if "no stripe customer" in message:
@@ -31,13 +46,58 @@ def _map_billing_value_error(exc: Exception):
             "contact_support",
         )
 
-    if "price" in message or "plan" in message:
+    if "contact required" in message:
         return (
-            "billing_invalid_price",
-            "That billing option is not available.",
+            "pricing_contact_required",
+            f"Projects over {CONTACT_REQUIRED_PAGE_THRESHOLD:,} pages require sales assistance.",
+            400,
+            False,
+            "contact_sales",
+        )
+
+    if "does not belong" in message:
+        return (
+            "pricing_quote_forbidden",
+            "That project quote does not belong to this account.",
+            403,
+            False,
+            "refresh",
+        )
+
+    if "quote" in message and "not found" in message:
+        return (
+            "pricing_quote_not_found",
+            "Project quote not found. Generate a fresh quote and try again.",
+            404,
+            False,
+            "requote",
+        )
+
+    if "quick match source" in message or "source session must be completed" in message:
+        return (
+            "pricing_source_not_ready",
+            "Run Quick Match first, then request a quote from the completed session.",
+            400,
+            False,
+            "run_quick_match",
+        )
+
+    if "billing cycle" in message:
+        return (
+            "billing_invalid_cycle",
+            "Choose a valid Agency billing cycle.",
             400,
             False,
             "select_plan",
+        )
+
+    if "price" in message:
+        return (
+            "billing_price_unavailable",
+            "That billing option is currently unavailable.",
+            400,
+            False,
+            "retry",
         )
 
     return (
@@ -49,68 +109,189 @@ def _map_billing_value_error(exc: Exception):
     )
 
 
-@billing_blueprint.route('/create-checkout-session', methods=['POST'])
-@require_auth
-def create_checkout_session():
-    """
-    Create a Stripe Checkout session for purchasing a plan.
+# ---------------------------------------------------------------------------
+# Pricing endpoints (/api/pricing/*)
+# ---------------------------------------------------------------------------
 
-    Body:
-      {
-        price_id: string,
-        success_url?: string,
-        cancel_url?: string,
-        context_source?: string,
-        source_session_id?: string
-      }
-    Returns: { url: string }
-    """
-    data = request.get_json()
 
-    if not data or not data.get('price_id'):
-        return error_response(
-            code="billing_price_required",
-            user_message="Please select a plan before checkout.",
-            status=400,
-            retryable=False,
-            next_action="select_plan",
-        )
-
-    price_id = data['price_id']
-    # Default URLs redirect back to settings with status param
-    origin = request.headers.get('Origin', 'http://localhost:3000')
-    success_url = data.get('success_url', f'{origin}/settings?tab=subscription&status=success')
-    cancel_url = data.get('cancel_url', f'{origin}/settings?tab=subscription&status=cancelled')
-    extra_metadata = {}
-    context_source = data.get('context_source')
-    source_session_id = data.get('source_session_id')
-    if context_source:
-        extra_metadata['context_source'] = str(context_source)[:100]
-    if source_session_id:
-        extra_metadata['source_session_id'] = str(source_session_id)[:100]
+@pricing_blueprint.route("/estimate", methods=["GET"])
+def estimate_price():
+    page_count_raw = request.args.get("page_count", "")
 
     try:
-        service = _get_stripe_service()
-        url, _ = service.create_checkout_session(
-            user_id=request.user.id,
-            email=request.user.email,
-            price_id=price_id,
-            success_url=success_url,
-            cancel_url=cancel_url,
-            extra_metadata=extra_metadata or None,
+        page_count = int(page_count_raw)
+    except ValueError:
+        return error_response(
+            code="pricing_invalid_page_count",
+            user_message="Provide page_count as a positive integer.",
+            status=400,
+            retryable=False,
+            next_action="fix_input",
         )
-        return jsonify({'url': url})
+
+    if page_count <= 0:
+        return error_response(
+            code="pricing_invalid_page_count",
+            user_message="Provide page_count as a positive integer.",
+            status=400,
+            retryable=False,
+            next_action="fix_input",
+        )
+
+    try:
+        estimate = _get_pricing_service().estimate(page_count)
+        return jsonify({"success": True, **estimate})
+    except Exception as e:
+        logger.error("Pricing estimate failed: %s", e)
+        return error_response(
+            code="pricing_estimate_failed",
+            user_message="Unable to generate pricing estimate right now.",
+            status=500,
+            retryable=True,
+            next_action="retry",
+        )
+
+
+@pricing_blueprint.route("/quote", methods=["POST"])
+@require_auth
+def create_or_refresh_quote():
+    data = request.get_json(silent=True) or {}
+    source_session_id = data.get("source_session_id")
+    if not source_session_id:
+        return error_response(
+            code="pricing_source_session_required",
+            user_message="source_session_id is required to generate a quote.",
+            status=400,
+            retryable=False,
+            next_action="fix_input",
+        )
+
+    try:
+        source_uuid = UUID(str(source_session_id))
+    except ValueError:
+        return error_response(
+            code="pricing_source_session_invalid",
+            user_message="source_session_id must be a valid UUID.",
+            status=400,
+            retryable=False,
+            next_action="fix_input",
+        )
+
+    try:
+        quote = _get_pricing_service().create_or_refresh_quote(
+            source_session_id=source_uuid,
+            user_id=str(request.user.id),
+        )
+        return jsonify({"success": True, "quote": quote})
     except ValueError as e:
-        code, message, status, retryable, next_action = _map_billing_value_error(e)
+        code, user_message, status, retryable, next_action = _map_value_error(e)
         return error_response(
             code=code,
-            user_message=message,
+            user_message=user_message,
             status=status,
             retryable=retryable,
             next_action=next_action,
         )
     except Exception as e:
-        logger.error(f"Checkout session creation failed: {e}")
+        logger.error("Pricing quote generation failed: %s", e)
+        return error_response(
+            code="pricing_quote_failed",
+            user_message="Unable to create your project quote right now.",
+            status=500,
+            retryable=True,
+            next_action="retry",
+        )
+
+
+# ---------------------------------------------------------------------------
+# Billing endpoints (/api/billing/*)
+# ---------------------------------------------------------------------------
+
+
+@billing_blueprint.route("/project/checkout", methods=["POST"])
+@require_auth
+def create_project_checkout():
+    data = request.get_json(silent=True) or {}
+    source_session_id = data.get("source_session_id")
+    quote_id = data.get("quote_id")
+
+    if not source_session_id and not quote_id:
+        return error_response(
+            code="pricing_source_session_required",
+            user_message="Provide source_session_id or quote_id.",
+            status=400,
+            retryable=False,
+            next_action="fix_input",
+        )
+
+    pricing_service = _get_pricing_service()
+
+    try:
+        if quote_id:
+            quote = pricing_service.get_quote_by_id(str(quote_id))
+            if not quote:
+                raise ValueError("Quote not found")
+            if quote.get("user_id") != str(request.user.id):
+                raise ValueError("Quote does not belong to user")
+        else:
+            quote = pricing_service.create_or_refresh_quote(
+                source_session_id=UUID(str(source_session_id)),
+                user_id=str(request.user.id),
+            )
+
+        if (quote.get("status") or "").lower() == "paid":
+            return jsonify(
+                {
+                    "success": True,
+                    "already_paid": True,
+                    "quote_id": quote.get("id"),
+                    "deep_session_id": quote.get("deep_session_id"),
+                }
+            )
+
+        origin = _default_origin()
+        success_url = data.get(
+            "success_url",
+            f"{origin}/review/{quote.get('source_session_id')}?unlock=success",
+        )
+        cancel_url = data.get(
+            "cancel_url",
+            f"{origin}/pricing?source_session_id={quote.get('source_session_id')}&status=cancelled",
+        )
+
+        stripe_service = _get_stripe_service()
+        url, checkout_session_id = stripe_service.create_project_checkout_session(
+            user_id=str(request.user.id),
+            email=str(request.user.email),
+            quote=quote,
+            success_url=success_url,
+            cancel_url=cancel_url,
+        )
+
+        pricing_service.mark_checkout_created(
+            quote_id=str(quote["id"]),
+            stripe_checkout_session_id=checkout_session_id,
+        )
+
+        return jsonify(
+            {
+                "success": True,
+                "url": url,
+                "quote_id": quote.get("id"),
+                "checkout_session_id": checkout_session_id,
+            }
+        )
+    except ValueError as e:
+        code, user_message, status, retryable, next_action = _map_value_error(e)
+        return error_response(
+            code=code,
+            user_message=user_message,
+            status=status,
+            retryable=retryable,
+            next_action=next_action,
+        )
+    except Exception as e:
+        logger.error("Project checkout session creation failed: %s", e)
         return error_response(
             code="billing_checkout_failed",
             user_message="Unable to start checkout right now. Please try again.",
@@ -120,37 +301,102 @@ def create_checkout_session():
         )
 
 
-@billing_blueprint.route('/create-portal-session', methods=['POST'])
+@billing_blueprint.route("/agency/checkout", methods=["POST"])
 @require_auth
-def create_portal_session():
-    """
-    Create a Stripe Customer Portal session for managing subscription.
-
-    Body: { return_url?: string }
-    Returns: { url: string }
-    """
+def create_agency_checkout():
     data = request.get_json(silent=True) or {}
-    origin = request.headers.get('Origin', 'http://localhost:3000')
-    return_url = data.get('return_url', f'{origin}/settings?tab=subscription')
+    billing_cycle = str(data.get("billing_cycle") or "monthly").lower()
 
     try:
-        service = _get_stripe_service()
-        url = service.create_portal_session(
-            user_id=request.user.id,
-            return_url=return_url,
+        origin = _default_origin()
+        success_url = data.get("success_url", f"{origin}/settings?tab=subscription&status=success")
+        cancel_url = data.get("cancel_url", f"{origin}/settings?tab=subscription&status=cancelled")
+
+        url, checkout_session_id = _get_stripe_service().create_agency_checkout_session(
+            user_id=str(request.user.id),
+            email=str(request.user.email),
+            billing_cycle=billing_cycle,
+            success_url=success_url,
+            cancel_url=cancel_url,
         )
-        return jsonify({'url': url})
+
+        return jsonify(
+            {
+                "success": True,
+                "url": url,
+                "checkout_session_id": checkout_session_id,
+            }
+        )
     except ValueError as e:
-        code, message, status, retryable, next_action = _map_billing_value_error(e)
+        code, user_message, status, retryable, next_action = _map_value_error(e)
         return error_response(
             code=code,
-            user_message=message,
+            user_message=user_message,
             status=status,
             retryable=retryable,
             next_action=next_action,
         )
     except Exception as e:
-        logger.error(f"Portal session creation failed: {e}")
+        logger.error("Agency checkout session creation failed: %s", e)
+        return error_response(
+            code="billing_checkout_failed",
+            user_message="Unable to start checkout right now. Please try again.",
+            status=500,
+            retryable=True,
+            next_action="retry",
+        )
+
+
+@billing_blueprint.route("/status", methods=["GET"])
+@require_auth
+def get_billing_status():
+    try:
+        status = _get_stripe_service().get_billing_status(str(request.user.id))
+        return jsonify({"success": True, **status})
+    except ValueError as e:
+        code, user_message, http_status, retryable, next_action = _map_value_error(e)
+        return error_response(
+            code=code,
+            user_message=user_message,
+            status=http_status,
+            retryable=retryable,
+            next_action=next_action,
+        )
+    except Exception as e:
+        logger.error("Failed to get billing status: %s", e)
+        return error_response(
+            code="billing_status_failed",
+            user_message="Unable to load billing details right now.",
+            status=500,
+            retryable=True,
+            next_action="retry",
+        )
+
+
+@billing_blueprint.route("/create-portal-session", methods=["POST"])
+@require_auth
+def create_portal_session():
+    data = request.get_json(silent=True) or {}
+    origin = _default_origin()
+    return_url = data.get("return_url", f"{origin}/settings?tab=subscription")
+
+    try:
+        url = _get_stripe_service().create_portal_session(
+            user_id=str(request.user.id),
+            return_url=return_url,
+        )
+        return jsonify({"success": True, "url": url})
+    except ValueError as e:
+        code, user_message, status, retryable, next_action = _map_value_error(e)
+        return error_response(
+            code=code,
+            user_message=user_message,
+            status=status,
+            retryable=retryable,
+            next_action=next_action,
+        )
+    except Exception as e:
+        logger.error("Portal session creation failed: %s", e)
         return error_response(
             code="billing_portal_failed",
             user_message="Unable to open billing portal right now.",
@@ -160,13 +406,10 @@ def create_portal_session():
         )
 
 
-@billing_blueprint.route('/webhook', methods=['POST'])
+@billing_blueprint.route("/webhook", methods=["POST"])
 def stripe_webhook():
-    """
-    Stripe webhook endpoint. No auth required - verified by Stripe signature.
-    """
     payload = request.get_data()
-    sig_header = request.headers.get('Stripe-Signature')
+    sig_header = request.headers.get("Stripe-Signature")
 
     if not sig_header:
         return error_response(
@@ -178,11 +421,10 @@ def stripe_webhook():
         )
 
     try:
-        service = _get_stripe_service()
-        result = service.handle_webhook_event(payload, sig_header)
+        result = _get_stripe_service().handle_webhook_event(payload, sig_header)
         return jsonify(result)
     except ValueError as e:
-        logger.warning(f"Webhook signature verification failed: {e}")
+        logger.warning("Webhook signature verification failed: %s", e)
         return error_response(
             code="billing_webhook_signature_invalid",
             user_message="Invalid webhook signature.",
@@ -191,7 +433,7 @@ def stripe_webhook():
             next_action="contact_support",
         )
     except Exception as e:
-        logger.error(f"Webhook processing failed: {e}")
+        logger.error("Webhook processing failed: %s", e)
         return error_response(
             code="billing_webhook_failed",
             user_message="Webhook processing failed.",
@@ -201,186 +443,51 @@ def stripe_webhook():
         )
 
 
-@billing_blueprint.route('/update-subscription', methods=['POST'])
-@require_auth
-def update_subscription():
-    """
-    Switch an existing subscription to a different plan/price.
-
-    Body: { price_id: string }
-    Returns: { plan: string, status: string }
-    """
-    data = request.get_json()
-
-    if not data or not data.get('price_id'):
-        return error_response(
-            code="billing_price_required",
-            user_message="Please select a plan before updating your subscription.",
-            status=400,
-            retryable=False,
-            next_action="select_plan",
-        )
-
-    try:
-        service = _get_stripe_service()
-        result = service.update_subscription(
-            user_id=request.user.id,
-            price_id=data['price_id'],
-        )
-        return jsonify(result)
-    except ValueError as e:
-        code, message, status, retryable, next_action = _map_billing_value_error(e)
-        return error_response(
-            code=code,
-            user_message=message,
-            status=status,
-            retryable=retryable,
-            next_action=next_action,
-        )
-    except Exception as e:
-        logger.error(f"Subscription update failed: {e}")
-        return error_response(
-            code="billing_update_failed",
-            user_message="Unable to update your subscription right now.",
-            status=500,
-            retryable=True,
-            next_action="retry",
-        )
+# ---------------------------------------------------------------------------
+# Legacy endpoint deprecations
+# ---------------------------------------------------------------------------
 
 
-@billing_blueprint.route('/cancel-subscription', methods=['POST'])
-@require_auth
-def cancel_subscription():
-    """
-    Cancel subscription at end of current billing period.
-
-    Returns: { status, cancel_at_period_end, current_period_end }
-    """
-    try:
-        service = _get_stripe_service()
-        result = service.cancel_subscription(user_id=request.user.id)
-        return jsonify(result)
-    except ValueError as e:
-        code, message, status, retryable, next_action = _map_billing_value_error(e)
-        return error_response(
-            code=code,
-            user_message=message,
-            status=status,
-            retryable=retryable,
-            next_action=next_action,
-        )
-    except Exception as e:
-        logger.error(f"Subscription cancellation failed: {e}")
-        return error_response(
-            code="billing_cancel_failed",
-            user_message="Unable to cancel your subscription right now.",
-            status=500,
-            retryable=True,
-            next_action="retry",
-        )
+def _legacy_endpoint_deprecated():
+    return error_response(
+        code="billing_endpoint_deprecated",
+        user_message="This billing endpoint has been removed. Use pricing v2 endpoints.",
+        status=410,
+        retryable=False,
+        next_action="upgrade_client",
+    )
 
 
-@billing_blueprint.route('/reactivate-subscription', methods=['POST'])
-@require_auth
-def reactivate_subscription():
-    """
-    Undo a pending cancellation, keeping the subscription active.
-
-    Returns: { status, cancel_at_period_end, current_period_end }
-    """
-    try:
-        service = _get_stripe_service()
-        result = service.reactivate_subscription(user_id=request.user.id)
-        return jsonify(result)
-    except ValueError as e:
-        code, message, status, retryable, next_action = _map_billing_value_error(e)
-        return error_response(
-            code=code,
-            user_message=message,
-            status=status,
-            retryable=retryable,
-            next_action=next_action,
-        )
-    except Exception as e:
-        logger.error(f"Subscription reactivation failed: {e}")
-        return error_response(
-            code="billing_reactivate_failed",
-            user_message="Unable to reactivate your subscription right now.",
-            status=500,
-            retryable=True,
-            next_action="retry",
-        )
+@billing_blueprint.route("/create-checkout-session", methods=["POST"])
+def deprecated_create_checkout_session():
+    return _legacy_endpoint_deprecated()
 
 
-@billing_blueprint.route('/plans', methods=['GET'])
-def get_plans():
-    """
-    Get available subscription plans with pricing info.
-    Public endpoint - no auth required.
-    """
-    plans = StripeService.get_available_plans()
-    return jsonify({'plans': plans})
+@billing_blueprint.route("/update-subscription", methods=["POST"])
+def deprecated_update_subscription():
+    return _legacy_endpoint_deprecated()
 
 
-@billing_blueprint.route('/subscription', methods=['GET'])
-@require_auth
-def get_subscription():
-    """
-    Get current user's subscription status.
-    """
-    try:
-        service = _get_stripe_service()
-        status = service.get_subscription_status(request.user.id)
-        return jsonify(status)
-    except ValueError as e:
-        code, message, status, retryable, next_action = _map_billing_value_error(e)
-        return error_response(
-            code=code,
-            user_message=message,
-            status=status,
-            retryable=retryable,
-            next_action=next_action,
-        )
-    except Exception as e:
-        logger.error(f"Failed to get subscription status: {e}")
-        return error_response(
-            code="billing_subscription_status_failed",
-            user_message="Unable to load subscription details right now.",
-            status=500,
-            retryable=True,
-            next_action="retry",
-        )
+@billing_blueprint.route("/cancel-subscription", methods=["POST"])
+def deprecated_cancel_subscription():
+    return _legacy_endpoint_deprecated()
 
 
-@billing_blueprint.route('/admin/reconcile', methods=['POST'])
-def reconcile_plans():
-    """
-    Reconcile recent Stripe checkouts against user_profiles.
-    Authenticated via X-Cron-Secret header (same pattern as trial expiry).
-    Run nightly as a safety net to catch missed/failed webhooks.
-    """
-    cron_secret = Config.CRON_SECRET
-    provided = request.headers.get('X-Cron-Secret', '')
+@billing_blueprint.route("/reactivate-subscription", methods=["POST"])
+def deprecated_reactivate_subscription():
+    return _legacy_endpoint_deprecated()
 
-    if not cron_secret or provided != cron_secret:
-        return error_response(
-            code="billing_admin_unauthorized",
-            user_message="Unauthorized.",
-            status=401,
-            retryable=False,
-            next_action="authenticate",
-        )
 
-    try:
-        service = _get_stripe_service()
-        result = service.reconcile_recent_checkouts()
-        return jsonify(result)
-    except Exception as e:
-        logger.error(f"Reconciliation failed: {e}")
-        return error_response(
-            code="billing_reconciliation_failed",
-            user_message="Reconciliation failed.",
-            status=500,
-            retryable=True,
-            next_action="retry",
-        )
+@billing_blueprint.route("/plans", methods=["GET"])
+def deprecated_plans():
+    return _legacy_endpoint_deprecated()
+
+
+@billing_blueprint.route("/subscription", methods=["GET"])
+def deprecated_subscription():
+    return _legacy_endpoint_deprecated()
+
+
+@billing_blueprint.route("/admin/reconcile", methods=["POST"])
+def deprecated_reconcile():
+    return _legacy_endpoint_deprecated()

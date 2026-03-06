@@ -19,8 +19,7 @@ from backend.routes.auth_routes import auth_blueprint
 from backend.routes.user_routes import user_blueprint
 from backend.routes.demo_routes import demo_blueprint
 from backend.routes.url_match_routes import url_match_blueprint
-from backend.routes.billing_routes import billing_blueprint
-from backend.routes.trial_routes import trial_blueprint
+from backend.routes.billing_routes import billing_blueprint, pricing_blueprint
 from backend.routes.email_routes import email_blueprint
 from backend.extensions import limiter, register_error_handlers
 
@@ -45,8 +44,8 @@ def create_app():
     app.register_blueprint(user_blueprint, url_prefix="/api/user")
     app.register_blueprint(demo_blueprint, url_prefix="/api/demo")
     app.register_blueprint(url_match_blueprint, url_prefix="/api")
+    app.register_blueprint(pricing_blueprint, url_prefix="/api/pricing")
     app.register_blueprint(billing_blueprint, url_prefix="/api/billing")
-    app.register_blueprint(trial_blueprint, url_prefix="/api")
     app.register_blueprint(email_blueprint, url_prefix="/api/email")
 
     @app.route("/")

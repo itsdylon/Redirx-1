@@ -91,33 +91,58 @@ class RedirxWorker:
 
     def _apply_usage_accounting(
         self,
+        *,
         user_id: Optional[str],
-        mapping_count: int,
+        session_id: UUID,
         pipeline_type: str,
         is_preview: bool,
+        old_urls: list[str],
+        new_urls: list[str],
     ) -> None:
         """
-        Apply usage accounting after a successful job completion.
+        Apply post-completion accounting for pricing v2.
 
         Rules:
-        - Preview jobs are always non-billable.
-        - url_only source jobs increment Quick Match usage.
-        - content source jobs increment Deep Match credits.
+        - Preview jobs are non-billable.
+        - Quick Match (url_only) is non-metered.
+        - Agency Deep Match emits one Stripe metered event keyed by session_id.
         """
-        if not user_id or mapping_count <= 0:
+        if not user_id:
             return
 
-        if is_preview:
-            print(f"[Worker] Preview job is non-billable; skipped usage increment")
+        if is_preview or pipeline_type != 'content':
             return
 
         quota_db = UserQuotaDB()
-        if pipeline_type == 'url_only':
-            quota_db.increment_quick_match_usage(user_id, mapping_count)
-            print(f"[Worker] Incremented Quick Match usage for user {user_id} by {mapping_count}")
-        else:
-            quota_db.increment_credits(user_id, mapping_count)
-            print(f"[Worker] Incremented Deep Match credits for user {user_id} by {mapping_count}")
+        if quota_db.get_plan(user_id) != 'agency':
+            return
+
+        billable_pages = max(len(old_urls), len(new_urls))
+        if billable_pages <= 0:
+            return
+
+        try:
+            from backend.services.stripe_service import StripeService
+
+            result = StripeService().record_agency_usage(
+                session_id=str(session_id),
+                user_id=user_id,
+                billable_pages=billable_pages,
+                metadata={
+                    'source': 'worker_completion',
+                    'pipeline_type': pipeline_type,
+                },
+            )
+            print(
+                f"[Worker] Agency metering result for session {session_id}: {result}",
+                flush=True,
+            )
+        except Exception as metering_error:
+            print(
+                f"[Worker] Failed to emit agency meter event for session {session_id}: "
+                f"{metering_error}",
+                flush=True,
+            )
 
     def get_database_url(self) -> Optional[str]:
         """
@@ -441,9 +466,11 @@ class RedirxWorker:
 
                 self._apply_usage_accounting(
                     user_id=user_id,
-                    mapping_count=mapping_count,
+                    session_id=session_id,
                     pipeline_type=pipeline_type,
                     is_preview=is_preview,
+                    old_urls=old_urls,
+                    new_urls=new_urls,
                 )
 
             # Queue preview job after successful source url_only completion.

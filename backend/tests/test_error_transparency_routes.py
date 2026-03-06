@@ -14,33 +14,7 @@ sys.path.insert(0, os.path.join(BASE_DIR, "src"))
 
 from backend.routes.auth_routes import auth_blueprint, AuthServiceError as RouteAuthServiceError
 from backend.routes.billing_routes import billing_blueprint
-from backend.routes.trial_routes import trial_blueprint
 from backend.services.auth_service import AuthService, AuthServiceError
-
-
-class _MockSingleQuery:
-    def __init__(self, data):
-        self._data = data
-
-    def select(self, *_args, **_kwargs):
-        return self
-
-    def eq(self, *_args, **_kwargs):
-        return self
-
-    def single(self):
-        return self
-
-    def execute(self):
-        return SimpleNamespace(data=self._data)
-
-
-class _MockSupabaseClient:
-    def __init__(self, data):
-        self._data = data
-
-    def table(self, _name):
-        return _MockSingleQuery(self._data)
 
 
 class ErrorTransparencyRouteTests(unittest.TestCase):
@@ -166,44 +140,17 @@ class ErrorTransparencyRouteTests(unittest.TestCase):
         self.assertEqual(payload["user_message"], "No billing account was found for this user.")
         self.assertEqual(payload["error"], payload["user_message"])
 
-    def test_trial_validate_invalid_code_structured_400(self):
-        app = self._create_app(trial_blueprint, "/api")
+    def test_legacy_billing_endpoint_returns_structured_410(self):
+        app = self._create_app(billing_blueprint, "/api/billing")
         client = app.test_client()
 
-        mock_trial_service = SimpleNamespace(
-            validate_code=Mock(return_value=(False, "Invalid or expired code", None))
-        )
+        response = client.post("/api/billing/create-checkout-session", json={"price_id": "price_123"})
 
-        with patch("backend.routes.trial_routes._get_trial_service", return_value=mock_trial_service):
-            response = client.post("/api/trials/validate", json={"code": "bad-code"})
-
-        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.status_code, 410)
         payload = response.get_json()
         self._assert_structured_error(payload)
-        self.assertFalse(payload["valid"])
-        self.assertEqual(payload["code"], "trial_code_invalid_or_expired")
-        self.assertEqual(payload["next_action"], "request_new_code")
-
-    def test_trial_admin_route_forbidden_uses_trial_code(self):
-        app = self._create_app(trial_blueprint, "/api")
-        client = app.test_client()
-
-        authed_user = SimpleNamespace(id="user_1", email="admincheck@example.com")
-        non_admin_client = _MockSupabaseClient({"is_admin": False})
-
-        with patch("backend.services.auth_service.AuthService.verify_token", return_value=authed_user):
-            with patch("backend.services.auth_service.SupabaseClient.get_client", return_value=non_admin_client):
-                response = client.post(
-                    "/api/admin/trials/campaigns",
-                    headers={"Authorization": "Bearer test-token"},
-                    json={"name": "Campaign", "slug": "campaign"},
-                )
-
-        self.assertEqual(response.status_code, 403)
-        payload = response.get_json()
-        self._assert_structured_error(payload)
-        self.assertEqual(payload["code"], "trial_admin_forbidden")
-        self.assertEqual(payload["next_action"], "switch_account")
+        self.assertEqual(payload["code"], "billing_endpoint_deprecated")
+        self.assertEqual(payload["next_action"], "upgrade_client")
 
 
 if __name__ == "__main__":

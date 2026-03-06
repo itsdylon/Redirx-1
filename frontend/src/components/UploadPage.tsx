@@ -1,4 +1,4 @@
-import { uploadCSVs, QuotaExceededError, type ContentUrlCapError } from "../api/pipeline";
+import { uploadCSVs, type ContentUrlCapError } from "../api/pipeline";
 import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
@@ -17,12 +17,6 @@ interface FileData {
   name: string;
   rowCount: number;
   file: File;
-}
-
-interface QuotaError {
-  message: string;
-  current_usage: number;
-  limit: number;
 }
 
 interface BeginMatchingOptions {
@@ -69,15 +63,14 @@ export function UploadPage() {
     completeStep,
     createSampleSession,
   } = useOnboarding();
-  const userPlan = user?.plan || 'launch';
-  const isFreeUser = userPlan === 'launch';
+  const userPlan = user?.plan || 'free';
+  const isFreeUser = userPlan === 'free';
   const [pipelineType, setPipelineType] = useState<'content' | 'url_only'>(isFreeUser ? 'url_only' : 'content');
   const [isLoading, setIsLoading] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [oldSiteFile, setOldSiteFile] = useState<FileData | null>(null);
   const [newSiteFile, setNewSiteFile] = useState<FileData | null>(null);
-  const [quotaError, setQuotaError] = useState<QuotaError | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [contentCapApiError, setContentCapApiError] = useState<ContentUrlCapError | null>(null);
   const [duplicateSessionId, setDuplicateSessionId] = useState<string | null>(null);
@@ -228,7 +221,6 @@ export function UploadPage() {
     setContentCapApiError(null);
     setPendingWarnings(null);
     setError(null);
-    setQuotaError(null);
     setDuplicateSessionId(null);
     setShowScrapingWarning(false);
     setScrapingWarningAcknowledged(false);
@@ -252,7 +244,6 @@ export function UploadPage() {
   }: BeginMatchingOptions = {}) => {
     if (sampleTutorialActive) {
       setError(null);
-      setQuotaError(null);
       setDuplicateSessionId(null);
       setPendingWarnings(null);
       setIsUploading(true);
@@ -310,7 +301,6 @@ export function UploadPage() {
 
     // Clear previous errors
     setError(null);
-    setQuotaError(null);
     setContentCapApiError(null);
     setDuplicateSessionId(null);
     setPendingWarnings(null);
@@ -347,15 +337,7 @@ export function UploadPage() {
       setIsLoading(false);
       setCurrentSessionId(null);
 
-      // Check if it's a quota exceeded error
-      if (err && typeof err === 'object' && 'type' in err && (err as QuotaExceededError).type === 'quota_exceeded') {
-        const quotaErr = err as QuotaExceededError;
-        setQuotaError({
-          message: quotaErr.message,
-          current_usage: quotaErr.current_usage,
-          limit: quotaErr.limit
-        });
-      } else if (err && typeof err === 'object' && 'type' in err && (err as ContentUrlCapError).type === 'content_url_cap_exceeded') {
+      if (err && typeof err === 'object' && 'type' in err && (err as ContentUrlCapError).type === 'content_url_cap_exceeded') {
         setContentCapApiError(err as ContentUrlCapError);
         setError(null);
       } else if (err instanceof Error) {
@@ -464,17 +446,17 @@ export function UploadPage() {
             <div className="mb-6 border border-blue-500/30 bg-blue-500/5 p-4 flex items-start gap-3">
               <Info className="h-5 w-5 text-blue-500 flex-shrink-0 mt-0.5" />
               <div>
-                <div className="font-medium text-blue-600 dark:text-blue-400">Launch Plan: Quick Match</div>
+                <div className="font-medium text-blue-600 dark:text-blue-400">Free Plan: Quick Match</div>
                 <p className="text-sm text-muted-foreground mt-1">
-                  Your Launch plan includes free Quick Match (URL pattern matching). Upgrade to a paid plan to unlock Deep Match with AI-powered semantic analysis using mapping credits.
+                  Quick Match is always free. Unlock Deep Match per project or choose the Agency plan for recurring migrations.
                 </p>
                 <Button
                   variant="outline"
                   size="sm"
                   className="mt-3"
-                  onClick={() => navigate('/account')}
+                  onClick={() => navigate('/pricing')}
                 >
-                  Upgrade Plan
+                  View Pricing
                 </Button>
               </div>
             </div>
@@ -496,7 +478,7 @@ export function UploadPage() {
                   Scrapes page content and uses AI embeddings for semantic matching. Most accurate.
                 </p>
                 <p className="text-xs text-muted-foreground mt-1">
-                  Uses mapping credits &middot; {((user?.is_lifetime ? (user?.lifetime_credits_total || 0) - (user?.lifetime_credits_used || 0) : (user?.credits_limit || 0) - (user?.credits_used || 0))).toLocaleString()} remaining
+                  Available for Agency plans and unlocked project runs.
                 </p>
               </button>
               <button
@@ -513,7 +495,7 @@ export function UploadPage() {
                   <span className="text-xs bg-green-500/10 text-green-600 dark:text-green-400 px-1.5 py-0.5 rounded font-medium">Free</span>
                 </div>
                 <p className="text-sm text-muted-foreground">
-                  URL pattern matching only. Fastest, no credits used, no scraping required.
+                  URL pattern matching only. Fastest, no scraping required.
                 </p>
               </button>
             </div>
@@ -549,27 +531,6 @@ export function UploadPage() {
                     </Button>
                   </div>
                 )}
-              </div>
-            </div>
-          )}
-
-          {/* Quota Exceeded Error */}
-          {quotaError && (
-            <div className="mb-6 border border-yellow-500 bg-yellow-500/10 p-4 flex items-start gap-3">
-              <AlertTriangle className="h-5 w-5 text-yellow-500 flex-shrink-0 mt-0.5" />
-              <div>
-                <div className="font-medium text-yellow-600 dark:text-yellow-400">Credit Limit Reached</div>
-                <p className="text-sm text-muted-foreground mt-1">
-                  You've used {quotaError.current_usage.toLocaleString()} of {quotaError.limit.toLocaleString()} credits.
-                </p>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="mt-3"
-                  onClick={() => navigate('/account')}
-                >
-                  View Account & Upgrade
-                </Button>
               </div>
             </div>
           )}

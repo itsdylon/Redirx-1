@@ -6,6 +6,7 @@ from backend.services.pipeline_runner import run_pipeline, read_csv
 from backend.services.results_formatter import format_results_response, calculate_path_similarity
 from backend.services.auth_service import require_auth
 from backend.services.deep_preview_service import DeepPreviewService
+from backend.services.pricing_service import PricingService
 from backend.services.job_limits import (
     ContentJobUrlCapExceeded,
     validate_content_job_url_counts,
@@ -80,7 +81,7 @@ def _build_preview_copy(total_convincing_fixes: int, locked_count: int) -> dict[
             f'and found {total_convincing_fixes} higher-confidence fixes.'
         ),
         'cta_primary': 'Unlock Every High-Confidence Fix',
-        'cta_secondary': 'Compare Plans',
+        'cta_secondary': 'View Pricing',
         'lock_overlay': (
             f'Unlock {locked_count} more high-confidence fixes and AI alternatives before launch.'
         ),
@@ -150,16 +151,30 @@ def process_csv():
     # Get optional 'force' parameter from form data
     force = request.form.get('force', 'false').lower() == 'true'
 
-    # Get requested pipeline type
-    pipeline_type = request.form.get('pipeline_type', 'content')
-    if pipeline_type not in ('content', 'url_only'):
-        pipeline_type = 'content'
+    # Determine requested/default pipeline type.
+    requested_pipeline_type = request.form.get('pipeline_type')
+    if requested_pipeline_type not in (None, 'content', 'url_only'):
+        requested_pipeline_type = 'content'
 
-    # Enforce tier: launch (free trial) users can only use url_only
+    # Enforce new access model:
+    # - free: Quick Match only (url_only)
+    # - agency|enterprise: Quick Match or Deep Match
     quota_db = UserQuotaDB()
     user_plan = quota_db.get_plan(user_id)
-    if user_plan == 'launch':
-        pipeline_type = 'url_only'
+    pipeline_type = requested_pipeline_type or ('url_only' if user_plan == 'free' else 'content')
+
+    if user_plan == 'free' and pipeline_type == 'content':
+        return jsonify({
+            "success": False,
+            "code": "deep_match_requires_project_checkout",
+            "error": "Deep Match requires project checkout",
+            "user_message": (
+                "Free accounts can only start Quick Match from upload. "
+                "Use the pricing flow to unlock Deep Match for this project."
+            ),
+            "next_action": "pricing_checkout",
+            "retryable": False,
+        }), 403
 
     parsed_old_urls = None
     parsed_new_urls = None
@@ -179,32 +194,6 @@ def process_csv():
     )
     if cap_error:
         return cap_error
-
-    # Check credits quota for Deep Match pipeline
-    if pipeline_type == 'content':
-        has_credits, credits_used, credits_limit = quota_db.check_credits(user_id)
-
-        if not has_credits:
-            return jsonify({
-                "success": False,
-                "error": "Credit limit exceeded",
-                "message": f"You have used {credits_used} of {credits_limit} Deep Match credits. Please upgrade your plan for more.",
-                "credits_used": credits_used,
-                "credits_limit": credits_limit
-            }), 429
-
-    # Check Quick Match quota (free tier only; paid plans are unlimited)
-    if pipeline_type == 'url_only':
-        has_qm_quota, qm_used, qm_limit = quota_db.check_quick_match_quota(user_id)
-
-        if not has_qm_quota:
-            return jsonify({
-                "success": False,
-                "error": "Quick Match limit exceeded",
-                "message": f"You have used {qm_used} of {qm_limit} Quick Matches this month. Upgrade to a paid plan for unlimited Quick Match.",
-                "quick_match_used": qm_used,
-                "quick_match_limit": qm_limit
-            }), 429
 
     try:
         # Run the pipeline
@@ -367,8 +356,8 @@ def get_deep_preview(session_id: str):
             return _not_applicable("source_pipeline_not_url_only")
 
         quota_db = UserQuotaDB()
-        if quota_db.get_plan(user_id) != 'launch':
-            return _not_applicable("plan_not_launch")
+        if quota_db.get_plan(user_id) != 'free':
+            return _not_applicable("plan_not_free")
 
         preview_db = DeepMatchPreviewDB()
         preview = preview_db.get_by_source_session(session_uuid)
@@ -485,6 +474,44 @@ def get_deep_preview(session_id: str):
         }), 500
 
 
+@pipeline_blueprint.route("/projects/<source_session_id>/unlock-status", methods=["GET"])
+@require_auth
+def get_project_unlock_status(source_session_id: str):
+    """
+    Get unlock/payment/deep-run status for a Quick Match source session.
+    """
+    try:
+        try:
+            source_uuid = UUID(source_session_id)
+        except ValueError:
+            return jsonify({
+                "success": False,
+                "error": f"Invalid source_session_id format: {source_session_id}",
+            }), 400
+
+        status = PricingService().get_unlock_status(
+            source_session_id=source_uuid,
+            user_id=str(request.user.id),
+        )
+        return jsonify({"success": True, **status}), 200
+    except ValueError as e:
+        message = str(e).lower()
+        if "does not belong" in message:
+            return jsonify({
+                "success": False,
+                "error": "Unauthorized: Session belongs to another user",
+            }), 403
+        return jsonify({
+            "success": False,
+            "error": str(e),
+        }), 404
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": f"Failed to load unlock status: {str(e)}",
+        }), 500
+
+
 @pipeline_blueprint.route("/results/<session_id>/alternatives/<mapping_id>", methods=["GET"])
 @require_auth
 def get_alternatives(session_id: str, mapping_id: str):
@@ -550,7 +577,10 @@ def get_alternatives(session_id: str, mapping_id: str):
             return jsonify({
                 "success": True,
                 "alternatives": [],
-                "message": "Alternatives are not available for URL-only matches. Upgrade to a paid plan for content-based matching with alternative suggestions."
+                "message": (
+                    "Alternatives are only available after Deep Match is unlocked "
+                    "for this project or with an Agency subscription."
+                ),
             }), 200
 
         old_url = mapping['old_url']

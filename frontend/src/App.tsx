@@ -9,12 +9,8 @@ import { UploadPage } from './components/UploadPage';
 import { ReviewInterface } from './components/ReviewInterface';
 import { AccountPage } from './components/AccountPage';
 import { Settings } from './components/Settings';
+import { PricingPage } from './components/PricingPage';
 import { DemoPage } from './components/DemoPage';
-import { TrialLandingPage } from './components/TrialLandingPage';
-import { FounderLandingPage } from './components/FounderLandingPage';
-import { FounderSuccessPage } from './components/FounderSuccessPage';
-import { AdminTrials } from './components/AdminTrials';
-import { AdminOnboardingReport } from './components/AdminOnboardingReport';
 import { Toaster } from './components/ui/sonner';
 
 export default function App() {
@@ -48,14 +44,6 @@ export default function App() {
         path="/demo"
         element={<DemoPage />}
       />
-      <Route
-        path="/trial"
-        element={<TrialLandingPage />}
-      />
-      <Route
-        path="/founder"
-        element={<FounderLandingPage />}
-      />
 
       {/* Protected routes */}
       <Route
@@ -83,20 +71,12 @@ export default function App() {
         element={user ? <Settings /> : <Navigate to="/login" replace />}
       />
       <Route
+        path="/pricing"
+        element={user ? <PricingPage /> : <Navigate to="/login" replace />}
+      />
+      <Route
         path="/account"
         element={user ? <AccountPage /> : <Navigate to="/login" replace />}
-      />
-      <Route
-        path="/founder/success"
-        element={user ? <FounderSuccessPage /> : <Navigate to="/login" replace />}
-      />
-      <Route
-        path="/admin/trials"
-        element={user ? <AdminTrials /> : <Navigate to="/login" replace />}
-      />
-      <Route
-        path="/admin/onboarding-report"
-        element={user ? <AdminOnboardingReport /> : <Navigate to="/login" replace />}
       />
     </Routes>
   );

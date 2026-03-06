@@ -46,7 +46,7 @@ class CandidateRow:
 
 class DeepPreviewService:
     """
-    Handles Deep Match conversion preview lifecycle for Launch quick-match sessions.
+    Handles Deep Match conversion preview lifecycle for free quick-match sessions.
     """
 
     def __init__(self):
@@ -74,8 +74,23 @@ class DeepPreviewService:
         if session.get('pipeline_type') != 'url_only' or session.get('is_preview'):
             return {'status': 'not_applicable', 'reason': 'unsupported_source_session'}
 
-        if self.quota_db.get_plan(user_id) != 'launch':
-            return {'status': 'not_applicable', 'reason': 'plan_not_launch'}
+        if self.quota_db.get_plan(user_id) != 'free':
+            return {'status': 'not_applicable', 'reason': 'plan_not_free'}
+
+        billable_pages = max(len(old_urls), len(new_urls))
+        if billable_pages < max(1, Config.DEEP_MATCH_BACKGROUND_MIN_PAGES):
+            self.preview_db.upsert_source_preview(
+                source_session_id=source_session_id,
+                user_id=user_id,
+                status='skipped',
+                total_convincing_fixes=0,
+                error_message='Deep Match preview is only available for larger projects.',
+            )
+            return {
+                'status': 'skipped',
+                'reason': 'below_background_threshold',
+                'billable_pages': billable_pages,
+            }
 
         if not Config.OPENAI_API_KEY:
             self.preview_db.upsert_source_preview(

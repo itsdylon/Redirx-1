@@ -7,14 +7,6 @@ export interface UserProfile {
   full_name: string;
   company: string;
   plan: string;
-  credits_limit: number;
-  credits_used: number;
-  is_lifetime?: boolean;
-  lifetime_credits_total?: number;
-  lifetime_credits_used?: number;
-  quick_match_limit?: number | null;
-  quick_match_used?: number;
-  trial_expires_at?: string;
 }
 
 export interface UserProfileResponse {

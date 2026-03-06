@@ -109,8 +109,7 @@ class UploadGuardTests(unittest.TestCase):
         client = app.test_client()
 
         quota_db = Mock()
-        quota_db.get_plan.return_value = "starter"
-        quota_db.check_credits.return_value = (True, 0, 50000)
+        quota_db.get_plan.return_value = "agency"
 
         with patch("backend.services.auth_service.AuthService") as mock_auth_cls, patch(
             "backend.routes.pipeline_routes.UserQuotaDB",
@@ -147,6 +146,84 @@ class UploadGuardTests(unittest.TestCase):
         self.assertEqual(payload["next_action"], "reduce_csv_rows_or_switch_pipeline")
         self.assertEqual(payload["retryable"], False)
         quota_db.check_credits.assert_not_called()
+
+    def test_free_user_cannot_start_deep_match_from_upload(self):
+        app = Flask(__name__)
+        app.register_blueprint(pipeline_routes.pipeline_blueprint, url_prefix="/api")
+        client = app.test_client()
+
+        quota_db = Mock()
+        quota_db.get_plan.return_value = "free"
+
+        with patch("backend.services.auth_service.AuthService") as mock_auth_cls, patch(
+            "backend.routes.pipeline_routes.UserQuotaDB",
+            return_value=quota_db,
+        ):
+            mock_auth_cls.return_value.verify_token.return_value = SimpleNamespace(id="user-1")
+
+            response = client.post(
+                "/api/process",
+                data={
+                    "old_csv": (BytesIO(b"https://old.example.com/1\n"), "old.csv"),
+                    "new_csv": (BytesIO(b"https://new.example.com/1\n"), "new.csv"),
+                    "pipeline_type": "content",
+                },
+                headers={"Authorization": "Bearer test-token"},
+                content_type="multipart/form-data",
+            )
+
+        self.assertEqual(response.status_code, 403)
+        payload = response.get_json()
+        self.assertEqual(payload["code"], "deep_match_requires_project_checkout")
+        self.assertIn("quick match", payload["user_message"].lower())
+
+    def test_free_user_defaults_to_quick_match_and_can_repeat_runs(self):
+        app = Flask(__name__)
+        app.register_blueprint(pipeline_routes.pipeline_blueprint, url_prefix="/api")
+        client = app.test_client()
+
+        quota_db = Mock()
+        quota_db.get_plan.return_value = "free"
+
+        run_pipeline = Mock(side_effect=[
+            ("session-free-1", False),
+            ("session-free-2", False),
+        ])
+
+        with patch("backend.services.auth_service.AuthService") as mock_auth_cls, patch(
+            "backend.routes.pipeline_routes.UserQuotaDB",
+            return_value=quota_db,
+        ), patch("backend.routes.pipeline_routes.run_pipeline", run_pipeline):
+            mock_auth_cls.return_value.verify_token.return_value = SimpleNamespace(id="user-1")
+
+            first = client.post(
+                "/api/process",
+                data={
+                    "old_csv": (BytesIO(b"https://old.example.com/1\n"), "old.csv"),
+                    "new_csv": (BytesIO(b"https://new.example.com/1\n"), "new.csv"),
+                },
+                headers={"Authorization": "Bearer test-token"},
+                content_type="multipart/form-data",
+            )
+            second = client.post(
+                "/api/process",
+                data={
+                    "old_csv": (BytesIO(b"https://old.example.com/2\n"), "old.csv"),
+                    "new_csv": (BytesIO(b"https://new.example.com/2\n"), "new.csv"),
+                },
+                headers={"Authorization": "Bearer test-token"},
+                content_type="multipart/form-data",
+            )
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.status_code, 200)
+        self.assertEqual(first.get_json()["pipeline_type"], "url_only")
+        self.assertEqual(second.get_json()["pipeline_type"], "url_only")
+        self.assertEqual(run_pipeline.call_count, 2)
+        first_kwargs = run_pipeline.call_args_list[0].kwargs
+        second_kwargs = run_pipeline.call_args_list[1].kwargs
+        self.assertEqual(first_kwargs["pipeline_type"], "url_only")
+        self.assertEqual(second_kwargs["pipeline_type"], "url_only")
 
 
 if __name__ == "__main__":

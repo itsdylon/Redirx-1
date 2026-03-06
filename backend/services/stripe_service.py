@@ -201,6 +201,8 @@ class StripeService:
         )
         if not price_id:
             raise ValueError(f"Agency {cycle} price is not configured")
+        if not Config.STRIPE_PRICE_ID_AGENCY_OVERAGE:
+            raise ValueError("Agency overage price is not configured")
 
         customer_id = self._get_or_create_customer(user_id, email)
         metadata = {
@@ -208,11 +210,15 @@ class StripeService:
             "supabase_user_id": user_id,
             "billing_cycle": cycle,
         }
+        line_items = [
+            {"price": price_id, "quantity": 1},
+            {"price": Config.STRIPE_PRICE_ID_AGENCY_OVERAGE},
+        ]
 
         session = stripe.checkout.Session.create(
             customer=customer_id,
             mode="subscription",
-            line_items=[{"price": price_id, "quantity": 1}],
+            line_items=line_items,
             allow_promotion_codes=True,
             metadata=metadata,
             success_url=success_url,

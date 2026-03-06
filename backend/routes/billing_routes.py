@@ -249,6 +249,20 @@ def create_project_checkout():
                 }
             )
 
+        subtotal_cents = quote.get("subtotal_cents") or 0
+        if 0 < subtotal_cents < 50:
+            return error_response(
+                code="billing_below_stripe_minimum",
+                user_message=(
+                    f"Project total is ${subtotal_cents / 100:.2f}, "
+                    "which is below Stripe's $0.50 minimum charge. "
+                    "Add more pages or contact us for small-project options."
+                ),
+                status=422,
+                retryable=False,
+                next_action="add_pages",
+            )
+
         origin = _default_origin()
         success_url = data.get(
             "success_url",

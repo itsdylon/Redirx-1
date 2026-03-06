@@ -11,14 +11,14 @@
 ALTER TABLE user_profiles
   ALTER COLUMN plan SET DEFAULT 'free';
 
+ALTER TABLE user_profiles
+  DROP CONSTRAINT IF EXISTS user_profiles_plan_check;
+
 UPDATE user_profiles
 SET plan = CASE
   WHEN plan IN ('agency', 'enterprise', 'free') THEN plan
   ELSE 'free'
 END;
-
-ALTER TABLE user_profiles
-  DROP CONSTRAINT IF EXISTS user_profiles_plan_check;
 
 ALTER TABLE user_profiles
   ADD CONSTRAINT user_profiles_plan_check

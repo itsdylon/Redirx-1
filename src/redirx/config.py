@@ -39,6 +39,7 @@ class Config:
     STRIPE_PRICE_ID_AGENCY_MONTHLY: Optional[str] = os.getenv('STRIPE_PRICE_ID_AGENCY_MONTHLY')
     STRIPE_PRICE_ID_AGENCY_ANNUAL: Optional[str] = os.getenv('STRIPE_PRICE_ID_AGENCY_ANNUAL')
     STRIPE_PRICE_ID_AGENCY_OVERAGE: Optional[str] = os.getenv('STRIPE_PRICE_ID_AGENCY_OVERAGE')
+    STRIPE_METER_EVENT_NAME: Optional[str] = os.getenv('STRIPE_METER_EVENT_NAME')
 
     # Trial Invite System
     TRIAL_INVITE_PEPPER: Optional[str] = os.getenv('TRIAL_INVITE_PEPPER')

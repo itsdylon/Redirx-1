@@ -479,27 +479,32 @@ class StripeService:
             return {"recorded": False, "reason": "not_agency_plan"}
 
         subscription_item_id = profile.data.get("stripe_overage_item_id")
+        customer_id = profile.data.get("stripe_customer_id")
         stripe_usage_record_id = None
         usage_metadata: Dict[str, Any] = metadata.copy() if isinstance(metadata, dict) else {}
 
-        if subscription_item_id:
+        meter_event_name = Config.STRIPE_METER_EVENT_NAME
+        if meter_event_name and customer_id:
             try:
-                usage_record = stripe.SubscriptionItem.create_usage_record(
-                    subscription_item_id,
-                    quantity=int(billable_pages),
-                    timestamp=int(datetime.now(timezone.utc).timestamp()),
-                    action="increment",
+                meter_event = stripe.billing.MeterEvent.create(
+                    event_name=meter_event_name,
+                    payload={
+                        "stripe_customer_id": customer_id,
+                        "value": str(int(billable_pages)),
+                    },
                 )
-                stripe_usage_record_id = usage_record.get("id")
+                stripe_usage_record_id = meter_event.get("identifier")
                 usage_metadata["stripe_metering"] = "sent"
             except Exception as e:
                 usage_metadata["stripe_metering"] = "failed"
                 usage_metadata["stripe_error"] = str(e)[:500]
                 logger.error(
-                    "Failed to submit Stripe metered usage for session %s: %s",
+                    "Failed to submit Stripe meter event for session %s: %s",
                     session_id,
                     e,
                 )
+        elif subscription_item_id:
+            usage_metadata["stripe_metering"] = "meter_not_configured"
         else:
             usage_metadata["stripe_metering"] = "not_configured"
 

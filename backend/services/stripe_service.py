@@ -70,7 +70,7 @@ class StripeService:
             "stripe_customer_id"
         ).eq("id", user_id).maybe_single().execute()
 
-        if result.data and result.data.get("stripe_customer_id"):
+        if result and result.data and result.data.get("stripe_customer_id"):
             return str(result.data["stripe_customer_id"])
 
         customer = stripe.Customer.create(
@@ -95,7 +95,7 @@ class StripeService:
             "stripe_customer_id", customer_id
         ).maybe_single().execute()
 
-        if not result.data:
+        if not result or not result.data:
             return None
 
         return str(result.data["id"])
@@ -226,7 +226,7 @@ class StripeService:
             "stripe_customer_id"
         ).eq("id", user_id).maybe_single().execute()
 
-        if not result.data or not result.data.get("stripe_customer_id"):
+        if not result or not result.data or not result.data.get("stripe_customer_id"):
             raise ValueError("No Stripe customer found for this user")
 
         session = stripe.billing_portal.Session.create(
@@ -247,7 +247,7 @@ class StripeService:
             existing = self.client.table("stripe_webhook_events").select("stripe_event_id").eq(
                 "stripe_event_id", event_id
             ).maybe_single().execute()
-            return bool(existing.data)
+            return bool(existing and existing.data)
         except Exception:
             # If table is unavailable, continue processing.
             return False
@@ -275,7 +275,7 @@ class StripeService:
             "id,user_id,project_name,old_urls,new_urls"
         ).eq("id", source_session_id).maybe_single().execute()
 
-        source = source_result.data
+        source = source_result.data if source_result else None
         if not source:
             raise ValueError("Source session not found for paid quote")
 
@@ -459,14 +459,14 @@ class StripeService:
         existing = self.client.table("agency_usage_events").select("id").eq(
             "session_id", str(session_id)
         ).maybe_single().execute()
-        if existing.data:
+        if existing and existing.data:
             return {"recorded": False, "duplicate": True, "event_id": existing.data.get("id")}
 
         profile = self.client.table("user_profiles").select(
             "plan,stripe_customer_id,stripe_subscription_id,stripe_overage_item_id"
         ).eq("id", user_id).maybe_single().execute()
 
-        if not profile.data:
+        if not profile or not profile.data:
             return {"recorded": False, "reason": "profile_not_found"}
 
         if profile.data.get("plan") != "agency":
@@ -523,7 +523,7 @@ class StripeService:
             "plan,stripe_customer_id,stripe_subscription_id,stripe_subscription_status,stripe_overage_item_id"
         ).eq("id", user_id).maybe_single().execute()
 
-        if not result.data:
+        if not result or not result.data:
             return {
                 "plan": "free",
                 "manage_portal_available": False,

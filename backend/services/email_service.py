@@ -226,7 +226,7 @@ class EmailService:
                 .maybe_single()
                 .execute()
             )
-            if result.data:
+            if result and result.data:
                 return result.data.get("opted_out", False)
             return False
         except Exception:

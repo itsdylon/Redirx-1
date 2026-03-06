@@ -190,19 +190,19 @@ class PricingService:
         result = self.client.table("project_pricing_quotes").select("*").eq(
             "source_session_id", str(source_session_id)
         ).eq("user_id", user_id).maybe_single().execute()
-        return result.data
+        return result.data if result else None
 
     def get_quote_by_id(self, quote_id: str) -> dict[str, Any] | None:
         result = self.client.table("project_pricing_quotes").select("*").eq(
             "id", quote_id
         ).maybe_single().execute()
-        return result.data
+        return result.data if result else None
 
     def get_quote_by_checkout_session(self, stripe_checkout_session_id: str) -> dict[str, Any] | None:
         result = self.client.table("project_pricing_quotes").select("*").eq(
             "stripe_checkout_session_id", stripe_checkout_session_id
         ).maybe_single().execute()
-        return result.data
+        return result.data if result else None
 
     def mark_checkout_created(self, quote_id: str, stripe_checkout_session_id: str) -> dict[str, Any] | None:
         result = self.client.table("project_pricing_quotes").update(
@@ -213,7 +213,7 @@ class PricingService:
                 "updated_at": _now_iso(),
             }
         ).eq("id", quote_id).execute()
-        return result.data[0] if result.data else None
+        return result.data[0] if (result and result.data) else None
 
     def mark_paid(self, quote_id: str, stripe_payment_intent_id: str | None = None) -> dict[str, Any] | None:
         updates: dict[str, Any] = {
@@ -227,7 +227,7 @@ class PricingService:
         result = self.client.table("project_pricing_quotes").update(updates).eq(
             "id", quote_id
         ).execute()
-        return result.data[0] if result.data else None
+        return result.data[0] if (result and result.data) else None
 
     def attach_deep_session(self, quote_id: str, deep_session_id: UUID | str) -> dict[str, Any] | None:
         result = self.client.table("project_pricing_quotes").update(
@@ -236,7 +236,7 @@ class PricingService:
                 "updated_at": _now_iso(),
             }
         ).eq("id", quote_id).execute()
-        return result.data[0] if result.data else None
+        return result.data[0] if (result and result.data) else None
 
     def get_unlock_status(self, source_session_id: UUID | str, user_id: str) -> dict[str, Any]:
         source_session_id = str(source_session_id)
@@ -270,7 +270,7 @@ class PricingService:
             deep_session = self.client.table("migration_sessions").select(
                 "status"
             ).eq("id", str(deep_session_id)).maybe_single().execute()
-            if deep_session.data:
+            if deep_session and deep_session.data:
                 deep_status = deep_session.data.get("status")
 
         return {
@@ -325,8 +325,8 @@ class PricingService:
         existing = self.client.table("agency_usage_events").select("*").eq(
             "session_id", str(session_id)
         ).maybe_single().execute()
-        if existing.data:
+        if existing and existing.data:
             return existing.data
 
         result = self.client.table("agency_usage_events").insert(payload).execute()
-        return result.data[0] if result.data else None
+        return result.data[0] if (result and result.data) else None

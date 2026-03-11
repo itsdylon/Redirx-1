@@ -1,0 +1,1 @@
+"""Benchmark redirect tests."""

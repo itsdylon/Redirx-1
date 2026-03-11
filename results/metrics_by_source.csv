@@ -1,0 +1,16 @@
+method,source_repo,n_pairs,top1_accuracy,top3_recall,mrr,coverage,runtime_seconds
+string_similarity,aws-amplify/docs,804,0.195274,0.252488,0.221186,1.000000,0.0563
+string_similarity,denoland/docs,57,0.508772,0.631579,0.564327,1.000000,0.0025
+string_similarity,hashicorp/terraform-website,235,0.689362,0.902128,0.784397,1.000000,0.0102
+string_similarity,withastro/docs,60,0.500000,0.683333,0.580556,1.000000,0.0025
+string_similarity,fluxcd/website,44,0.590909,0.727273,0.659091,1.000000,0.0019
+slug_only,aws-amplify/docs,804,0.062189,0.089552,0.074627,1.000000,4.1059
+slug_only,denoland/docs,57,0.508772,0.789474,0.643275,1.000000,0.1842
+slug_only,hashicorp/terraform-website,235,0.182979,0.217021,0.197872,1.000000,0.9614
+slug_only,withastro/docs,60,0.400000,0.516667,0.455556,1.000000,0.2324
+slug_only,fluxcd/website,44,0.136364,0.500000,0.314394,1.000000,0.1812
+content_based,aws-amplify/docs,804,0.044776,0.084577,0.061153,0.715174,90.5669
+content_based,denoland/docs,57,0.087719,0.192982,0.134503,0.473684,25.4237
+content_based,hashicorp/terraform-website,235,0.506383,0.770213,0.625532,0.936170,9.0073
+content_based,withastro/docs,60,0.400000,0.583333,0.472222,0.833333,0.0615
+content_based,fluxcd/website,44,0.250000,0.340909,0.295455,0.545455,0.0407

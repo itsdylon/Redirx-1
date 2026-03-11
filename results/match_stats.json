@@ -1,0 +1,21 @@
+{
+  "generated_at": "2026-03-03T18:38:57.811787+00:00",
+  "methods": [
+    "string_similarity",
+    "slug_only",
+    "content_based"
+  ],
+  "runtime_ms": {
+    "string_similarity": 73.48456361796707,
+    "slug_only": 5665.127545595169,
+    "content_based": 125100.20615602843
+  },
+  "embedding": {
+    "model": "text-embedding-3-small",
+    "openai_calls": 522,
+    "cache_hits": 9150,
+    "tokens_estimated": 373740,
+    "estimated_cost_usd": 0.007474800000000001,
+    "price_per_1k_tokens_usd": 2e-05
+  }
+}

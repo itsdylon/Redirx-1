@@ -1,0 +1,786 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Redirect Benchmark Story</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;600&display=swap');
+
+    :root {
+      --bg: #f5f7f2;
+      --bg-soft: #e3efe6;
+      --ink: #102028;
+      --muted: #4b5c66;
+      --card: rgba(255, 255, 255, 0.84);
+      --line: rgba(16, 32, 40, 0.14);
+      --accent: #0f8572;
+      --accent-soft: #8fe0ce;
+      --accent-2: #e67b39;
+      --accent-2-soft: #ffd2b6;
+      --accent-3: #3f7ee2;
+      --good: #0f8572;
+      --warn: #d56b23;
+      --bad: #bf2b2b;
+      --shadow: 0 16px 60px rgba(16, 32, 40, 0.12);
+      --radius: 18px;
+      --radius-sm: 12px;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: 'Space Grotesk', sans-serif;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 10% -10%, #cdeedd 0, transparent 38%),
+        radial-gradient(circle at 90% 0%, #f9dcb7 0, transparent 40%),
+        linear-gradient(180deg, var(--bg) 0%, #eef3f6 100%);
+      min-height: 100vh;
+    }
+
+    .noise {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      opacity: 0.055;
+      background-image: repeating-linear-gradient(
+        45deg,
+        #000 0,
+        #000 1px,
+        transparent 1px,
+        transparent 8px
+      );
+    }
+
+    .wrap {
+      width: min(1140px, calc(100% - 2rem));
+      margin: 1.25rem auto 3rem;
+      display: grid;
+      gap: 1rem;
+    }
+
+    .hero,
+    .card {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(6px);
+    }
+
+    .hero {
+      padding: clamp(1.25rem, 2.6vw, 2.2rem);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .hero::after {
+      content: '';
+      position: absolute;
+      right: -120px;
+      top: -80px;
+      width: 340px;
+      height: 340px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(15, 133, 114, 0.2), transparent 68%);
+      pointer-events: none;
+    }
+
+    .kicker {
+      font-family: 'IBM Plex Mono', monospace;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--accent);
+      font-size: 0.76rem;
+    }
+
+    h1 {
+      margin: 0.35rem 0 0.5rem;
+      line-height: 1.1;
+      font-size: clamp(1.45rem, 3.8vw, 2.7rem);
+      max-width: 18ch;
+    }
+
+    .subtitle {
+      max-width: 70ch;
+      color: var(--muted);
+      line-height: 1.5;
+      margin-bottom: 1rem;
+      font-size: 0.98rem;
+    }
+
+    .badges {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+    }
+
+    .badge {
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      padding: 0.35rem 0.72rem;
+      font-size: 0.82rem;
+      background: rgba(255, 255, 255, 0.82);
+    }
+
+    .controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.6rem;
+      align-items: center;
+      padding: 0.9rem;
+      position: sticky;
+      top: 0.75rem;
+      z-index: 8;
+    }
+
+    .controls .label {
+      font-size: 0.84rem;
+      color: var(--muted);
+      margin-right: 0.2rem;
+    }
+
+    select {
+      border: 1px solid var(--line);
+      background: #fff;
+      border-radius: 10px;
+      padding: 0.48rem 0.58rem;
+      font-family: inherit;
+      font-size: 0.88rem;
+    }
+
+    .grid-3 {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 0.8rem;
+    }
+
+    .grid-2 {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 0.8rem;
+    }
+
+    .card {
+      padding: 1rem;
+      animation: rise 320ms ease both;
+    }
+
+    @keyframes rise {
+      from { opacity: 0; transform: translateY(6px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .card h2 {
+      margin: 0;
+      font-size: 1.05rem;
+    }
+
+    .card p {
+      margin: 0.45rem 0 0;
+      color: var(--muted);
+      font-size: 0.9rem;
+      line-height: 1.5;
+    }
+
+    .metric {
+      margin-top: 0.8rem;
+      display: flex;
+      align-items: baseline;
+      gap: 0.4rem;
+    }
+
+    .metric .value {
+      font-size: clamp(1.2rem, 2.7vw, 1.85rem);
+      font-weight: 700;
+      line-height: 1;
+    }
+
+    .metric .hint {
+      font-size: 0.83rem;
+      color: var(--muted);
+    }
+
+    .gate-row {
+      display: grid;
+      gap: 0.5rem;
+      margin-top: 0.8rem;
+    }
+
+    .gate {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 0.48rem 0.6rem;
+      background: rgba(255, 255, 255, 0.7);
+      font-size: 0.84rem;
+    }
+
+    .gate .status {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 0.75rem;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      border-radius: 999px;
+      padding: 0.16rem 0.5rem;
+      border: 1px solid;
+    }
+
+    .status.pass {
+      color: var(--good);
+      border-color: color-mix(in oklab, var(--good), #fff 45%);
+      background: color-mix(in oklab, var(--good), #fff 92%);
+    }
+
+    .status.warn {
+      color: var(--warn);
+      border-color: color-mix(in oklab, var(--warn), #fff 45%);
+      background: color-mix(in oklab, var(--warn), #fff 90%);
+    }
+
+    .status.fail {
+      color: var(--bad);
+      border-color: color-mix(in oklab, var(--bad), #fff 45%);
+      background: color-mix(in oklab, var(--bad), #fff 92%);
+    }
+
+    .method-list {
+      margin-top: 0.7rem;
+      display: grid;
+      gap: 0.65rem;
+    }
+
+    .method {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 0.62rem;
+      background: rgba(255, 255, 255, 0.74);
+    }
+
+    .method-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.87rem;
+      font-weight: 600;
+      margin-bottom: 0.42rem;
+    }
+
+    .method small {
+      color: var(--muted);
+      font-weight: 500;
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .bar-group {
+      display: grid;
+      gap: 0.42rem;
+    }
+
+    .bar-row {
+      display: grid;
+      grid-template-columns: 68px 1fr 52px;
+      gap: 0.46rem;
+      align-items: center;
+      font-size: 0.77rem;
+      color: var(--muted);
+    }
+
+    .track {
+      height: 8px;
+      border-radius: 999px;
+      background: rgba(16, 32, 40, 0.1);
+      overflow: hidden;
+      position: relative;
+    }
+
+    .fill {
+      height: 100%;
+      border-radius: inherit;
+      transform-origin: left;
+      animation: wipe 640ms ease both;
+    }
+
+    @keyframes wipe {
+      from { transform: scaleX(0); }
+      to { transform: scaleX(1); }
+    }
+
+    .tone-1 { background: linear-gradient(90deg, var(--accent), #5bcab4); }
+    .tone-2 { background: linear-gradient(90deg, var(--accent-2), #ffb177); }
+    .tone-3 { background: linear-gradient(90deg, var(--accent-3), #8db4ff); }
+
+    .funnel {
+      margin-top: 0.85rem;
+      display: grid;
+      gap: 0.52rem;
+    }
+
+    .step {
+      display: grid;
+      gap: 0.28rem;
+    }
+
+    .step-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      font-size: 0.8rem;
+      color: var(--muted);
+    }
+
+    .step-head strong {
+      color: var(--ink);
+      font-size: 0.86rem;
+    }
+
+    .step .track {
+      height: 11px;
+      background: rgba(16, 32, 40, 0.08);
+    }
+
+    .source-grid {
+      margin-top: 0.8rem;
+      display: grid;
+      gap: 0.5rem;
+    }
+
+    .source {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 0.45rem 0.56rem;
+      background: rgba(255, 255, 255, 0.65);
+      display: grid;
+      gap: 0.3rem;
+    }
+
+    .source .head {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      font-size: 0.8rem;
+    }
+
+    .source .head .count {
+      font-family: 'IBM Plex Mono', monospace;
+      color: var(--muted);
+      font-size: 0.73rem;
+    }
+
+    .source .rate {
+      display: grid;
+      gap: 0.22rem;
+      font-size: 0.73rem;
+      color: var(--muted);
+    }
+
+    .source .rate-line {
+      display: grid;
+      grid-template-columns: 42px 1fr 44px;
+      gap: 0.42rem;
+      align-items: center;
+    }
+
+    .insights {
+      margin-top: 0.85rem;
+      display: grid;
+      gap: 0.5rem;
+    }
+
+    .insight {
+      border-left: 4px solid var(--accent);
+      padding: 0.45rem 0.6rem;
+      background: rgba(255, 255, 255, 0.7);
+      border-radius: 0 10px 10px 0;
+      font-size: 0.84rem;
+      color: var(--muted);
+      line-height: 1.45;
+    }
+
+    .insight strong {
+      color: var(--ink);
+    }
+
+    .mono {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 0.76rem;
+      color: var(--muted);
+      margin-top: 0.5rem;
+      line-height: 1.45;
+    }
+
+    @media (max-width: 980px) {
+      .grid-3,
+      .grid-2 {
+        grid-template-columns: 1fr;
+      }
+      .controls {
+        position: static;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="noise"></div>
+  <main class="wrap">
+    <section class="hero">
+      <div class="kicker">Redirx Benchmark Story</div>
+      <h1>What the redirect benchmark says, and what it does not</h1>
+      <p class="subtitle">
+        This view explains the March 3, 2026 benchmark run (`N=1200`) with context-first framing:
+        dataset shape, acceptance gates, caveats, fair-slice performance, and practical implications.
+      </p>
+      <div class="badges">
+        <span class="badge">Run date: 2026-03-03</span>
+        <span class="badge">Methods: string / slug / content-based</span>
+        <span class="badge">Tier 1 + Tier 2</span>
+        <span class="badge">Seed: 20260303</span>
+      </div>
+    </section>
+
+    <section class="card controls">
+      <span class="label">Metric slice:</span>
+      <select id="subsetSelect">
+        <option value="all">All pairs (N=1200)</option>
+        <option value="old_covered">Old-content covered only (N=896)</option>
+        <option value="target_in_pool">Target present in candidate pool (N=665)</option>
+        <option value="old_covered_target_in_pool" selected>Fair slice: covered + target in pool (N=517)</option>
+        <option value="core_old_covered">Core literal + old-content covered (N=597)</option>
+      </select>
+      <span class="label">Reference:</span>
+      <select id="methodFocus">
+        <option value="string_similarity" selected>String similarity</option>
+        <option value="slug_only">Slug-only</option>
+        <option value="content_based">Content-based</option>
+      </select>
+    </section>
+
+    <section class="grid-3">
+      <article class="card">
+        <h2>Acceptance Gates</h2>
+        <div class="gate-row">
+          <div class="gate"><span>Data gate</span><span class="status pass">pass</span></div>
+          <div class="gate"><span>Reporting gate</span><span class="status pass">pass</span></div>
+          <div class="gate"><span>Coverage gate (>=80%)</span><span class="status fail">fail</span></div>
+        </div>
+        <div class="metric">
+          <span class="value">74.67%</span>
+          <span class="hint">old-content quality coverage</span>
+        </div>
+        <p>
+          The pipeline is end-to-end reproducible, but old-content recovery is below target,
+          which limits fairness for content-based comparison.
+        </p>
+      </article>
+
+      <article class="card">
+        <h2>Dataset Composition</h2>
+        <div class="funnel" id="datasetFunnel"></div>
+        <p>
+          The benchmark is source-skewed: AWS Amplify contributes the majority of pairs,
+          so aggregate scores mostly reflect its redirect characteristics.
+        </p>
+      </article>
+
+      <article class="card">
+        <h2>Runtime + Cost</h2>
+        <div class="method-list" id="runtimeList"></div>
+        <p>
+          Content-based used OpenAI `text-embedding-3-small` with cache reuse.
+          Estimated embedding spend for this run: <strong>$0.0075</strong>.
+        </p>
+      </article>
+    </section>
+
+    <section class="grid-2">
+      <article class="card">
+        <h2>Method Performance by Slice</h2>
+        <p id="sliceDescription"></p>
+        <div class="method-list" id="methodMetrics"></div>
+        <div class="insights" id="performanceInsights"></div>
+      </article>
+
+      <article class="card">
+        <h2>Per-Source View (All Pairs)</h2>
+        <p>
+          This table-like chart shows where each method is strong or weak. Use it to avoid over-generalizing from the global average.
+        </p>
+        <div class="source-grid" id="sourceMetrics"></div>
+      </article>
+    </section>
+
+    <section class="card">
+      <h2>Caveats to Keep In Mind</h2>
+      <div class="insights">
+        <div class="insight"><strong>Candidate pool recall ceiling:</strong> only <strong>55.4%</strong> of ground-truth targets were present in the candidate pool overall. For `aws-amplify/docs`, it was <strong>33.5%</strong>.</div>
+        <div class="insight"><strong>Coverage bottleneck:</strong> `304/1200` old pages were unusable (`old_content_source=unavailable`), reducing the effective evaluation set for content-based ranking.</div>
+        <div class="insight"><strong>Distribution skew:</strong> `804/1200` rows came from one source. Macro claims should be source-stratified, not only aggregate.</div>
+        <div class="insight"><strong>Secondary-rule noise:</strong> placeholders and wildcards represent `326/1200` rows and inflate ambiguity compared to literal-only mapping.</div>
+      </div>
+      <p class="mono">
+        Sources: data/normalized/pairs.csv, data/normalized/content_snapshots.csv,
+        data/normalized/candidate_pool.csv, results/metrics_summary.csv,
+        results/metrics_summary_subsets.csv, results/metrics_by_source.csv.
+      </p>
+    </section>
+
+    <section class="card">
+      <h2>Conclusion</h2>
+      <p id="conclusionText"></p>
+    </section>
+  </main>
+
+  <script>
+    const subsets = {
+      all: {
+        label: 'All pairs',
+        n: 1200,
+        description: 'Raw end-to-end result across every sampled pair. Includes rows missing old-content coverage and rows where the true destination is outside the candidate pool.',
+        metrics: {
+          string_similarity: { top1: 0.3367, top3: 0.4367, mrr: 0.3818 },
+          slug_only: { top1: 0.1267, top3: 0.1842, mrr: 0.1536 },
+          content_based: { top1: 0.1625, top3: 0.2583, mrr: 0.2043 },
+        }
+      },
+      old_covered: {
+        label: 'Old-content covered only',
+        n: 896,
+        description: 'Restricts to rows with usable recovered old-page content (`old_content_quality_pass=true`). Improves fairness for semantic comparisons.',
+        metrics: {
+          string_similarity: { top1: 0.3750, top3: 0.4877, mrr: 0.4263 },
+          slug_only: { top1: 0.1261, top3: 0.1674, mrr: 0.1449 },
+          content_based: { top1: 0.2176, top3: 0.3460, mrr: 0.2736 },
+        }
+      },
+      target_in_pool: {
+        label: 'Target present in candidate pool',
+        n: 665,
+        description: 'Removes impossible cases where ground truth was not available to any method. Useful for estimating ranking quality rather than retrieval coverage.',
+        metrics: {
+          string_similarity: { top1: 0.6075, top3: 0.7880, mrr: 0.6890 },
+          slug_only: { top1: 0.2286, top3: 0.3323, mrr: 0.2772 },
+          content_based: { top1: 0.2932, top3: 0.4662, mrr: 0.3687 },
+        }
+      },
+      old_covered_target_in_pool: {
+        label: 'Fair slice: covered + target in pool',
+        n: 517,
+        description: 'Best apples-to-apples subset for method comparison: old content is usable and true destination is in candidate pool.',
+        metrics: {
+          string_similarity: { top1: 0.6499, top3: 0.8453, mrr: 0.7389 },
+          slug_only: { top1: 0.2186, top3: 0.2901, mrr: 0.2511 },
+          content_based: { top1: 0.3772, top3: 0.5996, mrr: 0.4742 },
+        }
+      },
+      core_old_covered: {
+        label: 'Core literal + old-content covered',
+        n: 597,
+        description: 'Literal-focused subset with usable old content. Useful for publication-grade primary metric reporting when strict mapping shape is needed.',
+        metrics: {
+          string_similarity: { top1: 0.2764, top3: 0.3501, mrr: 0.3110 },
+          slug_only: { top1: 0.1055, top3: 0.1441, mrr: 0.1231 },
+          content_based: { top1: 0.0888, top3: 0.1591, mrr: 0.1178 },
+        }
+      }
+    };
+
+    const methodMeta = {
+      string_similarity: { label: 'String similarity', tone: 'tone-1', runtimeSec: 0.0735, cost: 0.0 },
+      slug_only: { label: 'Slug-only', tone: 'tone-2', runtimeSec: 5.6651, cost: 0.0 },
+      content_based: { label: 'Content-based', tone: 'tone-3', runtimeSec: 125.1001, cost: 0.0075 },
+    };
+
+    const sourceMetrics = {
+      string_similarity: {
+        'aws-amplify/docs': 0.1953,
+        'denoland/docs': 0.5088,
+        'hashicorp/terraform-website': 0.6894,
+        'withastro/docs': 0.5000,
+        'fluxcd/website': 0.5909,
+      },
+      slug_only: {
+        'aws-amplify/docs': 0.0622,
+        'denoland/docs': 0.5088,
+        'hashicorp/terraform-website': 0.1830,
+        'withastro/docs': 0.4000,
+        'fluxcd/website': 0.1364,
+      },
+      content_based: {
+        'aws-amplify/docs': 0.0448,
+        'denoland/docs': 0.0877,
+        'hashicorp/terraform-website': 0.5064,
+        'withastro/docs': 0.4000,
+        'fluxcd/website': 0.2500,
+      },
+      counts: {
+        'aws-amplify/docs': 804,
+        'denoland/docs': 57,
+        'hashicorp/terraform-website': 235,
+        'withastro/docs': 60,
+        'fluxcd/website': 44,
+      }
+    };
+
+    const funnel = [
+      { label: 'Sampled pairs', value: 1200, color: 'tone-1' },
+      { label: 'Old-content covered', value: 896, color: 'tone-1' },
+      { label: 'Target in candidate pool', value: 665, color: 'tone-2' },
+      { label: 'Fair slice (both true)', value: 517, color: 'tone-3' },
+    ];
+
+    const runtimeData = [
+      { key: 'string_similarity', runtime: 0.0735, calls: 0, cost: 0 },
+      { key: 'slug_only', runtime: 5.6651, calls: 0, cost: 0 },
+      { key: 'content_based', runtime: 125.1001, calls: 522, cost: 0.0075 },
+    ];
+
+    const subsetSelect = document.getElementById('subsetSelect');
+    const methodFocus = document.getElementById('methodFocus');
+
+    function pct(x) { return `${(x * 100).toFixed(1)}%`; }
+
+    function metricBar(label, value, tone) {
+      return `
+        <div class="bar-row">
+          <span>${label}</span>
+          <div class="track"><div class="fill ${tone}" style="width:${(value * 100).toFixed(1)}%"></div></div>
+          <strong>${pct(value)}</strong>
+        </div>
+      `;
+    }
+
+    function renderFunnel() {
+      const max = Math.max(...funnel.map(s => s.value));
+      const root = document.getElementById('datasetFunnel');
+      root.innerHTML = funnel.map(step => `
+        <div class="step">
+          <div class="step-head">
+            <strong>${step.label}</strong>
+            <span>${step.value.toLocaleString()}</span>
+          </div>
+          <div class="track">
+            <div class="fill ${step.color}" style="width:${(step.value / max * 100).toFixed(1)}%"></div>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    function renderRuntime() {
+      const max = Math.max(...runtimeData.map(d => d.runtime));
+      const root = document.getElementById('runtimeList');
+      root.innerHTML = runtimeData.map(d => {
+        const m = methodMeta[d.key];
+        return `
+          <div class="method">
+            <div class="method-head">
+              <span>${m.label}</span>
+              <small>${d.runtime.toFixed(2)}s</small>
+            </div>
+            <div class="bar-group">
+              <div class="bar-row">
+                <span>runtime</span>
+                <div class="track"><div class="fill ${m.tone}" style="width:${(d.runtime / max * 100).toFixed(1)}%"></div></div>
+                <strong>${d.runtime.toFixed(2)}s</strong>
+              </div>
+              <div class="bar-row">
+                <span>cost</span>
+                <div class="track"><div class="fill ${m.tone}" style="width:${Math.min(100, d.cost * 10000).toFixed(1)}%"></div></div>
+                <strong>$${d.cost.toFixed(4)}</strong>
+              </div>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function renderMethods() {
+      const subsetKey = subsetSelect.value;
+      const subset = subsets[subsetKey];
+      const focus = methodFocus.value;
+
+      document.getElementById('sliceDescription').textContent = `${subset.label} (N=${subset.n}): ${subset.description}`;
+
+      const root = document.getElementById('methodMetrics');
+      const order = Object.keys(subset.metrics).sort((a, b) => subset.metrics[b].top1 - subset.metrics[a].top1);
+      root.innerHTML = order.map(key => {
+        const m = subset.metrics[key];
+        const meta = methodMeta[key];
+        return `
+          <div class="method">
+            <div class="method-head">
+              <span>${meta.label}</span>
+              <small>${key === focus ? 'focused' : 'comparison'}</small>
+            </div>
+            <div class="bar-group">
+              ${metricBar('Top-1', m.top1, meta.tone)}
+              ${metricBar('Top-3', m.top3, meta.tone)}
+              ${metricBar('MRR', m.mrr, meta.tone)}
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      const sAll = subsets.all.metrics[focus];
+      const sNow = subset.metrics[focus];
+      const improveTop1 = (sNow.top1 - sAll.top1) * 100;
+      const improveTop3 = (sNow.top3 - sAll.top3) * 100;
+
+      const best = order[0];
+      const winner = methodMeta[best].label;
+
+      const insights = document.getElementById('performanceInsights');
+      insights.innerHTML = `
+        <div class="insight"><strong>Slice winner:</strong> ${winner} leads this view by Top-1.</div>
+        <div class="insight"><strong>${methodMeta[focus].label} delta vs all-pairs:</strong> Top-1 ${improveTop1 >= 0 ? '+' : ''}${improveTop1.toFixed(1)} pts, Top-3 ${improveTop3 >= 0 ? '+' : ''}${improveTop3.toFixed(1)} pts.</div>
+        <div class="insight"><strong>Interpretation rule:</strong> Use this slice for method ranking, and use all-pairs for system-level operational reality.</div>
+      `;
+
+      document.getElementById('conclusionText').textContent =
+        subsetKey === 'old_covered_target_in_pool'
+          ? 'On the fairest slice, string similarity remains strongest, content-based improves substantially versus raw all-pairs, and slug-only remains a weak baseline. The next validity lift should target candidate-pool recall and old-content recovery before making broad external claims.'
+          : 'This slice is informative, but conclusions should be cross-checked against the fair slice (covered + target in pool) before publishing comparative claims.';
+    }
+
+    function renderSourceMetrics() {
+      const root = document.getElementById('sourceMetrics');
+      const repos = Object.keys(sourceMetrics.counts).sort((a, b) => sourceMetrics.counts[b] - sourceMetrics.counts[a]);
+
+      root.innerHTML = repos.map(repo => {
+        const count = sourceMetrics.counts[repo];
+        const rows = ['string_similarity', 'slug_only', 'content_based'];
+        return `
+          <div class="source">
+            <div class="head">
+              <strong>${repo}</strong>
+              <span class="count">N=${count}</span>
+            </div>
+            <div class="rate">
+              ${rows.map(method => `
+                <div class="rate-line">
+                  <span>${methodMeta[method].label.split(' ')[0]}</span>
+                  <div class="track"><div class="fill ${methodMeta[method].tone}" style="width:${(sourceMetrics[method][repo] * 100).toFixed(1)}%"></div></div>
+                  <strong>${pct(sourceMetrics[method][repo])}</strong>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    subsetSelect.addEventListener('change', renderMethods);
+    methodFocus.addEventListener('change', renderMethods);
+
+    renderFunnel();
+    renderRuntime();
+    renderMethods();
+    renderSourceMetrics();
+  </script>
+</body>
+</html>

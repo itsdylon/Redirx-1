@@ -1,0 +1,18 @@
+{
+  "generated_at": "2026-03-03T18:38:58.018478+00:00",
+  "mode": "run-all",
+  "size": 1200,
+  "seed": 20260303,
+  "methods": [
+    "string_similarity",
+    "slug_only",
+    "content_based"
+  ],
+  "old_content_quality_coverage": 0.7466666666666667,
+  "acceptance_gates": {
+    "data_gate": true,
+    "coverage_gate": false,
+    "reporting_gate": true
+  },
+  "overall_status": "WARN"
+}

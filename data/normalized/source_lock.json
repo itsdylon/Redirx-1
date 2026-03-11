@@ -1,0 +1,92 @@
+{
+  "generated_at": "2026-03-03T18:30:49.728421+00:00",
+  "adapter_version": "2026.03.03",
+  "sources": [
+    {
+      "source_id": "aws_amplify_docs",
+      "repo": "aws-amplify/docs",
+      "branch": "main",
+      "repo_commit": "23f0406663733992d4fb33405df34f1ef0cdd883",
+      "site_base_url": "https://docs.amplify.aws",
+      "files": [
+        {
+          "redirect_file": "redirects.json",
+          "raw_file": "data/raw/aws_amplify_docs/23f040666373__redirects.json",
+          "sha256": "d4527bb0d2aea7220e00c869fae77e1d076e8180007fb4edcff2a35b91cfb2b2",
+          "bytes": 316986
+        }
+      ],
+      "records_extracted": 2060
+    },
+    {
+      "source_id": "deno_docs",
+      "repo": "denoland/docs",
+      "branch": "main",
+      "repo_commit": "3bc9f662c58db48d2b07ceaf5da2fa5587cfbf5f",
+      "site_base_url": "https://docs.deno.com",
+      "files": [
+        {
+          "redirect_file": "oldurls.json",
+          "raw_file": "data/raw/deno_docs/3bc9f662c58d__oldurls.json",
+          "sha256": "a1b8e39e9619219b7d09299d3bf033a04fab4d6983db590756364497b8243f5f",
+          "bytes": 9780
+        }
+      ],
+      "records_extracted": 153
+    },
+    {
+      "source_id": "terraform_website",
+      "repo": "hashicorp/terraform-website",
+      "branch": "master",
+      "repo_commit": "93ec9cbdc3a120ffde18d1275339d0d6599cd9b3",
+      "site_base_url": "https://www.terraform.io",
+      "files": [
+        {
+          "redirect_file": "redirects.js",
+          "raw_file": "data/raw/terraform_website/93ec9cbdc3a1__redirects.js",
+          "sha256": "aa462dee4788b94933fa6bf9c3ed023a09e9284c69672eaece35497b9f65bff8",
+          "bytes": 2927
+        },
+        {
+          "redirect_file": "redirects.next.js",
+          "raw_file": "data/raw/terraform_website/93ec9cbdc3a1__redirects.next.js",
+          "sha256": "ea4277b1083eccacde96c2dc1ae734388737c6cfd0816b5664aa60e304f137c9",
+          "bytes": 16146
+        }
+      ],
+      "records_extracted": 611
+    },
+    {
+      "source_id": "flux_website",
+      "repo": "fluxcd/website",
+      "branch": "main",
+      "repo_commit": "fbe28609d4c4773ba8b0c73fe65fe8e0b428d89c",
+      "site_base_url": "https://fluxcd.io",
+      "files": [
+        {
+          "redirect_file": "static/_redirects",
+          "raw_file": "data/raw/flux_website/fbe28609d4c4__static___redirects",
+          "sha256": "eacd88fd606c790619b216a72fa9606ca8e4b9158fc6ed648a8ff393c0cd8f84",
+          "bytes": 4643
+        }
+      ],
+      "records_extracted": 44
+    },
+    {
+      "source_id": "astro_docs",
+      "repo": "withastro/docs",
+      "branch": "main",
+      "repo_commit": "8e216293f74f38cc64db427622de74060403d5a8",
+      "site_base_url": "https://docs.astro.build",
+      "files": [
+        {
+          "redirect_file": "public/_redirects",
+          "raw_file": "data/raw/astro_docs/8e216293f74f__public___redirects",
+          "sha256": "79014b7e5a31727675ce83cdc70ec6a248ca7a59acde20aeb41aef492dc85e7e",
+          "bytes": 5085
+        }
+      ],
+      "records_extracted": 60
+    }
+  ]
+}

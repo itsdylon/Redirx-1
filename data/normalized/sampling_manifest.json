@@ -1,0 +1,20 @@
+{
+  "generated_at": "2026-03-03T18:30:54.986947+00:00",
+  "seed": 20260303,
+  "requested_size": 1200,
+  "selected_size": 1200,
+  "core_eval_size": 872,
+  "tier_counts": {
+    "tier1": 1096,
+    "tier2": 104
+  },
+  "source_counts": {
+    "aws-amplify/docs": 804,
+    "denoland/docs": 57,
+    "hashicorp/terraform-website": 235,
+    "withastro/docs": 60,
+    "fluxcd/website": 44
+  },
+  "input": "/Users/dylonshattuck/Documents/Redirx-1/data/normalized/pairs_classified.csv",
+  "output": "/Users/dylonshattuck/Documents/Redirx-1/data/normalized/pairs.csv"
+}

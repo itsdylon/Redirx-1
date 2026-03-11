@@ -1,0 +1,47 @@
+[
+  {
+    "source_id": "aws_amplify_docs",
+    "tier": "tier1",
+    "repo": "aws-amplify/docs",
+    "branch": "main",
+    "redirect_files": ["redirects.json"],
+    "site_base_url": "https://docs.amplify.aws",
+    "enabled": true
+  },
+  {
+    "source_id": "deno_docs",
+    "tier": "tier1",
+    "repo": "denoland/docs",
+    "branch": "main",
+    "redirect_files": ["oldurls.json"],
+    "site_base_url": "https://docs.deno.com",
+    "enabled": true
+  },
+  {
+    "source_id": "terraform_website",
+    "tier": "tier1",
+    "repo": "hashicorp/terraform-website",
+    "branch": "master",
+    "redirect_files": ["redirects.js", "redirects.next.js"],
+    "site_base_url": "https://www.terraform.io",
+    "enabled": true
+  },
+  {
+    "source_id": "flux_website",
+    "tier": "tier2",
+    "repo": "fluxcd/website",
+    "branch": "main",
+    "redirect_files": ["static/_redirects"],
+    "site_base_url": "https://fluxcd.io",
+    "enabled": true
+  },
+  {
+    "source_id": "astro_docs",
+    "tier": "tier2",
+    "repo": "withastro/docs",
+    "branch": "main",
+    "redirect_files": ["public/_redirects"],
+    "site_base_url": "https://docs.astro.build",
+    "enabled": true
+  }
+]

@@ -4,6 +4,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { Sidebar } from './Sidebar';
 import { TopBar } from './TopBar';
 import { OnboardingChecklistDock } from './OnboardingChecklistDock';
+import { isAgencyPlan } from '../lib/plans';
 
 interface DashboardLayoutProps {
   title: string;
@@ -12,7 +13,8 @@ interface DashboardLayoutProps {
 
 export function DashboardLayout({ title, children }: DashboardLayoutProps) {
   const navigate = useNavigate();
-  const { logout } = useAuth();
+  const { logout, user } = useAuth();
+  const createJobPath = isAgencyPlan(user?.plan) ? '/upload' : '/quick-match';
 
   const handleLogout = async () => {
     await logout();
@@ -25,7 +27,7 @@ export function DashboardLayout({ title, children }: DashboardLayoutProps) {
       <div className="flex-1 flex flex-col overflow-hidden">
         <TopBar
           title={title}
-          onCreateJob={() => navigate('/upload')}
+          onCreateJob={() => navigate(createJobPath)}
         />
         <main className="flex-1 flex flex-col overflow-auto p-8 bg-muted/20">
           {children}

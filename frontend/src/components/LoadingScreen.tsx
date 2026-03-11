@@ -5,6 +5,9 @@ import { Button } from './ui/button';
 import { Progress } from './ui/progress';
 import { Alert, AlertTitle, AlertDescription } from './ui/alert';
 import { getSessionStatus, SessionStatus } from '../api/sessions';
+import { useAuth } from '../contexts/AuthContext';
+import { isEnterprisePlan } from '../lib/plans';
+import { ROUTES, getRetryRouteForPlan } from '../routes';
 
 interface LoadingScreenProps {
   sessionId?: string | null;
@@ -22,6 +25,10 @@ export function LoadingScreen({
   minDisplayMs = 0,
 }: LoadingScreenProps) {
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const enterpriseUser = isEnterprisePlan(user?.plan);
+  const retryRoute = getRetryRouteForPlan(user?.plan);
+  const fallbackRoute = enterpriseUser ? ROUTES.dashboard : ROUTES.quickMatch;
   const [progress, setProgress] = useState<{
     currentStage: number | null;
     stageName: string | null;
@@ -134,7 +141,7 @@ export function LoadingScreen({
   }, [failureCount, minDisplayMs, navigate, sessionId, tutorialMode]);
 
   const handleContinueInBackground = () => {
-    navigate('/');
+    navigate(fallbackRoute);
   };
 
   const handleRetry = () => {
@@ -162,17 +169,17 @@ export function LoadingScreen({
 
             <div className="flex flex-col sm:flex-row gap-3">
               <Button
-                onClick={() => navigate('/upload')}
+                onClick={() => navigate(retryRoute)}
                 className="flex-1"
               >
                 Try Again
               </Button>
               <Button
                 variant="outline"
-                onClick={() => navigate('/')}
+                onClick={() => navigate(fallbackRoute)}
                 className="flex-1"
               >
-                View Dashboard
+                {enterpriseUser ? 'View Dashboard' : 'Back to Quick Match'}
               </Button>
             </div>
           </div>
@@ -191,7 +198,7 @@ export function LoadingScreen({
               <AlertTriangle className="h-5 w-5" />
               <AlertTitle>Unable to Check Job Status</AlertTitle>
               <AlertDescription>
-                Unable to check job status. The job may still be running. Please try refreshing or check your dashboard.
+                Unable to check job status. The job may still be running. Please try refreshing or return to your previous workspace.
               </AlertDescription>
             </Alert>
 
@@ -204,10 +211,10 @@ export function LoadingScreen({
               </Button>
               <Button
                 variant="outline"
-                onClick={() => navigate('/')}
+                onClick={() => navigate(fallbackRoute)}
                 className="flex-1"
               >
-                Go to Dashboard
+                {enterpriseUser ? 'Go to Dashboard' : 'Back to Quick Match'}
               </Button>
             </div>
           </div>
@@ -269,7 +276,7 @@ export function LoadingScreen({
                 ? (isDelayingCompletion
                     ? 'Holding for a brief tutorial pause before opening your sample results.'
                     : 'Tutorial mode: this sample run intentionally includes a short processing pause so the flow is easier to follow.')
-                : 'You can wait here or continue working. Your job will process in the background and you can view the results from your dashboard.'
+                : `You can wait here or continue working. Your job will process in the background and you can view the results from your ${enterpriseUser ? 'dashboard' : 'quick-match history'}.`
               }
             </p>
           </div>

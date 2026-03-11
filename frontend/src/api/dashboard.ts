@@ -20,6 +20,8 @@ export interface DashboardData {
     total_mappings: number;
     approved_mappings: number;
     status: string;
+    pipeline_type?: 'content' | 'url_only' | string;
+    source_session_id?: string | null;
   }>;
 }
 

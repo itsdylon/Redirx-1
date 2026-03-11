@@ -4,6 +4,7 @@ import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { usePostHog } from '@posthog/react';
 import { useHotkeys } from 'react-hotkeys-hook';
 import { DashboardLayout } from './DashboardLayout';
+import { ToolLayout } from './ToolLayout';
 import { StatsBar } from './StatsBar';
 import { ReviewToolbar } from './ReviewToolbar';
 import { RedirectTable } from './RedirectTable';
@@ -22,6 +23,7 @@ import { Info } from 'lucide-react';
 import { getResults, getDeepPreview, type DeepPreviewResponse } from '../api/pipeline';
 import { getProjectUnlockStatus } from '../api/billing';
 import { isMac } from '../lib/keyboard';
+import { isEnterprisePlan } from '../lib/plans';
 import { useOnboarding } from '../contexts/OnboardingContext';
 import { useAuth } from '../contexts/AuthContext';
 import { DeepMatchPreviewCard } from './DeepMatchPreviewCard';
@@ -66,7 +68,11 @@ export interface RedirectMapping {
   contentSimilarity: number;
 }
 
-export function ReviewInterface() {
+interface ReviewInterfaceProps {
+  layoutVariant?: 'dashboard' | 'tool';
+}
+
+export function ReviewInterface({ layoutVariant = 'dashboard' }: ReviewInterfaceProps = {}) {
   const { sessionId } = useParams<{ sessionId: string }>();
   const navigate = useNavigate();
   const posthog = usePostHog();
@@ -95,6 +101,9 @@ export function ReviewInterface() {
   const [showCoachmarks, setShowCoachmarks] = useState(false);
   const [samplePreparationActive, setSamplePreparationActive] = useState(false);
   const PAGE_SIZE = 25;
+  const Layout = layoutVariant === 'tool' ? ToolLayout : DashboardLayout;
+  const layoutTitle = 'Review Redirects';
+  const enterpriseUser = isEnterprisePlan(user?.plan);
   const isFreeUser = (user?.plan || 'free') === 'free';
 
   // Refs for keyboard shortcuts
@@ -103,6 +112,7 @@ export function ReviewInterface() {
   const tutorialReviewMarkedRef = useRef(false);
   const hydratedSessionRef = useRef<string | null>(null);
   const resultsViewedTrackedRef = useRef(false);
+  const quickMatchCompletedTrackedRef = useRef(false);
   const tutorialFromQuery = searchParams.get('tutorial') === '1';
   const tutorialActive = !!onboarding &&
     onboarding.onboarding_status === 'in_progress' &&
@@ -156,6 +166,9 @@ export function ReviewInterface() {
       return false;
     },
   });
+  const isDeepMatchUnlocked = !!unlockStatusQuery.data?.is_unlocked;
+  const showDeepMatchPreview = pipelineType === 'url_only' && isFreeUser && !!deepPreview && !isDeepMatchUnlocked;
+  const showDeepMatchPreviewError = pipelineType === 'url_only' && isFreeUser && !!deepPreviewError && !isDeepMatchUnlocked;
 
   const isLoading =
     resultsQuery.isLoading ||
@@ -164,6 +177,7 @@ export function ReviewInterface() {
   useEffect(() => {
     hydratedSessionRef.current = null;
     resultsViewedTrackedRef.current = false;
+    quickMatchCompletedTrackedRef.current = false;
     setRedirects([]);
     setPipelineType('content');
     setError(null);
@@ -210,6 +224,20 @@ export function ReviewInterface() {
         : 'Failed to fetch results'
     );
   }, [resultsQuery.error, navigate]);
+
+  useEffect(() => {
+    if (!sessionId || pipelineType !== 'url_only' || quickMatchCompletedTrackedRef.current) {
+      return;
+    }
+
+    quickMatchCompletedTrackedRef.current = true;
+    posthog?.capture('quick_match_completed', {
+      session_id: sessionId,
+      pipeline_type: pipelineType,
+      source: searchParams.get('source') || 'review',
+      plan: user?.plan || 'free',
+    });
+  }, [pipelineType, posthog, searchParams, sessionId, user?.plan]);
 
   useEffect(() => {
     if (!deepPreviewQuery.error) return;
@@ -374,6 +402,17 @@ export function ReviewInterface() {
     toast.success(newApproved ? 'Redirect approved' : 'Approval removed');
   };
 
+  const handleDeepUnlockClick = () => {
+    if (!sessionId) return;
+    posthog?.capture('deep_unlock_clicked_from_review', {
+      session_id: sessionId,
+      pipeline_type: pipelineType,
+      source: 'review',
+      plan: user?.plan || 'free',
+    });
+    navigate(`/pricing?source_session_id=${sessionId}`);
+  };
+
   const filteredRedirects = redirects.filter((r) => {
     // Hide exact URL matches when toggle is off
     if (!showExactMatches && r.matchType === 'exact_url') return false;
@@ -477,7 +516,7 @@ export function ReviewInterface() {
   // Show error state
   if (error) {
     return (
-      <DashboardLayout title="Review Redirects">
+      <Layout title={layoutTitle}>
         <div className="flex-1 flex items-center justify-center">
           <div className="text-center">
             <div className="text-lg font-medium text-destructive mb-2">Error Loading Results</div>
@@ -487,12 +526,12 @@ export function ReviewInterface() {
             </Button>
           </div>
         </div>
-      </DashboardLayout>
+      </Layout>
     );
   }
 
   return (
-      <DashboardLayout title="Review Redirects">
+      <Layout title={layoutTitle}>
           {isSampleTutorial && samplePreparationActive && (
             <div className="mb-4 border border-[#26D99D] bg-[#26D99D]/16 dark:bg-[#26D99D]/24 p-3">
               <div className="flex items-center gap-2 text-sm font-medium text-[#064731] dark:text-[#E9FFF8]">
@@ -521,7 +560,13 @@ export function ReviewInterface() {
           )}
 
           {pipelineType === 'url_only' && unlockStatusEnabled && (
-            <div className="mb-4 border border-border bg-card p-4">
+            <div
+              className={`mb-4 border p-4 ${
+                isDeepMatchUnlocked
+                  ? 'border-emerald-500/40 bg-emerald-500/10'
+                  : 'border-border bg-card'
+              }`}
+            >
               {unlockStatusQuery.isLoading ? (
                 <div className="flex items-center gap-2 text-sm text-muted-foreground">
                   <Loader2 className="h-4 w-4 animate-spin" />
@@ -534,7 +579,7 @@ export function ReviewInterface() {
                       <p className="text-sm text-muted-foreground">
                         Get a one-time Deep Match quote for this project.
                       </p>
-                      <Button onClick={() => navigate(`/pricing?source_session_id=${sessionId}`)}>
+                      <Button onClick={handleDeepUnlockClick}>
                         View Project Pricing
                       </Button>
                     </>
@@ -545,7 +590,7 @@ export function ReviewInterface() {
                       <p className="text-sm text-muted-foreground">
                         Deep Match is locked for this project.
                       </p>
-                      <Button onClick={() => navigate(`/pricing?source_session_id=${sessionId}`)}>
+                      <Button onClick={handleDeepUnlockClick}>
                         Unlock Deep Match
                       </Button>
                     </>
@@ -565,7 +610,7 @@ export function ReviewInterface() {
 
                   {unlockStatusQuery.data.is_unlocked && (
                     <>
-                      <p className="text-sm text-foreground">Deep Match unlocked.</p>
+                      <p className="text-sm font-medium text-emerald-700 dark:text-emerald-300">Deep Match unlocked.</p>
                       {unlockStatusQuery.data.deep_session_status === 'completed' &&
                         unlockStatusQuery.data.deep_session_id && (
                           <Button
@@ -574,9 +619,10 @@ export function ReviewInterface() {
                             Open Deep Match Results
                           </Button>
                         )}
-                      {(unlockStatusQuery.data.deep_session_status === 'pending' ||
+                      {(unlockStatusQuery.data.deep_session_status === 'queued' ||
+                        unlockStatusQuery.data.deep_session_status === 'pending' ||
                         unlockStatusQuery.data.deep_session_status === 'processing') && (
-                        <p className="text-sm text-muted-foreground">
+                        <p className="text-sm text-emerald-700 dark:text-emerald-300">
                           Deep Match is processing in the background. This page will refresh status automatically.
                         </p>
                       )}
@@ -587,10 +633,10 @@ export function ReviewInterface() {
             </div>
           )}
 
-          {pipelineType === 'url_only' && isFreeUser && deepPreview && (
+          {showDeepMatchPreview && (
             <DeepMatchPreviewCard preview={deepPreview} />
           )}
-          {pipelineType === 'url_only' && isFreeUser && deepPreviewError && (
+          {showDeepMatchPreviewError && (
             <div className="mb-4 text-xs text-muted-foreground">{deepPreviewError}</div>
           )}
 
@@ -772,7 +818,7 @@ export function ReviewInterface() {
               onClick={async () => {
                 await completeOnboarding();
                 setShowTutorialSuccess(false);
-                navigate('/upload');
+                navigate(enterpriseUser ? '/upload' : '/quick-match');
               }}
             >
               Start Real Job Now
@@ -780,6 +826,6 @@ export function ReviewInterface() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </DashboardLayout>
+    </Layout>
   );
 }

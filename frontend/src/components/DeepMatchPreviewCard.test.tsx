@@ -107,6 +107,21 @@ describe('DeepMatchPreviewCard', () => {
     );
   });
 
+  it('derives fallback locked count from totals when lock_overlay is absent', () => {
+    render(
+      <DeepMatchPreviewCard
+        preview={makeCompletedPreview({
+          lock_overlay: undefined,
+          total_convincing_fixes: 7,
+        })}
+      />,
+    );
+
+    expect(
+      screen.getByText('Unlock 5 more high-confidence fixes and AI alternatives before launch.'),
+    ).toBeInTheDocument();
+  });
+
   it('renders queued state and tracks queue visibility event', () => {
     render(
       <DeepMatchPreviewCard

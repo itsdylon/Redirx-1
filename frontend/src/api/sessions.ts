@@ -12,6 +12,22 @@ export interface SessionStatus {
   total_stages?: number | null;
 }
 
+export interface MigrationSession {
+  id: string;
+  project_name: string;
+  created_at: string;
+  total_mappings: number;
+  approved_mappings: number;
+  status: string;
+  pipeline_type?: 'content' | 'url_only' | string;
+  source_session_id?: string | null;
+}
+
+export interface SessionListResponse {
+  success: boolean;
+  sessions: MigrationSession[];
+}
+
 export async function getSessionStatus(sessionId: string): Promise<SessionStatus> {
   try {
     const response = await fetch(`${API_BASE_URL}/api/user/sessions/${sessionId}/status`, {
@@ -88,7 +104,7 @@ export async function deleteSession(sessionId: string): Promise<any> {
   }
 }
 
-export async function fetchAllSessions(): Promise<any> {
+export async function fetchAllSessions(): Promise<SessionListResponse> {
   try {
     const response = await fetch(`${API_BASE_URL}/api/user/sessions`, {
       method: 'GET',

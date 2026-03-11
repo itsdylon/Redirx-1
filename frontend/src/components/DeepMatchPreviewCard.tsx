@@ -14,6 +14,11 @@ function confidencePct(value: number): string {
   return `${Math.round(value * 100)}%`;
 }
 
+function derivedLockedCount(preview: DeepPreviewResponse): number {
+  const inferred = Math.max(0, preview.total_convincing_fixes - preview.visible_items.length);
+  return Math.max(preview.locked_teasers.length, inferred);
+}
+
 export function DeepMatchPreviewCard({ preview }: DeepMatchPreviewCardProps) {
   const navigate = useNavigate();
   const posthog = usePostHog();
@@ -61,6 +66,11 @@ export function DeepMatchPreviewCard({ preview }: DeepMatchPreviewCardProps) {
       source_session_id: preview.source_session_id,
       total_convincing_fixes: preview.total_convincing_fixes,
       locked_count: preview.locked_teasers.length,
+    });
+    posthog?.capture('deep_unlock_clicked_from_review', {
+      session_id: preview.source_session_id,
+      pipeline_type: 'url_only',
+      source: 'deep_preview_card',
     });
     navigate(pricingHref);
   };
@@ -142,7 +152,7 @@ export function DeepMatchPreviewCard({ preview }: DeepMatchPreviewCardProps) {
                 <Lock className="h-4 w-4 text-foreground" />
               </div>
               <p className="text-sm font-medium text-foreground">
-                {preview.lock_overlay || `Unlock ${preview.locked_teasers.length} more high-confidence fixes and AI alternatives before launch.`}
+                {preview.lock_overlay || `Unlock ${derivedLockedCount(preview)} more high-confidence fixes and AI alternatives before launch.`}
               </p>
             </div>
           </div>

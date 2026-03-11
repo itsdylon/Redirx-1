@@ -165,6 +165,12 @@ describe('UploadPage — rendering', () => {
     const button = screen.getByRole('button', { name: /Begin/ });
     expect(button).toBeDisabled();
   });
+
+  it('renders quick-only start mode without deep/quick selector cards', () => {
+    render(<UploadPage quickOnly />);
+    expect(screen.getByText('Quick Match Workflow')).toBeInTheDocument();
+    expect(screen.queryByText('Deep Match')).not.toBeInTheDocument();
+  });
 });
 
 describe('UploadPage — CSV file upload flow', () => {

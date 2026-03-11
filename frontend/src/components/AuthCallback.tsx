@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { Card } from './ui/card';
 import { Button } from './ui/button';
+import { consumeAuthRedirect } from '../lib/authRedirect';
 
 export function AuthCallback() {
   const [error, setError] = useState<string | null>(null);
@@ -34,9 +35,8 @@ export function AuthCallback() {
             localStorage.setItem('refresh_token', data.session.refresh_token);
 
             // Check for pending redirect
-            const redirect = localStorage.getItem('auth_redirect');
+            const redirect = consumeAuthRedirect();
             if (redirect) {
-              localStorage.removeItem('auth_redirect');
               navigate(redirect, { replace: true });
             } else {
               navigate('/', { replace: true });
@@ -56,9 +56,8 @@ export function AuthCallback() {
           localStorage.setItem('access_token', session.access_token);
           localStorage.setItem('refresh_token', session.refresh_token);
 
-          const redirect = localStorage.getItem('auth_redirect');
+          const redirect = consumeAuthRedirect();
           if (redirect) {
-            localStorage.removeItem('auth_redirect');
             navigate(redirect, { replace: true });
           } else {
             navigate('/', { replace: true });

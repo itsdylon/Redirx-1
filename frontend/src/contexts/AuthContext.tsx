@@ -4,6 +4,7 @@ import { usePostHog } from '@posthog/react';
 import { API_BASE_URL } from '../api/config';
 import { supabase } from '../lib/supabase';
 import { ApiError, throwApiErrorFromResponse, toApiError } from '../utils/errorHandler';
+import { consumeAuthRedirect } from '../lib/authRedirect';
 
 interface User {
   id: string;
@@ -82,9 +83,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               }
 
               // Check for pending redirect
-              const redirect = localStorage.getItem('auth_redirect');
+              const redirect = consumeAuthRedirect();
               if (redirect) {
-                localStorage.removeItem('auth_redirect');
                 setLoading(false);
                 navigate(redirect, { replace: true });
                 return;

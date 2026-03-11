@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, Link, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Card } from './ui/card';
 import { validateEmail } from '../utils/validation';
 import { ApiError } from '../utils/errorHandler';
+import { consumeAuthRedirect, setAuthRedirect } from '../lib/authRedirect';
 
 export function LoginPage() {
   const [email, setEmail] = useState('');
@@ -22,6 +23,9 @@ export function LoginPage() {
 
   const { login, resendConfirmationEmail } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const redirectParam = searchParams.get('redirect');
+  const sourceParam = searchParams.get('source');
 
   useEffect(() => {
     if (resendCooldown <= 0) {
@@ -34,6 +38,10 @@ export function LoginPage() {
       window.clearTimeout(timer);
     };
   }, [resendCooldown]);
+
+  useEffect(() => {
+    setAuthRedirect(redirectParam);
+  }, [redirectParam]);
 
   const handleEmailBlur = () => {
     setEmailTouched(true);
@@ -82,9 +90,8 @@ export function LoginPage() {
 
     try {
       await login(email, password);
-      const redirect = localStorage.getItem('auth_redirect');
+      const redirect = consumeAuthRedirect();
       if (redirect) {
-        localStorage.removeItem('auth_redirect');
         navigate(redirect);
       } else {
         navigate('/');
@@ -236,7 +243,14 @@ export function LoginPage() {
         <p className="mt-6 text-center text-sm text-muted-foreground">
           Don't have an account?{' '}
           <Link
-            to={email ? `/signup?email=${encodeURIComponent(email)}` : '/signup'}
+            to={(() => {
+              const params = new URLSearchParams();
+              if (email) params.set('email', email);
+              if (redirectParam) params.set('redirect', redirectParam);
+              if (sourceParam) params.set('source', sourceParam);
+              const query = params.toString();
+              return query ? `/signup?${query}` : '/signup';
+            })()}
             className="text-primary hover:underline font-medium"
           >
             Sign up

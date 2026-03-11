@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { LayoutDashboard, FolderOpen, Settings, ChevronLeft, ChevronRight, LogOut, CreditCard } from 'lucide-react';
 import faviconImg from '@/assets/favicon.png';
+import { useAuth } from '../contexts/AuthContext';
+import { isAgencyPlan } from '../lib/plans';
 
 interface SidebarProps {
   onLogout: () => void;
@@ -10,7 +12,9 @@ interface SidebarProps {
 export function Sidebar({ onLogout }: SidebarProps) {
   const navigate = useNavigate();
   const location = useLocation();
+  const { user } = useAuth();
   const [isCollapsed, setIsCollapsed] = useState(false);
+  const agencyUser = isAgencyPlan(user?.plan);
 
   // Load collapsed state from localStorage
   useEffect(() => {
@@ -27,12 +31,18 @@ export function Sidebar({ onLogout }: SidebarProps) {
     localStorage.setItem('sidebar-collapsed', String(newState));
   };
 
-  const navItems = [
-    { icon: LayoutDashboard, label: 'Dashboard', path: '/dashboard' },
-    { icon: FolderOpen, label: 'All Projects', path: '/projects' },
-    { icon: CreditCard, label: 'Pricing', path: '/pricing' },
-    { icon: Settings, label: 'Settings', path: '/settings' },
-  ];
+  const navItems = agencyUser
+    ? [
+        { icon: LayoutDashboard, label: 'Dashboard', path: '/dashboard' },
+        { icon: FolderOpen, label: 'All Projects', path: '/projects' },
+        { icon: Settings, label: 'Settings', path: '/settings' },
+      ]
+    : [
+        { icon: LayoutDashboard, label: 'Quick Match', path: '/quick-match' },
+        { icon: FolderOpen, label: 'Project History', path: '/projects' },
+        { icon: CreditCard, label: 'Pricing', path: '/pricing' },
+        { icon: Settings, label: 'Settings', path: '/settings' },
+      ];
 
   return (
     <div

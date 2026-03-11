@@ -5,6 +5,7 @@ import { Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { DashboardLayout } from './DashboardLayout';
+import { ToolLayout } from './ToolLayout';
 import { Card } from './ui/card';
 import { Button } from './ui/button';
 import { Slider } from './ui/slider';
@@ -21,6 +22,8 @@ import {
 } from '../api/billing';
 import { queryKeys } from '../queries/queryKeys';
 import { ApiError } from '../utils/errorHandler';
+import { useAuth } from '../contexts/AuthContext';
+import { isEnterprisePlan } from '../lib/plans';
 
 function formatUsdFromCents(value: number | null | undefined): string {
   if (value == null) return '—';
@@ -100,14 +103,19 @@ function QuoteSummary({ quote }: { quote: ProjectQuote }) {
 export function PricingPage() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
+  const { user } = useAuth();
 
   const sourceSessionId = searchParams.get('source_session_id') || '';
+  const enterpriseUser = isEnterprisePlan(user?.plan);
+  const toolUnlockOnly = !enterpriseUser;
+  const Layout = enterpriseUser ? DashboardLayout : ToolLayout;
   const [pageCount, setPageCount] = useState(5000);
   const [billingCycle, setBillingCycle] = useState<'monthly' | 'annual'>('monthly');
 
   const estimateQuery = useQuery({
     queryKey: queryKeys.billing.estimate(pageCount),
     queryFn: () => getPricingEstimate(pageCount),
+    enabled: enterpriseUser,
   });
 
   const quoteQuery = useQuery({
@@ -119,6 +127,7 @@ export function PricingPage() {
   const billingStatusQuery = useQuery({
     queryKey: queryKeys.billing.status,
     queryFn: getBillingStatus,
+    enabled: enterpriseUser,
   });
 
   const projectCheckout = useMutation({
@@ -186,8 +195,64 @@ export function PricingPage() {
     return billingCycle === 'monthly' ? '$349 / month' : '$299 / month (billed annually)';
   }, [billingCycle]);
 
+  if (toolUnlockOnly && !sourceSessionId) {
+    return (
+      <Layout title="Project Unlock">
+        <div className="max-w-xl">
+          <Card className="p-6 space-y-4">
+            <p className="text-lg font-semibold text-foreground">No project selected</p>
+            <p className="text-sm text-muted-foreground">
+              Open pricing from a Quick Match results page to unlock Deep Match for that project.
+            </p>
+            <Button onClick={() => navigate('/quick-match')}>Back to Quick Match</Button>
+          </Card>
+        </div>
+      </Layout>
+    );
+  }
+
+  if (toolUnlockOnly) {
+    return (
+      <Layout title="Project Unlock">
+        <div className="max-w-2xl">
+          <Card className="p-6 space-y-5">
+            <div>
+              <p className="text-xl font-semibold">Unlock Deep Match For This Project</p>
+              <p className="text-sm text-muted-foreground mt-1">
+                One-time project pricing based on your uploaded sitemap counts.
+              </p>
+            </div>
+
+            {quoteQuery.isLoading ? (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Building quote from your uploaded sitemap counts...
+              </div>
+            ) : projectQuote ? (
+              <>
+                <QuoteSummary quote={projectQuote} />
+                {quoteIsContactRequired ? (
+                  <Button asChild>
+                    <a href="mailto:sales@redirx.dev?subject=RedirX%20Enterprise%20Quote">Contact Sales</a>
+                  </Button>
+                ) : (
+                  <Button onClick={() => projectCheckout.mutate()} disabled={projectCheckout.isPending}>
+                    {projectCheckout.isPending && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+                    Unlock Deep Match
+                  </Button>
+                )}
+              </>
+            ) : (
+              <p className="text-sm text-muted-foreground">Unable to load quote for this project.</p>
+            )}
+          </Card>
+        </div>
+      </Layout>
+    );
+  }
+
   return (
-    <DashboardLayout title="Pricing">
+    <Layout title="Pricing">
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 max-w-6xl">
         <Card className="p-6 space-y-5">
           <div>
@@ -292,6 +357,6 @@ export function PricingPage() {
           )}
         </Card>
       </div>
-    </DashboardLayout>
+    </Layout>
   );
 }

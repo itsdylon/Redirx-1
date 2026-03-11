@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, Building, Mail, User, CreditCard, Clock } from 'lucide-react';
 
 import { useAuth } from '../contexts/AuthContext';
-import { Header } from './Header';
+import { DashboardLayout } from './DashboardLayout';
 import { Card, CardHeader, CardTitle, CardContent } from './ui/card';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -106,12 +106,10 @@ export function AccountPage() {
   const loading = profileQuery.isLoading || sessionsQuery.isLoading || billingQuery.isLoading;
 
   return (
-    <div className="min-h-screen">
-      <Header currentView="account" />
-
-      <main className="max-w-4xl mx-auto p-8 space-y-6">
+    <DashboardLayout title="Account">
+      <div className="max-w-4xl space-y-6">
         <div>
-          <Button variant="outline" onClick={() => navigate('/')}>
+          <Button variant="outline" onClick={() => navigate('/dashboard')}>
             <ArrowLeft className="h-4 w-4 mr-2" />
             Back to Dashboard
           </Button>
@@ -227,7 +225,7 @@ export function AccountPage() {
             </Card>
           </div>
         )}
-      </main>
-    </div>
+      </div>
+    </DashboardLayout>
   );
 }

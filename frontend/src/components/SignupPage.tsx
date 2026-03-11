@@ -1,5 +1,6 @@
 import { useState, useMemo, useEffect } from 'react';
 import { useNavigate, Link, useSearchParams } from 'react-router-dom';
+import { usePostHog } from '@posthog/react';
 import { useAuth } from '../contexts/AuthContext';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -7,6 +8,7 @@ import { Card } from './ui/card';
 import { Progress } from './ui/progress';
 import { CheckCircle2, Circle } from 'lucide-react';
 import { calculatePasswordStrength, validateEmail } from '../utils/validation';
+import { consumeAuthRedirect, setAuthRedirect } from '../lib/authRedirect';
 
 export function SignupPage() {
   const [email, setEmail] = useState('');
@@ -23,6 +25,9 @@ export function SignupPage() {
   const { register } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const posthog = usePostHog();
+  const redirectParam = searchParams.get('redirect');
+  const sourceParam = searchParams.get('source');
 
   useEffect(() => {
     const prefillEmail = (searchParams.get('email') || '').trim();
@@ -37,6 +42,10 @@ export function SignupPage() {
       setEmailTouched(true);
     }
   }, [searchParams, email]);
+
+  useEffect(() => {
+    setAuthRedirect(redirectParam);
+  }, [redirectParam]);
 
   // Calculate password strength in real-time
   const passwordStrength = useMemo(
@@ -112,15 +121,22 @@ export function SignupPage() {
     try {
       const result = await register(email, password, fullName);
 
+      if (sourceParam === 'quick-match') {
+        posthog?.capture('signup_from_quick_match', {
+          source: sourceParam,
+          redirect: redirectParam || '/quick-match',
+          email_confirmation_required: result.emailConfirmationRequired,
+        });
+      }
+
       if (result.emailConfirmationRequired) {
         // Show email confirmation message
         setEmailSent(true);
         setSentToEmail(result.email || email);
       } else {
         // Immediate login - check for pending redirect
-        const redirect = localStorage.getItem('auth_redirect');
+        const redirect = consumeAuthRedirect();
         if (redirect) {
-          localStorage.removeItem('auth_redirect');
           navigate(redirect);
         } else {
           navigate('/');
@@ -165,7 +181,16 @@ export function SignupPage() {
             Click the link in the email to confirm your account and get started.
           </p>
 
-          <Link to="/login">
+          <Link
+            to={(() => {
+              const params = new URLSearchParams();
+              if (sentToEmail) params.set('email', sentToEmail);
+              if (redirectParam) params.set('redirect', redirectParam);
+              if (sourceParam) params.set('source', sourceParam);
+              const query = params.toString();
+              return query ? `/login?${query}` : '/login';
+            })()}
+          >
             <Button variant="outline" className="w-full">
               Back to Login
             </Button>
@@ -373,7 +398,17 @@ export function SignupPage() {
 
         <p className="mt-6 text-center text-sm text-muted-foreground">
           Already have an account?{' '}
-          <Link to="/login" className="text-primary hover:underline font-medium">
+          <Link
+            to={(() => {
+              const params = new URLSearchParams();
+              if (email) params.set('email', email);
+              if (redirectParam) params.set('redirect', redirectParam);
+              if (sourceParam) params.set('source', sourceParam);
+              const query = params.toString();
+              return query ? `/login?${query}` : '/login';
+            })()}
+            className="text-primary hover:underline font-medium"
+          >
             Login
           </Link>
         </p>

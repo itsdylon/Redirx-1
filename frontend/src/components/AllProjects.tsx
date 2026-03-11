@@ -1,42 +1,42 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
+import { usePostHog } from '@posthog/react';
 import { DashboardLayout } from './DashboardLayout';
+import { ToolLayout } from './ToolLayout';
 import { Card } from './ui/card';
 import { Button } from './ui/button';
-import { Clock, Pencil, Check, X, Loader2, Trash2, Search } from 'lucide-react';
-import { fetchAllSessions, updateSessionName, deleteSession } from '../api/sessions';
+import { Clock, Pencil, Check, X, Loader2, Trash2, Search, ArrowLeft } from 'lucide-react';
+import { fetchAllSessions, updateSessionName, deleteSession, type MigrationSession } from '../api/sessions';
 import { DashboardData } from '../api/dashboard';
 import { formatDate } from '../utils/date';
 import { toast } from 'sonner';
 import { queryKeys } from '../queries/queryKeys';
 import { handleUnauthorizedAndRedirect } from '../queries/auth';
-
-interface Session {
-  id: string;
-  project_name: string;
-  created_at: string;
-  total_mappings: number;
-  approved_mappings: number;
-  status: string;
-}
+import { useAuth } from '../contexts/AuthContext';
+import { isAgencyPlan } from '../lib/plans';
 
 export function AllProjects() {
   const navigate = useNavigate();
+  const posthog = usePostHog();
+  const { user } = useAuth();
   const queryClient = useQueryClient();
   const [searchQuery, setSearchQuery] = useState('');
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState('');
   const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null);
-  const [deletedSessionCache, setDeletedSessionCache] = useState<Session | null>(null);
+  const [deletedSessionCache, setDeletedSessionCache] = useState<MigrationSession | null>(null);
   const undoTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const agencyUser = isAgencyPlan(user?.plan);
+  const pageTitle = agencyUser ? 'All Projects' : 'Project History';
+  const Layout = agencyUser ? DashboardLayout : ToolLayout;
 
   const sessionsQuery = useQuery({
     queryKey: queryKeys.sessions.all,
     queryFn: fetchAllSessions,
   });
 
-  const sessions = (sessionsQuery.data?.sessions as Session[] | undefined) || [];
+  const sessions = sessionsQuery.data?.sessions || [];
   const loading = sessionsQuery.isLoading;
   const error = sessionsQuery.error instanceof Error ? sessionsQuery.error.message : '';
 
@@ -48,21 +48,22 @@ export function AllProjects() {
     const query = searchQuery.toLowerCase();
     return sessions.filter((session) =>
       (session.project_name || 'Untitled Session').toLowerCase().includes(query) ||
-      session.status.toLowerCase().includes(query)
+      session.status.toLowerCase().includes(query) ||
+      (session.pipeline_type || '').toLowerCase().includes(query)
     );
   }, [searchQuery, sessions]);
 
   const updateSessionsCache = (
-    updater: (currentSessions: Session[]) => Session[]
+    updater: (currentSessions: MigrationSession[]) => MigrationSession[]
   ) => {
-    queryClient.setQueryData<{ sessions: Session[] }>(queryKeys.sessions.all, (current) => {
+    queryClient.setQueryData<{ sessions: MigrationSession[] }>(queryKeys.sessions.all, (current) => {
       if (!current) return current;
       return { ...current, sessions: updater(current.sessions) };
     });
 
     queryClient.setQueryData<DashboardData>(queryKeys.dashboard.summary, (current) => {
       if (!current) return current;
-      return { ...current, recent_sessions: updater(current.recent_sessions as Session[]) };
+      return { ...current, recent_sessions: updater(current.recent_sessions as MigrationSession[]) };
     });
   };
 
@@ -71,6 +72,13 @@ export function AllProjects() {
       handleUnauthorizedAndRedirect(sessionsQuery.error, navigate);
     }
   }, [navigate, sessionsQuery.error]);
+
+  useEffect(() => {
+    posthog?.capture('project_history_opened', {
+      plan: user?.plan || 'free',
+      source: 'projects',
+    });
+  }, [posthog, user?.plan]);
 
   const updateSessionNameMutation = useMutation({
     mutationFn: ({ sessionId, projectName }: { sessionId: string; projectName: string }) =>
@@ -81,7 +89,7 @@ export function AllProjects() {
         queryClient.cancelQueries({ queryKey: queryKeys.dashboard.summary }),
       ]);
 
-      const previousSessions = queryClient.getQueryData<{ sessions: Session[] }>(queryKeys.sessions.all);
+      const previousSessions = queryClient.getQueryData<{ sessions: MigrationSession[] }>(queryKeys.sessions.all);
       const previousDashboard = queryClient.getQueryData<DashboardData>(queryKeys.dashboard.summary);
 
       updateSessionsCache((currentSessions) =>
@@ -124,11 +132,11 @@ export function AllProjects() {
         queryClient.cancelQueries({ queryKey: queryKeys.dashboard.summary }),
       ]);
 
-      const previousSessions = queryClient.getQueryData<{ sessions: Session[] }>(queryKeys.sessions.all);
+      const previousSessions = queryClient.getQueryData<{ sessions: MigrationSession[] }>(queryKeys.sessions.all);
       const previousDashboard = queryClient.getQueryData<DashboardData>(queryKeys.dashboard.summary);
       const sessionToDelete =
         previousSessions?.sessions.find((session) => session.id === sessionId) ||
-        (previousDashboard?.recent_sessions.find((session) => session.id === sessionId) as Session | undefined) ||
+        (previousDashboard?.recent_sessions.find((session) => session.id === sessionId) as MigrationSession | undefined) ||
         null;
 
       updateSessionsCache((currentSessions) =>
@@ -209,7 +217,7 @@ export function AllProjects() {
     deleteSessionMutation.mutate({ sessionId: deletingSessionId });
   };
 
-  const handleUndoDelete = (session: Session) => {
+  const handleUndoDelete = (session: MigrationSession) => {
     // Clear the undo timeout
     if (undoTimeoutRef.current) {
       clearTimeout(undoTimeoutRef.current);
@@ -237,32 +245,43 @@ export function AllProjects() {
 
   if (loading) {
     return (
-      <DashboardLayout title="All Projects">
+      <Layout title={pageTitle}>
         <div className="text-center py-8 text-muted-foreground">Loading projects...</div>
-      </DashboardLayout>
+      </Layout>
     );
   }
 
   if (error) {
     return (
-      <DashboardLayout title="All Projects">
+      <Layout title={pageTitle}>
         <div className="bg-destructive/10 border border-destructive/50 text-destructive px-4 py-3 rounded mb-4">
           {error}
         </div>
         <Button onClick={() => { void sessionsQuery.refetch(); }}>Retry</Button>
-      </DashboardLayout>
+      </Layout>
     );
   }
 
   return (
-    <DashboardLayout title="All Projects">
+    <Layout title={pageTitle}>
+      <div className="mb-4">
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => navigate(agencyUser ? '/dashboard' : '/quick-match')}
+        >
+          <ArrowLeft className="mr-2 h-4 w-4" />
+          Go back
+        </Button>
+      </div>
+
       {/* Search Bar */}
       <div className="mb-6">
         <div className="relative">
           <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <input
             type="text"
-            placeholder="Search projects by name or status..."
+            placeholder="Search projects by name, status, or match type..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="w-full pl-10 pr-4 py-2 border border-border bg-background text-foreground rounded-md focus:outline-none focus:ring-2 focus:ring-primary"
@@ -279,6 +298,7 @@ export function AllProjects() {
                 <th className="text-left p-4 text-muted-foreground text-sm">Project Name</th>
                 <th className="text-left p-4 text-muted-foreground text-sm">Date</th>
                 <th className="text-left p-4 text-muted-foreground text-sm">Redirects</th>
+                <th className="text-left p-4 text-muted-foreground text-sm">Match Type</th>
                 <th className="text-left p-4 text-muted-foreground text-sm">Status</th>
                 <th className="text-left p-4 text-muted-foreground text-sm">Actions</th>
               </tr>
@@ -339,6 +359,15 @@ export function AllProjects() {
                   </td>
                   <td className="p-4 text-foreground">{session.total_mappings || 0}</td>
                   <td className="p-4">
+                    <span className={`inline-flex items-center rounded border px-2 py-1 text-xs ${
+                      session.pipeline_type === 'url_only'
+                        ? 'border-blue-500/50 text-blue-700 dark:text-blue-300'
+                        : 'border-[#8353c5]/50 bg-[#8353c5]/10 text-[#8353c5]'
+                    }`}>
+                      {session.pipeline_type === 'url_only' ? 'Quick Match' : 'Deep Match'}
+                    </span>
+                  </td>
+                  <td className="p-4">
                     <span className={`inline-flex items-center gap-1 border px-2 py-1 text-xs ${
                       session.status === 'completed'
                         ? 'border-green-600 dark:border-green-400 text-green-700 dark:text-green-400'
@@ -357,19 +386,19 @@ export function AllProjects() {
                     </span>
                   </td>
                   <td className="p-4">
-                    <div className="flex items-center gap-2">
+                    <div className="flex w-full items-center gap-2">
                       <Button
                         variant="outline"
                         size="sm"
                         onClick={() => navigate(`/review/${session.id}`)}
                       >
-                        View Details
+                        Open Results
                       </Button>
                       <Button
                         variant="outline"
                         size="sm"
                         onClick={() => handleDeleteClick(session.id)}
-                        className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                        className="ml-auto text-destructive hover:text-destructive hover:bg-destructive/10"
                         title="Delete project"
                       >
                         <Trash2 className="h-4 w-4" />
@@ -414,6 +443,6 @@ export function AllProjects() {
           </Card>
         </div>
       )}
-    </DashboardLayout>
+    </Layout>
   );
 }

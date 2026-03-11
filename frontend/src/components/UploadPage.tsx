@@ -1,9 +1,11 @@
 import { uploadCSVs, type ContentUrlCapError } from "../api/pipeline";
 import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { usePostHog } from '@posthog/react';
 import { useAuth } from '../contexts/AuthContext';
 import { useOnboarding } from '../contexts/OnboardingContext';
 import { DashboardLayout } from './DashboardLayout';
+import { ToolLayout } from './ToolLayout';
 import { FileUploadZone } from './FileUploadZone';
 import { LoadingScreen } from './LoadingScreen';
 import { Button } from './ui/button';
@@ -53,8 +55,19 @@ function buildSampleCsv(urls: string[]): string {
 
 const LARGE_DATASET_WARNING_PREFIX = 'Large dataset detected';
 
-export function UploadPage() {
+interface UploadPageProps {
+  quickOnly?: boolean;
+  flowSource?: string;
+  layoutVariant?: 'dashboard' | 'tool';
+}
+
+export function UploadPage({
+  quickOnly = false,
+  flowSource = 'upload',
+  layoutVariant = 'dashboard',
+}: UploadPageProps = {}) {
   const navigate = useNavigate();
+  const posthog = usePostHog();
   const [searchParams] = useSearchParams();
   const { user } = useAuth();
   const {
@@ -65,7 +78,10 @@ export function UploadPage() {
   } = useOnboarding();
   const userPlan = user?.plan || 'free';
   const isFreeUser = userPlan === 'free';
-  const [pipelineType, setPipelineType] = useState<'content' | 'url_only'>(isFreeUser ? 'url_only' : 'content');
+  const isQuickOnlyMode = quickOnly;
+  const [pipelineType, setPipelineType] = useState<'content' | 'url_only'>((
+    isFreeUser || isQuickOnlyMode
+  ) ? 'url_only' : 'content');
   const [isLoading, setIsLoading] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
@@ -93,12 +109,20 @@ export function UploadPage() {
     tutorialIntent &&
     (onboarding.onboarding_status === 'in_progress' || onboarding.onboarding_status === 'not_started');
   const sampleTutorialActive = tutorialActive && (sampleFromQuery || tutorialPath === 'sample');
-  const effectivePipelineType = isFreeUser ? 'url_only' : pipelineType;
+  const effectivePipelineType = (isFreeUser || isQuickOnlyMode) ? 'url_only' : pipelineType;
+  const Layout = layoutVariant === 'tool' ? ToolLayout : DashboardLayout;
+  const layoutTitle = isQuickOnlyMode ? 'Quick Match' : 'Upload CSV Files';
   const oldRowCount = oldFileValidation?.rowCount ?? oldSiteFile?.rowCount ?? 0;
   const newRowCount = newFileValidation?.rowCount ?? newSiteFile?.rowCount ?? 0;
   const oldContentCapExceeded = effectivePipelineType === 'content' && oldRowCount > CONTENT_MAX_URLS_PER_SITE;
   const newContentCapExceeded = effectivePipelineType === 'content' && newRowCount > CONTENT_MAX_URLS_PER_SITE;
   const hasLocalContentCapViolation = oldContentCapExceeded || newContentCapExceeded;
+
+  useEffect(() => {
+    if (isFreeUser || isQuickOnlyMode) {
+      setPipelineType('url_only');
+    }
+  }, [isFreeUser, isQuickOnlyMode]);
 
   useEffect(() => {
     if (!tutorialActive) {
@@ -307,6 +331,16 @@ export function UploadPage() {
     setIsUploading(true);
     setIsLoading(true);
 
+    if (effectivePipelineType === 'url_only') {
+      posthog?.capture('quick_match_upload_started', {
+        plan: userPlan,
+        source: flowSource,
+        pipeline_type: effectivePipelineType,
+        old_url_count: oldRowCount,
+        new_url_count: newRowCount,
+      });
+    }
+
     try {
       const result = await uploadCSVs(oldCsvFile, newCsvFile, force, effectivePipelineType);
 
@@ -371,6 +405,9 @@ export function UploadPage() {
   };
 
   const handlePipelineTypeChange = (nextType: 'content' | 'url_only') => {
+    if (isQuickOnlyMode) {
+      return;
+    }
     setPipelineType(nextType);
     setPendingWarnings(null);
     setContentCapApiError(null);
@@ -419,30 +456,66 @@ export function UploadPage() {
   // Show loading screen when processing
   if (isLoading) {
     return (
-      <DashboardLayout title="Processing">
+      <Layout title="Processing">
         <LoadingScreen
           sessionId={currentSessionId}
           tutorialMode={sampleTutorialActive}
           minDisplayMs={sampleTutorialActive ? 4500 : 0}
         />
-      </DashboardLayout>
+      </Layout>
     );
   }
 
   return (
-    <DashboardLayout title="Upload CSV Files">
+    <Layout title={layoutTitle}>
       <div className="max-w-5xl">
-          {/* Subtitle */}
-          <div className="mb-8">
-            <p className="text-muted-foreground">
-              {sampleTutorialActive
-                ? 'Sample CSV files are preloaded. Click Begin Matching to run the tutorial sample and continue to review.'
-                : 'Upload URL lists from your old and new site to begin the redirect mapping process.'}
-            </p>
-          </div>
+          {/* Headline / Subtitle */}
+          {isQuickOnlyMode ? (
+            <div className="mb-8">
+              <h1 className="text-3xl font-semibold tracking-tight text-foreground md:text-4xl">
+                Free Redirect Map Generator
+              </h1>
+              <p className="mt-3 text-muted-foreground">
+                Upload two sitemaps. Get matched redirects in seconds.
+              </p>
+            </div>
+          ) : (
+            <div className="mb-8">
+              <p className="text-muted-foreground">
+                {sampleTutorialActive
+                  ? 'Sample CSV files are preloaded. Click Begin Matching to run the tutorial sample and continue to review.'
+                  : 'Upload URL lists from your old and new site to begin the redirect mapping process.'}
+              </p>
+            </div>
+          )}
 
           {/* Pipeline Type Selector / Tier Banner */}
-          {isFreeUser ? (
+          {isQuickOnlyMode ? (
+            <div className="mb-6 border border-blue-500/30 bg-blue-500/5 p-4 space-y-4">
+              <div>
+                <div>
+                  <div className="font-medium text-blue-600 dark:text-blue-400">Quick Match Workflow</div>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    Run URL-only matching now, then unlock Deep Match from results only if you need stronger fixes.
+                  </p>
+                </div>
+              </div>
+              <div className="grid grid-cols-1 gap-2 text-sm md:grid-cols-3">
+                <div className="border border-border bg-card p-3">
+                  <div className="font-medium text-foreground">1. Upload</div>
+                  <p className="text-xs text-muted-foreground mt-1">Drop old and new URL files.</p>
+                </div>
+                <div className="border border-border bg-card p-3">
+                  <div className="font-medium text-foreground">2. Review</div>
+                  <p className="text-xs text-muted-foreground mt-1">Validate confidence and approve mappings.</p>
+                </div>
+                <div className="border border-border bg-card p-3">
+                  <div className="font-medium text-foreground">3. Export</div>
+                  <p className="text-xs text-muted-foreground mt-1">Download redirect rules in your format.</p>
+                </div>
+              </div>
+            </div>
+          ) : isFreeUser ? (
             <div className="mb-6 border border-blue-500/30 bg-blue-500/5 p-4 flex items-start gap-3">
               <Info className="h-5 w-5 text-blue-500 flex-shrink-0 mt-0.5" />
               <div>
@@ -747,7 +820,7 @@ export function UploadPage() {
               {isUploading && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
               {isUploading
                 ? 'Processing...'
-                : isFreeUser
+                : (isFreeUser || isQuickOnlyMode)
                   ? 'Begin Quick Match →'
                   : pipelineType === 'content'
                     ? 'Begin Deep Match →'
@@ -763,6 +836,6 @@ export function UploadPage() {
             )}
           </div>
       </div>
-    </DashboardLayout>
+    </Layout>
   );
 }

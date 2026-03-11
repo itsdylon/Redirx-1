@@ -88,6 +88,15 @@ def _build_preview_copy(total_convincing_fixes: int, locked_count: int) -> dict[
     }
 
 
+def _derive_locked_count(
+    total_convincing_fixes: int,
+    visible_count: int,
+    locked_teaser_count: int,
+) -> int:
+    inferred_locked = max(0, total_convincing_fixes - max(0, visible_count))
+    return max(max(0, locked_teaser_count), inferred_locked)
+
+
 @pipeline_blueprint.route("/process", methods=["POST"])
 @limiter.limit("20 per hour")
 @require_auth
@@ -453,6 +462,11 @@ def get_deep_preview(session_id: str):
         visible_items = preview.get('visible_items') or []
         locked_teasers = preview.get('locked_teasers') or []
         free_unlock_count = int(preview.get('free_unlock_count') or max(1, Config.PREVIEW_FREE_ROWS))
+        locked_count = _derive_locked_count(
+            total_convincing_fixes=total,
+            visible_count=len(visible_items),
+            locked_teaser_count=len(locked_teasers),
+        )
 
         payload = {
             "success": True,
@@ -463,7 +477,7 @@ def get_deep_preview(session_id: str):
             "visible_items": visible_items,
             "locked_teasers": locked_teasers,
             "error_message": preview.get('error_message'),
-            **_build_preview_copy(total_convincing_fixes=total, locked_count=len(locked_teasers)),
+            **_build_preview_copy(total_convincing_fixes=total, locked_count=locked_count),
         }
         return jsonify(payload), 200
 

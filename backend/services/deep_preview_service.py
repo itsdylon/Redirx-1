@@ -442,7 +442,7 @@ class DeepPreviewService:
             })
 
         convincing.sort(key=lambda row: row['conviction_score'], reverse=True)
-        return convincing[:8]
+        return convincing
 
     def _compute_deep_gaps(self, preview_session_id: UUID) -> dict[str, float]:
         old_embeddings = self.embedding_db.get_embeddings_by_session(preview_session_id, site_type='old')

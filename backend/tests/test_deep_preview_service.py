@@ -125,6 +125,41 @@ class DeepPreviewServiceTests(unittest.TestCase):
         self.assertEqual(convincing[0]['old_url'], 'https://old.example.com/page-1')
         self.assertEqual(convincing[0]['confidence_gain_points'], 31)
 
+    def test_build_convincing_fixes_returns_all_qualifying_rows(self):
+        service = DeepPreviewService.__new__(DeepPreviewService)
+        service.mapping_db = Mock()
+
+        source_session_id = uuid4()
+        preview_session_id = uuid4()
+
+        source_rows = []
+        preview_rows = []
+        deep_gaps = {}
+
+        for i in range(9):
+            old_url = f"https://old.example.com/page-{i}"
+            source_rows.append({
+                'old_url': old_url,
+                'new_url': f"https://new.example.com/wrong-{i}",
+                'confidence_score': 0.60,
+                'match_type': 'semantic_low',
+            })
+            preview_rows.append({
+                'old_url': old_url,
+                'new_url': f"https://new.example.com/right-{i}",
+                'confidence_score': 0.92,
+                'needs_review': False,
+                'match_type': 'semantic_high',
+            })
+            deep_gaps[old_url] = 0.10
+
+        service.mapping_db.get_mappings_by_session.side_effect = [source_rows, preview_rows]
+        service._compute_deep_gaps = Mock(return_value=deep_gaps)
+
+        convincing = service._build_convincing_fixes(source_session_id, preview_session_id)
+
+        self.assertEqual(len(convincing), 9)
+
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)

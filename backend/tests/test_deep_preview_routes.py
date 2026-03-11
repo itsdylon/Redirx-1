@@ -123,6 +123,10 @@ class DeepPreviewRouteTests(unittest.TestCase):
         self.assertEqual(payload["total_convincing_fixes"], 4)
         self.assertEqual(len(payload["visible_items"]), 2)
         self.assertEqual(len(payload["locked_teasers"]), 1)
+        self.assertEqual(
+            payload["lock_overlay"],
+            "Unlock 2 more high-confidence fixes and AI alternatives before launch.",
+        )
         self.assertEqual(payload["headline"], "Deep Match found redirect mistakes Quick Match missed.")
         self.assertNotIn("preview_session_id", payload)
 

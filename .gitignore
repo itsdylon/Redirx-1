@@ -28,6 +28,10 @@ frontend/dist/
 .idea/
 *.sublime-*
 .claude
+.mcp.json
+
+# Local tooling state
+supabase/.temp/
 
 # Benchmark artifacts
 .tmp_worst_case_runs/
@@ -37,3 +41,8 @@ benchmark_results/worst_case/*
 !benchmark_results/worst_case/baseline_2026-03-02.json
 !benchmark_results/worst_case/baseline_2026-03-02.csv
 !benchmark_results/worst_case/README.md
+
+# Benchmark generation scratch/output (curated normalized/results files remain tracked)
+data/raw/repos/
+data/raw/cache/
+data/content/

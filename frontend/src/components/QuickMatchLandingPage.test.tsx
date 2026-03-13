@@ -7,6 +7,7 @@ import { MemoryRouter } from 'react-router-dom';
 const mockNavigate = vi.fn();
 const mockCapture = vi.fn();
 const mockUseAuth = vi.fn();
+const mockStartOAuth = vi.fn();
 
 vi.mock('react-router-dom', async (importOriginal) => {
   const actual = await importOriginal<typeof import('react-router-dom')>();
@@ -41,7 +42,7 @@ describe('QuickMatchLandingPage', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    mockUseAuth.mockReturnValue({ user: null });
+    mockUseAuth.mockReturnValue({ user: null, startOAuth: mockStartOAuth });
     localStorage.clear();
   });
 
@@ -68,9 +69,29 @@ describe('QuickMatchLandingPage', () => {
     expect(localStorage.getItem('auth_redirect')).toBe('/quick-match');
   });
 
+  it('starts OAuth directly from quick-match gate', async () => {
+    mockStartOAuth.mockImplementationOnce(() => new Promise(() => {}));
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(screen.getByRole('button', { name: 'Continue with Google' }));
+
+    expect(mockCapture).toHaveBeenCalledWith(
+      'quick_match_auth_gate_clicked',
+      expect.objectContaining({
+        target: 'google',
+      }),
+    );
+    expect(mockStartOAuth).toHaveBeenCalledWith('google', '/quick-match', 'quick-match');
+    expect(screen.getByRole('button', { name: 'Connecting...' })).toBeDisabled();
+    expect(localStorage.getItem('auth_redirect')).toBe('/quick-match');
+    expect(mockNavigate).not.toHaveBeenCalledWith('/signup?redirect=%2Fquick-match&source=quick-match');
+  });
+
   it('renders authenticated quick upload experience', async () => {
     mockUseAuth.mockReturnValue({
       user: { id: 'u1', email: 'test@example.com', plan: 'free' },
+      startOAuth: mockStartOAuth,
     });
 
     renderPage();

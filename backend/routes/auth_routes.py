@@ -23,6 +23,41 @@ def _looks_like_email(email: str) -> bool:
     return "@" in email and "." in email and " " not in email
 
 
+def _send_welcome_if_needed(
+    user_id: str,
+    user_email: str,
+    profile: dict | None = None,
+) -> None:
+    """Best-effort welcome email send, gated by user_profiles.welcome_email_sent."""
+    try:
+        from redirx.database import SupabaseClient
+        client = SupabaseClient.get_client()
+
+        profile_data = profile
+        if not profile_data:
+            profile_result = client.table('user_profiles').select(
+                'welcome_email_sent, full_name'
+            ).eq('id', user_id).maybe_single().execute()
+            profile_data = profile_result.data if profile_result else None
+
+        if not profile_data or profile_data.get('welcome_email_sent'):
+            return
+
+        from backend.services.email_service import EmailService
+        email_service = EmailService()
+        user_name = profile_data.get('full_name', '')
+        email_service.send_welcome(
+            user_id=user_id,
+            to_email=user_email,
+            user_name=user_name,
+        )
+        client.table('user_profiles').update(
+            {'welcome_email_sent': True}
+        ).eq('id', user_id).execute()
+    except Exception:
+        logger.exception("Welcome email failed (non-blocking)")
+
+
 @auth_blueprint.record_once
 def _init_limiter(state):
     if "limiter" not in state.app.extensions:
@@ -163,28 +198,10 @@ def login():
         result = auth_service.login(email, password)
 
         # Send welcome email on first login (fire-and-forget)
-        try:
-            from redirx.database import SupabaseClient
-            client = SupabaseClient.get_client()
-            profile = client.table('user_profiles').select(
-                'welcome_email_sent, full_name'
-            ).eq('id', result['user'].id).maybe_single().execute()
-
-            if profile.data and not profile.data.get('welcome_email_sent'):
-                from backend.services.email_service import EmailService
-                email_service = EmailService()
-                user_name = profile.data.get('full_name', '')
-                email_service.send_welcome(
-                    user_id=result['user'].id,
-                    to_email=result['user'].email,
-                    user_name=user_name,
-                )
-                client.table('user_profiles').update(
-                    {'welcome_email_sent': True}
-                ).eq('id', result['user'].id).execute()
-        except Exception:
-            import logging
-            logging.getLogger(__name__).exception("Welcome email failed (non-blocking)")
+        _send_welcome_if_needed(
+            user_id=result['user'].id,
+            user_email=result['user'].email,
+        )
 
         return jsonify({
             "success": True,
@@ -357,6 +374,11 @@ def get_current_user():
 
     try:
         profile = auth_service.get_user_profile(request.user.id)
+        _send_welcome_if_needed(
+            user_id=request.user.id,
+            user_email=request.user.email,
+            profile=profile,
+        )
 
         return jsonify({
             "success": True,

@@ -54,6 +54,16 @@ Migrations must be run manually in the Supabase SQL Editor:
 
 **Safe to run**: Yes, updates existing function (drop and recreate)
 
+### 023_update_handle_new_user_oauth_name_fallback.sql
+**Purpose**: Improve auth profile name hydration for OAuth signups.
+
+**Creates/Updates**:
+- Replaces `handle_new_user()` trigger function to populate `user_profiles.full_name`
+  from fallback metadata keys (`full_name`, `name`, `user_name`, `preferred_username`)
+- Backfills missing `user_profiles.full_name` values for existing users from `auth.users`
+
+**Safe to run**: Yes, backward compatible
+
 ## Verification
 
 After running all migrations, verify with:

@@ -4,16 +4,19 @@ import { useAuth } from '../contexts/AuthContext';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Card } from './ui/card';
+import { OAuthProviderIcon } from './OAuthProviderIcon';
 import { validateEmail } from '../utils/validation';
 import { ApiError } from '../utils/errorHandler';
 import { consumeAuthRedirect, setAuthRedirect } from '../lib/authRedirect';
 
 export function LoginPage() {
+  type OAuthProvider = 'google' | 'github';
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [authCode, setAuthCode] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [oauthLoading, setOauthLoading] = useState<OAuthProvider | null>(null);
   const [emailError, setEmailError] = useState('');
   const [emailTouched, setEmailTouched] = useState(false);
   const [resendLoading, setResendLoading] = useState(false);
@@ -21,7 +24,7 @@ export function LoginPage() {
   const [resendError, setResendError] = useState('');
   const [resendCooldown, setResendCooldown] = useState(0);
 
-  const { login, resendConfirmationEmail } = useAuth();
+  const { login, startOAuth, resendConfirmationEmail } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const redirectParam = searchParams.get('redirect');
@@ -149,6 +152,25 @@ export function LoginPage() {
     }
   };
 
+  const handleOAuth = async (provider: OAuthProvider) => {
+    setError('');
+    setAuthCode(null);
+    setResendSuccess('');
+    setResendError('');
+    setOauthLoading(provider);
+
+    try {
+      await startOAuth(provider, redirectParam || undefined, sourceParam || undefined);
+    } catch (err: unknown) {
+      if (err instanceof Error && err.message) {
+        setError(err.message);
+      } else {
+        setError(`Unable to continue with ${provider === 'google' ? 'Google' : 'GitHub'} right now.`);
+      }
+      setOauthLoading(null);
+    }
+  };
+
   return (
     <div className="min-h-screen flex flex-col items-center justify-center p-4">
       <Card className="w-full max-w-md p-8">
@@ -196,6 +218,38 @@ export function LoginPage() {
           </div>
         )}
 
+        <div className="space-y-2 mb-4">
+          <Button
+            type="button"
+            variant="outline"
+            className="w-full"
+            onClick={() => handleOAuth('google')}
+            disabled={loading || !!oauthLoading}
+          >
+            <OAuthProviderIcon provider="google" className="size-4" />
+            <span>{oauthLoading === 'google' ? 'Connecting...' : 'Continue with Google'}</span>
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            className="w-full"
+            onClick={() => handleOAuth('github')}
+            disabled={loading || !!oauthLoading}
+          >
+            <OAuthProviderIcon provider="github" className="size-4" />
+            <span>{oauthLoading === 'github' ? 'Connecting...' : 'Continue with GitHub'}</span>
+          </Button>
+        </div>
+
+        <div className="relative mb-4">
+          <div className="absolute inset-0 flex items-center">
+            <span className="w-full border-t border-border" />
+          </div>
+          <div className="relative flex justify-center text-xs uppercase">
+            <span className="bg-card px-2 text-muted-foreground">or continue with email</span>
+          </div>
+        </div>
+
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-foreground mb-2">
@@ -234,7 +288,7 @@ export function LoginPage() {
           <Button
             type="submit"
             className="w-full"
-            disabled={loading || !!emailError || !email}
+            disabled={loading || !!oauthLoading || !!emailError || !email}
           >
             {loading ? 'Logging in...' : 'Login'}
           </Button>

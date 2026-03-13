@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { usePostHog } from '@posthog/react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from './ui/button';
@@ -7,11 +7,15 @@ import { useAuth } from '../contexts/AuthContext';
 import { setAuthRedirect } from '../lib/authRedirect';
 import { UploadPage } from './UploadPage';
 import { ToolLayout } from './ToolLayout';
+import { OAuthProviderIcon } from './OAuthProviderIcon';
 
 export function QuickMatchLandingPage() {
+  type OAuthProvider = 'google' | 'github';
   const navigate = useNavigate();
   const posthog = usePostHog();
-  const { user } = useAuth();
+  const { user, startOAuth } = useAuth();
+  const [oauthLoading, setOauthLoading] = useState<OAuthProvider | null>(null);
+  const [oauthError, setOauthError] = useState('');
 
   useEffect(() => {
     posthog?.capture('quick_match_tool_viewed', {
@@ -27,6 +31,27 @@ export function QuickMatchLandingPage() {
       target,
     });
     navigate(`/${target}?redirect=${encodeURIComponent('/quick-match')}&source=quick-match`);
+  };
+
+  const startQuickMatchOAuth = async (provider: OAuthProvider) => {
+    setOauthError('');
+    setOauthLoading(provider);
+    setAuthRedirect('/quick-match');
+    posthog?.capture('quick_match_auth_gate_clicked', {
+      source: 'quick-match',
+      target: provider,
+    });
+
+    try {
+      await startOAuth(provider, '/quick-match', 'quick-match');
+    } catch (error) {
+      if (error instanceof Error && error.message) {
+        setOauthError(error.message);
+      } else {
+        setOauthError(`Unable to continue with ${provider === 'google' ? 'Google' : 'GitHub'} right now.`);
+      }
+      setOauthLoading(null);
+    }
   };
 
   if (user) {
@@ -110,22 +135,54 @@ export function QuickMatchLandingPage() {
             </div>
 
             <div className="mt-3 flex flex-col gap-2">
-              <Button size="sm" onClick={() => goToAuth('signup')}>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => startQuickMatchOAuth('google')}
+                disabled={!!oauthLoading}
+              >
+                <OAuthProviderIcon provider="google" className="size-4" />
+                <span>{oauthLoading === 'google' ? 'Connecting...' : 'Continue with Google'}</span>
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => startQuickMatchOAuth('github')}
+                disabled={!!oauthLoading}
+              >
+                <OAuthProviderIcon provider="github" className="size-4" />
+                <span>{oauthLoading === 'github' ? 'Connecting...' : 'Continue with GitHub'}</span>
+              </Button>
+              <div className="relative">
+                <div className="absolute inset-0 flex items-center">
+                  <span className="w-full border-t border-border" />
+                </div>
+                <div className="relative flex justify-center text-[10px] uppercase">
+                  <span className="bg-background px-2 text-muted-foreground">or continue with email</span>
+                </div>
+              </div>
+              <Button size="sm" onClick={() => goToAuth('signup')} disabled={!!oauthLoading}>
                 Sign up with email
               </Button>
-              <Button size="sm" variant="outline" onClick={() => goToAuth('login')}>
+              <Button size="sm" variant="outline" onClick={() => goToAuth('login')} disabled={!!oauthLoading}>
                 Log in
               </Button>
             </div>
+            {oauthError && (
+              <p className="mt-2 text-center text-[11px] text-destructive">
+                {oauthError}
+              </p>
+            )}
 
             <p className="mt-2 text-center text-[11px] text-muted-foreground">
               Already have an account?{' '}
-              <button
-                className="font-medium text-foreground underline-offset-4 hover:underline"
-                onClick={() => goToAuth('login')}
-              >
-                Log in
-              </button>
+                <button
+                  className="font-medium text-foreground underline-offset-4 hover:underline"
+                  onClick={() => goToAuth('login')}
+                  disabled={!!oauthLoading}
+                >
+                  Log in
+                </button>
             </p>
           </Card>
         </div>

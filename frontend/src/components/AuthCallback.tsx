@@ -1,89 +1,76 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { supabase } from '../lib/supabase';
 import { Card } from './ui/card';
 import { Button } from './ui/button';
-import { consumeAuthRedirect } from '../lib/authRedirect';
+import { useAuth } from '../contexts/AuthContext';
 
 export function AuthCallback() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
+  const { completeOAuthCallback } = useAuth();
+
+  const parseCallbackError = (): string | null => {
+    const searchParams = new URLSearchParams(window.location.search);
+    const hashParams = new URLSearchParams(
+      window.location.hash.startsWith('#')
+        ? window.location.hash.substring(1)
+        : window.location.hash
+    );
+
+    const errorCode = searchParams.get('error') || hashParams.get('error');
+    const errorDescription =
+      searchParams.get('error_description') || hashParams.get('error_description');
+    const errorStatus =
+      searchParams.get('error_code') || hashParams.get('error_code');
+
+    if (!errorCode && !errorDescription && !errorStatus) {
+      return null;
+    }
+
+    if (errorDescription) {
+      try {
+        return decodeURIComponent(errorDescription.replace(/\+/g, ' '));
+      } catch {
+        return errorDescription;
+      }
+    }
+
+    if (errorStatus) {
+      return `Authentication failed (${errorStatus}). Please try again.`;
+    }
+
+    return 'Authentication was canceled or failed. Please try again.';
+  };
 
   useEffect(() => {
     const handleCallback = async () => {
       try {
-        // Get the hash fragment from the URL
-        const hashParams = new URLSearchParams(window.location.hash.substring(1));
-        const accessToken = hashParams.get('access_token');
-        const refreshToken = hashParams.get('refresh_token');
-
-        if (accessToken && refreshToken) {
-          // Set the session using the tokens from the URL
-          const { data, error: sessionError } = await supabase.auth.setSession({
-            access_token: accessToken,
-            refresh_token: refreshToken
-          });
-
-          if (sessionError) {
-            throw sessionError;
-          }
-
-          if (data.session) {
-            // Store tokens in localStorage for our backend auth flow
-            localStorage.setItem('access_token', data.session.access_token);
-            localStorage.setItem('refresh_token', data.session.refresh_token);
-
-            // Check for pending redirect
-            const redirect = consumeAuthRedirect();
-            if (redirect) {
-              navigate(redirect, { replace: true });
-            } else {
-              navigate('/', { replace: true });
-            }
-            return;
-          }
-        }
-
-        // If no tokens in hash, try to get session from URL (for other auth types)
-        const { data: { session }, error: getSessionError } = await supabase.auth.getSession();
-
-        if (getSessionError) {
-          throw getSessionError;
-        }
-
-        if (session) {
-          localStorage.setItem('access_token', session.access_token);
-          localStorage.setItem('refresh_token', session.refresh_token);
-
-          const redirect = consumeAuthRedirect();
-          if (redirect) {
-            navigate(redirect, { replace: true });
-          } else {
-            navigate('/', { replace: true });
-          }
+        const callbackError = parseCallbackError();
+        if (callbackError) {
+          setError(callbackError);
           return;
         }
 
-        // No valid session found
-        setError('Unable to confirm your email. The link may have expired.');
+        const redirect = await completeOAuthCallback();
+        navigate(redirect, { replace: true });
       } catch (err: any) {
         console.error('Auth callback error:', err);
-        setError(err.message || 'An error occurred during email confirmation');
+        setError(err.message || 'Unable to complete sign-in. Please try again.');
       } finally {
         setLoading(false);
       }
     };
 
     handleCallback();
-  }, [navigate]);
+  }, [completeOAuthCallback, navigate]);
 
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center p-4">
         <Card className="w-full max-w-md p-8 text-center">
           <div className="animate-spin w-8 h-8 border-2 border-primary border-t-transparent rounded-full mx-auto mb-4"></div>
-          <p className="text-muted-foreground">Confirming your email...</p>
+          <p className="text-muted-foreground">Completing sign-in...</p>
         </Card>
       </div>
     );
@@ -108,14 +95,14 @@ export function AuthCallback() {
               />
             </svg>
           </div>
-          <h1 className="text-xl font-bold text-foreground mb-2">Confirmation Failed</h1>
+          <h1 className="text-xl font-bold text-foreground mb-2">Sign-in Failed</h1>
           <p className="text-muted-foreground mb-6">{error}</p>
           <div className="space-y-2">
-            <Button onClick={() => navigate('/signup')} className="w-full">
-              Try Signing Up Again
+            <Button onClick={() => navigate('/login')} className="w-full">
+              Try Logging In Again
             </Button>
-            <Button variant="outline" onClick={() => navigate('/login')} className="w-full">
-              Back to Login
+            <Button variant="outline" onClick={() => navigate('/signup')} className="w-full">
+              Go to Signup
             </Button>
           </div>
         </Card>

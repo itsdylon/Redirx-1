@@ -6,23 +6,26 @@ import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Card } from './ui/card';
 import { Progress } from './ui/progress';
+import { OAuthProviderIcon } from './OAuthProviderIcon';
 import { CheckCircle2, Circle } from 'lucide-react';
 import { calculatePasswordStrength, validateEmail } from '../utils/validation';
 import { consumeAuthRedirect, setAuthRedirect } from '../lib/authRedirect';
 
 export function SignupPage() {
+  type OAuthProvider = 'google' | 'github';
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [fullName, setFullName] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [oauthLoading, setOauthLoading] = useState<OAuthProvider | null>(null);
   const [emailSent, setEmailSent] = useState(false);
   const [sentToEmail, setSentToEmail] = useState('');
   const [emailError, setEmailError] = useState('');
   const [emailTouched, setEmailTouched] = useState(false);
 
-  const { register } = useAuth();
+  const { register, startOAuth } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const posthog = usePostHog();
@@ -149,6 +152,22 @@ export function SignupPage() {
     }
   };
 
+  const handleOAuth = async (provider: OAuthProvider) => {
+    setError('');
+    setOauthLoading(provider);
+
+    try {
+      await startOAuth(provider, redirectParam || undefined, sourceParam || undefined);
+    } catch (err: unknown) {
+      if (err instanceof Error && err.message) {
+        setError(err.message);
+      } else {
+        setError(`Unable to continue with ${provider === 'google' ? 'Google' : 'GitHub'} right now.`);
+      }
+      setOauthLoading(null);
+    }
+  };
+
   // Show success message after email is sent
   if (emailSent) {
     return (
@@ -215,6 +234,38 @@ export function SignupPage() {
             {error}
           </div>
         )}
+
+        <div className="space-y-2 mb-4">
+          <Button
+            type="button"
+            variant="outline"
+            className="w-full"
+            onClick={() => handleOAuth('google')}
+            disabled={loading || !!oauthLoading}
+          >
+            <OAuthProviderIcon provider="google" className="size-4" />
+            <span>{oauthLoading === 'google' ? 'Connecting...' : 'Continue with Google'}</span>
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            className="w-full"
+            onClick={() => handleOAuth('github')}
+            disabled={loading || !!oauthLoading}
+          >
+            <OAuthProviderIcon provider="github" className="size-4" />
+            <span>{oauthLoading === 'github' ? 'Connecting...' : 'Continue with GitHub'}</span>
+          </Button>
+        </div>
+
+        <div className="relative mb-4">
+          <div className="absolute inset-0 flex items-center">
+            <span className="w-full border-t border-border" />
+          </div>
+          <div className="relative flex justify-center text-xs uppercase">
+            <span className="bg-card px-2 text-muted-foreground">or continue with email</span>
+          </div>
+        </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
@@ -390,7 +441,7 @@ export function SignupPage() {
           <Button
             type="submit"
             className="w-full"
-            disabled={loading || (password.length > 0 && passwordStrength.strength === 'weak') || !!emailError || !email}
+            disabled={loading || !!oauthLoading || (password.length > 0 && passwordStrength.strength === 'weak') || !!emailError || !email}
           >
             {loading ? 'Creating account...' : 'Sign Up'}
           </Button>

@@ -6,18 +6,20 @@ import { LoginPage } from './LoginPage';
 import { ApiError } from '../utils/errorHandler';
 
 const mockLogin = vi.fn();
+const mockStartOAuth = vi.fn();
 const mockResendConfirmationEmail = vi.fn();
 
 vi.mock('../contexts/AuthContext', () => ({
   useAuth: () => ({
     login: mockLogin,
+    startOAuth: mockStartOAuth,
     resendConfirmationEmail: mockResendConfirmationEmail,
   }),
 }));
 
-function renderLoginPage() {
+function renderLoginPage(initialPath = '/login') {
   return render(
-    <MemoryRouter initialEntries={['/login']}>
+    <MemoryRouter initialEntries={[initialPath]}>
       <Routes>
         <Route path="/login" element={<LoginPage />} />
         <Route path="/" element={<div>Dashboard</div>} />
@@ -30,6 +32,27 @@ function renderLoginPage() {
 describe('LoginPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it('renders OAuth provider actions', () => {
+    renderLoginPage();
+
+    expect(screen.getByRole('button', { name: 'Continue with Google' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Continue with GitHub' })).toBeInTheDocument();
+    expect(screen.getByText('or continue with email')).toBeInTheDocument();
+  });
+
+  it('starts OAuth flow with redirect/source context and disables inputs while connecting', async () => {
+    mockStartOAuth.mockImplementationOnce(() => new Promise(() => {}));
+    const user = userEvent.setup();
+    renderLoginPage('/login?redirect=%2Fquick-match&source=quick-match');
+
+    await user.click(screen.getByRole('button', { name: 'Continue with Google' }));
+
+    expect(mockStartOAuth).toHaveBeenCalledWith('google', '/quick-match', 'quick-match');
+    expect(screen.getByRole('button', { name: 'Connecting...' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Continue with GitHub' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Login' })).toBeDisabled();
   });
 
   it('shows generic invalid-credentials copy', async () => {

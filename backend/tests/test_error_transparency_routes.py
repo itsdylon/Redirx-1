@@ -116,6 +116,68 @@ class ErrorTransparencyRouteTests(unittest.TestCase):
             "If an unconfirmed account exists, a new confirmation email has been sent.",
         )
 
+    def test_auth_me_triggers_welcome_email_when_flag_not_set(self):
+        app = self._create_app(auth_blueprint, "/api/auth")
+        client = app.test_client()
+
+        authed_user = SimpleNamespace(id="user_1", email="user@example.com")
+        mock_client = Mock()
+        mock_profiles = Mock()
+        mock_update_query = Mock()
+        mock_profiles.update.return_value = mock_update_query
+        mock_update_query.eq.return_value.execute.return_value = None
+        mock_client.table.return_value = mock_profiles
+
+        with patch("services.auth_service.AuthService.verify_token", return_value=authed_user):
+            with patch("backend.routes.auth_routes.AuthService") as mock_auth_service:
+                with patch("redirx.database.SupabaseClient.get_client", return_value=mock_client):
+                    with patch("backend.services.email_service.EmailService") as mock_email_service:
+                        mock_auth_service.return_value.get_user_profile.return_value = {
+                            "full_name": "Test User",
+                            "welcome_email_sent": False,
+                            "plan": "free",
+                        }
+                        response = client.get(
+                            "/api/auth/me",
+                            headers={"Authorization": "Bearer test-token"},
+                        )
+
+        self.assertEqual(response.status_code, 200)
+        mock_email_service.return_value.send_welcome.assert_called_once_with(
+            user_id="user_1",
+            to_email="user@example.com",
+            user_name="Test User",
+        )
+        mock_profiles.update.assert_called_once_with({"welcome_email_sent": True})
+        mock_update_query.eq.assert_called_once_with("id", "user_1")
+
+    def test_auth_me_skips_welcome_email_when_already_sent(self):
+        app = self._create_app(auth_blueprint, "/api/auth")
+        client = app.test_client()
+
+        authed_user = SimpleNamespace(id="user_1", email="user@example.com")
+        mock_client = Mock()
+        mock_profiles = Mock()
+        mock_client.table.return_value = mock_profiles
+
+        with patch("services.auth_service.AuthService.verify_token", return_value=authed_user):
+            with patch("backend.routes.auth_routes.AuthService") as mock_auth_service:
+                with patch("redirx.database.SupabaseClient.get_client", return_value=mock_client):
+                    with patch("backend.services.email_service.EmailService") as mock_email_service:
+                        mock_auth_service.return_value.get_user_profile.return_value = {
+                            "full_name": "Test User",
+                            "welcome_email_sent": True,
+                            "plan": "free",
+                        }
+                        response = client.get(
+                            "/api/auth/me",
+                            headers={"Authorization": "Bearer test-token"},
+                        )
+
+        self.assertEqual(response.status_code, 200)
+        mock_email_service.assert_not_called()
+        mock_profiles.update.assert_not_called()
+
     def test_billing_portal_no_customer_returns_structured_404(self):
         app = self._create_app(billing_blueprint, "/api/billing")
         client = app.test_client()

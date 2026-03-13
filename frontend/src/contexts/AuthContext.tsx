@@ -1,10 +1,9 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { usePostHog } from '@posthog/react';
 import { API_BASE_URL } from '../api/config';
 import { supabase } from '../lib/supabase';
 import { ApiError, throwApiErrorFromResponse, toApiError } from '../utils/errorHandler';
-import { consumeAuthRedirect } from '../lib/authRedirect';
+import { consumeAuthRedirect, setAuthRedirect } from '../lib/authRedirect';
 
 interface User {
   id: string;
@@ -13,6 +12,8 @@ interface User {
   plan?: string;
   is_admin?: boolean;
 }
+
+type OAuthProvider = 'google' | 'github';
 
 interface RegisterResult {
   emailConfirmationRequired: boolean;
@@ -24,6 +25,8 @@ interface AuthContextType {
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
   register: (email: string, password: string, fullName: string) => Promise<RegisterResult>;
+  startOAuth: (provider: OAuthProvider, redirectPath?: string, source?: string) => Promise<void>;
+  completeOAuthCallback: () => Promise<string>;
   resendConfirmationEmail: (email: string) => Promise<{ message: string }>;
   logout: () => Promise<void>;
   refreshSession: () => Promise<void>;
@@ -34,8 +37,59 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
-  const navigate = useNavigate();
   const posthog = usePostHog();
+
+  const persistTokens = (accessToken: string, refreshToken: string): void => {
+    localStorage.setItem('access_token', accessToken);
+    localStorage.setItem('refresh_token', refreshToken);
+  };
+
+  const clearTokens = (): void => {
+    localStorage.removeItem('access_token');
+    localStorage.removeItem('refresh_token');
+  };
+
+  const fetchCurrentUser = async (accessToken: string): Promise<User | null> => {
+    const meResponse = await fetch(`${API_BASE_URL}/api/auth/me`, {
+      headers: { 'Authorization': `Bearer ${accessToken}` },
+    });
+    if (!meResponse.ok) {
+      return null;
+    }
+    const meData = await meResponse.json();
+    return meData.user as User;
+  };
+
+  const hydrateUserFromAccessToken = async (
+    accessToken: string,
+    fallbackUser?: User
+  ): Promise<User | null> => {
+    try {
+      const profile = await fetchCurrentUser(accessToken);
+      if (profile) {
+        setUser(profile);
+        return profile;
+      }
+    } catch (error) {
+      console.error('Failed to hydrate user profile:', error);
+    }
+
+    if (fallbackUser) {
+      setUser(fallbackUser);
+      return fallbackUser;
+    }
+
+    return null;
+  };
+
+  const applySessionTokens = async (
+    accessToken: string,
+    refreshToken: string,
+    fallbackUser?: User
+  ): Promise<void> => {
+    persistTokens(accessToken, refreshToken);
+    await hydrateUserFromAccessToken(accessToken, fallbackUser);
+  };
 
   // Identify user in PostHog when auth state changes
   useEffect(() => {
@@ -51,78 +105,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // Initialize auth state from localStorage on mount
   useEffect(() => {
     const initAuth = async () => {
-      // Check for Supabase auth tokens in URL hash (email confirmation redirect)
-      const hash = window.location.hash;
-      if (hash && hash.includes('access_token')) {
-        try {
-          const hashParams = new URLSearchParams(hash.substring(1));
-          const hashAccessToken = hashParams.get('access_token');
-          const hashRefreshToken = hashParams.get('refresh_token');
-
-          if (hashAccessToken && hashRefreshToken) {
-            // Validate session via Supabase client
-            const { data, error } = await supabase.auth.setSession({
-              access_token: hashAccessToken,
-              refresh_token: hashRefreshToken,
-            });
-
-            if (!error && data.session) {
-              localStorage.setItem('access_token', data.session.access_token);
-              localStorage.setItem('refresh_token', data.session.refresh_token);
-
-              // Clear hash from URL
-              window.history.replaceState(null, '', window.location.pathname + window.location.search);
-
-              // Fetch user profile
-              const meResponse = await fetch(`${API_BASE_URL}/api/auth/me`, {
-                headers: { 'Authorization': `Bearer ${data.session.access_token}` },
-              });
-              if (meResponse.ok) {
-                const meData = await meResponse.json();
-                setUser(meData.user);
-              }
-
-              // Check for pending redirect
-              const redirect = consumeAuthRedirect();
-              if (redirect) {
-                setLoading(false);
-                navigate(redirect, { replace: true });
-                return;
-              }
-
-              setLoading(false);
-              return;
-            }
-          }
-        } catch (error) {
-          console.error('Hash token auth error:', error);
-        }
-        // Clear hash even on failure
-        window.history.replaceState(null, '', window.location.pathname + window.location.search);
-      }
-
       const accessToken = localStorage.getItem('access_token');
 
       if (accessToken) {
         try {
-          const response = await fetch(`${API_BASE_URL}/api/auth/me`, {
-            headers: {
-              'Authorization': `Bearer ${accessToken}`
-            }
-          });
-
-          if (response.ok) {
-            const data = await response.json();
-            setUser(data.user);
-          } else {
+          const hydratedUser = await hydrateUserFromAccessToken(accessToken);
+          if (!hydratedUser) {
             // Token invalid, try refresh
             await refreshSession();
           }
         } catch (error) {
           console.error('Auth init error:', error);
           // Clear invalid tokens
-          localStorage.removeItem('access_token');
-          localStorage.removeItem('refresh_token');
+          clearTokens();
+          setUser(null);
         }
       }
 
@@ -144,25 +140,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     const data = await response.json();
-
-    // Store tokens in localStorage
-    localStorage.setItem('access_token', data.access_token);
-    localStorage.setItem('refresh_token', data.refresh_token);
-
-    // Fetch full profile (including current plan)
-    try {
-      const meResponse = await fetch(`${API_BASE_URL}/api/auth/me`, {
-        headers: { 'Authorization': `Bearer ${data.access_token}` }
-      });
-      if (meResponse.ok) {
-        const meData = await meResponse.json();
-        setUser(meData.user);
-      } else {
-        setUser({ id: data.user_id, email: data.email });
-      }
-    } catch {
-      setUser({ id: data.user_id, email: data.email });
-    }
+    await applySessionTokens(
+      data.access_token,
+      data.refresh_token,
+      { id: data.user_id, email: data.email }
+    );
   };
 
   const register = async (email: string, password: string, fullName: string): Promise<RegisterResult> => {
@@ -186,28 +168,88 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       };
     }
 
-    // Store tokens and set user (immediate login)
-    localStorage.setItem('access_token', data.access_token);
-    localStorage.setItem('refresh_token', data.refresh_token);
-
-    // Fetch full profile (including current plan)
-    try {
-      const meResponse = await fetch(`${API_BASE_URL}/api/auth/me`, {
-        headers: { 'Authorization': `Bearer ${data.access_token}` }
-      });
-      if (meResponse.ok) {
-        const meData = await meResponse.json();
-        setUser(meData.user);
-      } else {
-        setUser({ id: data.user_id, email: data.email });
-      }
-    } catch {
-      setUser({ id: data.user_id, email: data.email });
-    }
+    await applySessionTokens(
+      data.access_token,
+      data.refresh_token,
+      { id: data.user_id, email: data.email }
+    );
 
     return {
       emailConfirmationRequired: false
     };
+  };
+
+  const startOAuth = async (
+    provider: OAuthProvider,
+    redirectPath?: string,
+    _source?: string
+  ): Promise<void> => {
+    if (redirectPath) {
+      setAuthRedirect(redirectPath);
+    }
+
+    const redirectTo = `${window.location.origin}/auth/callback`;
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider,
+      options: {
+        redirectTo,
+      },
+    });
+
+    if (error) {
+      throw error;
+    }
+  };
+
+  const completeOAuthCallback = async (): Promise<string> => {
+    const hashParams = new URLSearchParams(
+      window.location.hash.startsWith('#')
+        ? window.location.hash.substring(1)
+        : window.location.hash
+    );
+    const searchParams = new URLSearchParams(window.location.search);
+
+    let accessToken = hashParams.get('access_token');
+    let refreshToken = hashParams.get('refresh_token');
+
+    if (!accessToken || !refreshToken) {
+      const code = searchParams.get('code');
+      if (code) {
+        try {
+          const { data, error } = await supabase.auth.exchangeCodeForSession(code);
+          if (!error && data.session) {
+            accessToken = data.session.access_token;
+            refreshToken = data.session.refresh_token;
+          }
+        } catch (error) {
+          console.warn('OAuth code exchange failed, falling back to current session.', error);
+        }
+      }
+    }
+
+    if (!accessToken || !refreshToken) {
+      const { data: { session }, error: getSessionError } = await supabase.auth.getSession();
+      if (getSessionError) {
+        throw getSessionError;
+      }
+      accessToken = session?.access_token || null;
+      refreshToken = session?.refresh_token || null;
+    }
+
+    if (!accessToken || !refreshToken) {
+      throw new Error('Unable to complete sign-in. The link may have expired.');
+    }
+
+    const { data, error: sessionError } = await supabase.auth.setSession({
+      access_token: accessToken,
+      refresh_token: refreshToken,
+    });
+    if (sessionError || !data.session) {
+      throw sessionError || new Error('Unable to establish an authenticated session.');
+    }
+
+    await applySessionTokens(data.session.access_token, data.session.refresh_token);
+    return consumeAuthRedirect() || '/';
   };
 
   const logout = async () => {
@@ -224,9 +266,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     }
 
+    try {
+      await supabase.auth.signOut();
+    } catch (error) {
+      console.error('Supabase sign-out error:', error);
+    }
+
     // Clear local state
-    localStorage.removeItem('access_token');
-    localStorage.removeItem('refresh_token');
+    clearTokens();
     posthog?.reset();
     setUser(null);
   };
@@ -285,25 +332,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const data = await response.json();
 
     // Update tokens
-    localStorage.setItem('access_token', data.access_token);
-    localStorage.setItem('refresh_token', data.refresh_token);
-
-    // Re-fetch user profile so context reflects latest data
-    try {
-      const meResponse = await fetch(`${API_BASE_URL}/api/auth/me`, {
-        headers: { 'Authorization': `Bearer ${data.access_token}` },
-      });
-      if (meResponse.ok) {
-        const meData = await meResponse.json();
-        setUser(meData.user);
-      }
-    } catch {
-      // Token refresh succeeded; profile fetch is best-effort
-    }
+    await applySessionTokens(data.access_token, data.refresh_token);
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, register, resendConfirmationEmail, logout, refreshSession }}>
+    <AuthContext.Provider value={{
+      user,
+      loading,
+      login,
+      register,
+      startOAuth,
+      completeOAuthCallback,
+      resendConfirmationEmail,
+      logout,
+      refreshSession,
+    }}>
       {children}
     </AuthContext.Provider>
   );

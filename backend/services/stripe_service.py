@@ -161,6 +161,7 @@ class StripeService:
         session = stripe.checkout.Session.create(
             customer=customer_id,
             mode="payment",
+            allow_promotion_codes=True,
             line_items=[
                 {
                     "price_data": {

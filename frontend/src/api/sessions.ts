@@ -28,6 +28,18 @@ export interface SessionListResponse {
   sessions: MigrationSession[];
 }
 
+export interface SourceSessionFilesResponse {
+  success: boolean;
+  session_id: string;
+  project_name: string;
+  pipeline_type?: 'content' | 'url_only' | string;
+  status: string;
+  old_url_count: number;
+  new_url_count: number;
+  old_urls: string[];
+  new_urls: string[];
+}
+
 export async function getSessionStatus(sessionId: string): Promise<SessionStatus> {
   try {
     const response = await fetch(`${API_BASE_URL}/api/user/sessions/${sessionId}/status`, {
@@ -125,6 +137,28 @@ export async function fetchAllSessions(): Promise<SessionListResponse> {
     }
 
     // Re-throw other errors
+    throw error;
+  }
+}
+
+export async function getSourceSessionFiles(sessionId: string): Promise<SourceSessionFilesResponse> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/user/sessions/${sessionId}/source-files`, {
+      method: 'GET',
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) {
+      const userError = await handleApiError(null, response);
+      throw new Error(userError.message);
+    }
+
+    return await response.json();
+  } catch (error: any) {
+    if (error instanceof TypeError || error.name === 'AbortError') {
+      const userError = await handleApiError(error);
+      throw new Error(userError.message);
+    }
     throw error;
   }
 }

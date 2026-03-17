@@ -8,9 +8,17 @@ import { ApiError } from '../utils/errorHandler';
 const mockLogin = vi.fn();
 const mockStartOAuth = vi.fn();
 const mockResendConfirmationEmail = vi.fn();
+const mockCapture = vi.fn();
+
+vi.mock('@posthog/react', () => ({
+  usePostHog: () => ({
+    capture: mockCapture,
+  }),
+}));
 
 vi.mock('../contexts/AuthContext', () => ({
   useAuth: () => ({
+    user: null,
     login: mockLogin,
     startOAuth: mockStartOAuth,
     resendConfirmationEmail: mockResendConfirmationEmail,
@@ -32,6 +40,7 @@ function renderLoginPage(initialPath = '/login') {
 describe('LoginPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    localStorage.clear();
   });
 
   it('renders OAuth provider actions', () => {
@@ -40,6 +49,19 @@ describe('LoginPage', () => {
     expect(screen.getByRole('button', { name: 'Continue with Google' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Continue with GitHub' })).toBeInTheDocument();
     expect(screen.getByText('or continue with email')).toBeInTheDocument();
+  });
+
+  it('tracks login page view with source context', () => {
+    renderLoginPage('/login?redirect=%2Fquick-match&source=quick-match');
+
+    expect(mockCapture).toHaveBeenCalledWith(
+      'login_page_viewed',
+      expect.objectContaining({
+        source: 'quick-match',
+        redirect: '/quick-match',
+        authenticated: false,
+      }),
+    );
   });
 
   it('starts OAuth flow with redirect/source context and disables inputs while connecting', async () => {

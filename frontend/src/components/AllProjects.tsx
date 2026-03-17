@@ -268,7 +268,7 @@ export function AllProjects() {
         <Button
           variant="outline"
           size="sm"
-          onClick={() => navigate(agencyUser ? '/dashboard' : '/quick-match')}
+          onClick={() => navigate(agencyUser ? '/dashboard' : '/url-match')}
         >
           <ArrowLeft className="mr-2 h-4 w-4" />
           Go back

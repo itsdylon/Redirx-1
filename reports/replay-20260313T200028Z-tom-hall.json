@@ -1,0 +1,428 @@
+{
+  "generated_at": "2026-03-13T20:00:28.439538+00:00",
+  "user": {
+    "id": "aa9c9869-92eb-4aa1-80e0-4f149b3d780e",
+    "email": "tom.hall@sharpahead.com",
+    "plan": "free",
+    "updated_at": "2026-03-13T14:07:38.435059+00:00",
+    "stripe_subscription_status": null
+  },
+  "requested_source_session_ids": [
+    "0edf6c7b-043d-4acd-8bdf-3986721b3642",
+    "6cd2af17-a20f-49d9-b7f5-81eba870cdf7"
+  ],
+  "missing_requested_source_session_ids": [],
+  "analyzed_session_ids": [
+    "0edf6c7b-043d-4acd-8bdf-3986721b3642",
+    "6cd2af17-a20f-49d9-b7f5-81eba870cdf7"
+  ],
+  "runtime_logs": {
+    "available": false,
+    "note": "Runtime logs were not available in this replay. DB-backed state transitions were used as canonical diagnostic evidence.",
+    "canonical_tables": [
+      "migration_sessions",
+      "url_mappings",
+      "deep_match_previews",
+      "project_pricing_quotes",
+      "user_profiles"
+    ]
+  },
+  "timeline": [
+    {
+      "timestamp": "2026-03-13T12:55:31.294209+00:00",
+      "event_type": "session_created",
+      "session_id": "0edf6c7b-043d-4acd-8bdf-3986721b3642",
+      "detail": "Session created with pipeline=url_only status_now=completed old=87 new=159",
+      "evidence": "migration_sessions:0edf6c7b-043d-4acd-8bdf-3986721b3642",
+      "inferred": false
+    },
+    {
+      "timestamp": "2026-03-13T12:55:31.962297+00:00",
+      "event_type": "mapping_first_seen",
+      "session_id": "0edf6c7b-043d-4acd-8bdf-3986721b3642",
+      "detail": "First url_mappings row observed for this session (count_now=77).",
+      "evidence": "url_mappings:session_id=0edf6c7b-043d-4acd-8bdf-3986721b3642",
+      "inferred": true
+    },
+    {
+      "timestamp": "2026-03-13T12:55:35.162839+00:00",
+      "event_type": "mapping_last_seen",
+      "session_id": "0edf6c7b-043d-4acd-8bdf-3986721b3642",
+      "detail": "Last url_mappings row observed for this session (count_now=77).",
+      "evidence": "url_mappings:session_id=0edf6c7b-043d-4acd-8bdf-3986721b3642",
+      "inferred": true
+    },
+    {
+      "timestamp": "2026-03-13T12:56:06.331484+00:00",
+      "event_type": "quote_created",
+      "session_id": "0edf6c7b-043d-4acd-8bdf-3986721b3642",
+      "detail": "Quote created with status=draft subtotal_cents=1590.",
+      "evidence": "project_pricing_quotes:b9c33afe-4997-499a-b146-aff07217b88e",
+      "inferred": false
+    },
+    {
+      "timestamp": "2026-03-13T15:30:07.223827+00:00",
+      "event_type": "session_created",
+      "session_id": "6cd2af17-a20f-49d9-b7f5-81eba870cdf7",
+      "detail": "Session created with pipeline=url_only status_now=completed old=1001 new=1237",
+      "evidence": "migration_sessions:6cd2af17-a20f-49d9-b7f5-81eba870cdf7",
+      "inferred": false
+    },
+    {
+      "timestamp": "2026-03-13T15:30:08.011675+00:00",
+      "event_type": "mapping_first_seen",
+      "session_id": "6cd2af17-a20f-49d9-b7f5-81eba870cdf7",
+      "detail": "First url_mappings row observed for this session (count_now=133).",
+      "evidence": "url_mappings:session_id=6cd2af17-a20f-49d9-b7f5-81eba870cdf7",
+      "inferred": true
+    },
+    {
+      "timestamp": "2026-03-13T15:30:17.669434+00:00",
+      "event_type": "mapping_last_seen",
+      "session_id": "6cd2af17-a20f-49d9-b7f5-81eba870cdf7",
+      "detail": "Last url_mappings row observed for this session (count_now=133).",
+      "evidence": "url_mappings:session_id=6cd2af17-a20f-49d9-b7f5-81eba870cdf7",
+      "inferred": true
+    },
+    {
+      "timestamp": "2026-03-13T15:31:07.674738+00:00",
+      "event_type": "quote_created",
+      "session_id": "6cd2af17-a20f-49d9-b7f5-81eba870cdf7",
+      "detail": "Quote created with status=draft subtotal_cents=8685.",
+      "evidence": "project_pricing_quotes:a25f9f86-1d74-42b3-9ac2-40faae6dfa9b",
+      "inferred": false
+    }
+  ],
+  "session_summaries": [
+    {
+      "session_id": "0edf6c7b-043d-4acd-8bdf-3986721b3642",
+      "is_requested_source_session": true,
+      "status": "completed",
+      "pipeline_type": "url_only",
+      "is_preview": false,
+      "source_session_id": null,
+      "created_at": "2026-03-13T12:55:31.294209",
+      "old_url_count": 87,
+      "new_url_count": 159,
+      "billable_pages": 159,
+      "mapping_summary": {
+        "mapping_count": 77,
+        "needs_review_count": 36,
+        "confidence_distribution": {
+          "high_ge_0.85": 38,
+          "medium_0.65_to_0.8499": 8,
+          "low_lt_0.65": 31
+        },
+        "match_type_distribution": {
+          "slug_match": 37,
+          "url_high": 4,
+          "url_medium": 17,
+          "url_low": 19
+        },
+        "confidence_stats": {
+          "min": 0.4333,
+          "avg": 0.7403,
+          "max": 0.9
+        },
+        "mapping_first_seen_at": "2026-03-13T12:55:31.962297+00:00",
+        "mapping_last_seen_at": "2026-03-13T12:55:35.162839+00:00"
+      }
+    },
+    {
+      "session_id": "6cd2af17-a20f-49d9-b7f5-81eba870cdf7",
+      "is_requested_source_session": true,
+      "status": "completed",
+      "pipeline_type": "url_only",
+      "is_preview": false,
+      "source_session_id": null,
+      "created_at": "2026-03-13T15:30:07.223827",
+      "old_url_count": 1001,
+      "new_url_count": 1237,
+      "billable_pages": 1237,
+      "mapping_summary": {
+        "mapping_count": 133,
+        "needs_review_count": 128,
+        "confidence_distribution": {
+          "high_ge_0.85": 4,
+          "medium_0.65_to_0.8499": 3,
+          "low_lt_0.65": 126
+        },
+        "match_type_distribution": {
+          "exact_url": 2,
+          "slug_match": 1,
+          "url_high": 2,
+          "url_medium": 21,
+          "url_low": 107
+        },
+        "confidence_stats": {
+          "min": 0.4034,
+          "avg": 0.5196,
+          "max": 1.0
+        },
+        "mapping_first_seen_at": "2026-03-13T15:30:08.011675+00:00",
+        "mapping_last_seen_at": "2026-03-13T15:30:17.669434+00:00"
+      }
+    }
+  ],
+  "risky_mapping_samples": [
+    {
+      "session_id": "0edf6c7b-043d-4acd-8bdf-3986721b3642",
+      "samples": [
+        {
+          "old_url": "https://redgravesearch.com/publications/partnering-with-executive-search-firm/",
+          "new_url": "https://redgravesearch.com/executive-search/",
+          "confidence_score": 0.4333,
+          "needs_review": true,
+          "match_type": "url_low",
+          "risk_score": 1.0687
+        },
+        {
+          "old_url": "https://redgravesearch.com/filter/",
+          "new_url": "https://redgravesearch.com/candidate/",
+          "confidence_score": 0.4706,
+          "needs_review": true,
+          "match_type": "url_low",
+          "risk_score": 1.0394
+        },
+        {
+          "old_url": "https://redgravesearch.com/publications/exploring-board-roles-starting",
+          "new_url": "https://redgravesearch.com/insights/publications/the-human-skills-that-will-matter-most-in-2026/",
+          "confidence_score": 0.4779,
+          "needs_review": true,
+          "match_type": "url_low",
+          "risk_score": 1.0381
+        },
+        {
+          "old_url": "https://redgravesearch.com/publications/are-businesses-underestimating-the-value-of-equity-diversity-and-inclusion-in-their-workplace-culture/",
+          "new_url": "https://redgravesearch.com/insights/case-studies/energising-the-leadership-team-of-british-supermarket-chain/",
+          "confidence_score": 0.4772,
+          "needs_review": true,
+          "match_type": "url_low",
+          "risk_score": 1.0378
+        },
+        {
+          "old_url": "https://redgravesearch.com/publications/exploring-",
+          "new_url": "https://redgravesearch.com/operations-transformation/",
+          "confidence_score": 0.48,
+          "needs_review": true,
+          "match_type": "url_low",
+          "risk_score": 1.025
+        },
+        {
+          "old_url": "https://redgravesearch.com/wp-content/*",
+          "new_url": "https://redgravesearch.com/contact-us/",
+          "confidence_score": 0.5,
+          "needs_review": true,
+          "match_type": "url_low",
+          "risk_score": 1.005
+        },
+        {
+          "old_url": "https://redgravesearch.com/publications/the-secrets-of-ceo-success-how-women-are-reshaping-the-infrastructure-industrial-and-energy-sectors/",
+          "new_url": "https://redgravesearch.com/insights/publications/ceo-succession-trends-across-banking-insurance-wealth-management-in-2025/",
+          "confidence_score": 0.5096,
+          "needs_review": true,
+          "match_type": "url_low",
+          "risk_score": 0.9994
+        },
+        {
+          "old_url": "https://redgravesearch.com/publications/impact-of-workplace-culture-on-performance/",
+          "new_url": "https://redgravesearch.com/workplace-culture-competitive-edge/",
+          "confidence_score": 0.5055,
+          "needs_review": true,
+          "match_type": "url_low",
+          "risk_score": 0.9955
+        }
+      ]
+    },
+    {
+      "session_id": "6cd2af17-a20f-49d9-b7f5-81eba870cdf7",
+      "samples": [
+        {
+          "old_url": "https://www.ebp.be/fr/services-int\u00e9gr\u00e9s-de-facility-management-pour-elia_elia-asset_18082022_22562263",
+          "new_url": "https://www.ebp.be/fr/event/congres-fonction-publique-2025/",
+          "confidence_score": 0.4553,
+          "needs_review": true,
+          "match_type": "url_low",
+          "risk_score": 1.1267
+        },
+        {
+          "old_url": "https://www.ebp.be/nl/n124-hoogstraten-structureel-onderhoud_mobiliteit-en-openbare-werken-agentschap-wegen-en-verkeer-afdeling-wegen-en-verkeer-antwerpen_08112022_22978992",
+          "new_url": "https://www.ebp.be/fr/verklarende_woorden/awv-agentschap-wegen-en-verkeer/",
+          "confidence_score": 0.4034,
+          "needs_review": true,
+          "match_type": "url_low",
+          "risk_score": 1.1076
+        },
+        {
+          "old_url": "https://www.ebp.be/nl/bda-overheidsopdracht-openbare-of-niet-openbare-procedure/overheidsopdrachten-sofico-20515853/",
+          "new_url": "https://www.ebp.be/nl/verklarende_woorden/niet-openbare-procedure/",
+          "confidence_score": 0.4035,
+          "needs_review": true,
+          "match_type": "url_low",
+          "risk_score": 1.1005
+        },
+        {
+          "old_url": "https://www.ebp.be/fr/construction-dune-voirie-portuaire-et-amenagements-dans-la-concession-hublet-a-floriffoux_port-autonome-de-namur_23052022_22121761",
+          "new_url": "https://www.ebp.be/fr/decouvrez-vos-opportunites-dans-les-marches-publics-et-les-projets-de-construction/?utm_source=offline&utm_medium=referral&utm_term=Ebook&utm_content=&utm_campaign=EBP_AC_ABOE_OO_ALL&division_contact=EBP&produits=aboe_ebp",
+          "confidence_score": 0.4545,
+          "needs_review": true,
+          "match_type": "url_low",
+          "risk_score": 1.0825
+        },
+        {
+          "old_url": "https://www.ebp.be/fr/uitnodiging-tot-indienen-offerte-inhuur-hoogwerkers-vereenvoudigde-onderhandelingsprocedure-met-voorafgaande-bekendmaking_vrt_05072022_22333692",
+          "new_url": "https://www.ebp.be/fr/verklarende_woorden/vereenvoudigde-onderhandelingsprocedure-met-voorafgaande-bekendmaking/",
+          "confidence_score": 0.407,
+          "needs_review": true,
+          "match_type": "url_low",
+          "risk_score": 1.079
+        },
+        {
+          "old_url": "https://www.ebp.be/nl/egouttage-de-la-rue-de-verviers_aide_14122022_23165582",
+          "new_url": "https://www.ebp.be/nl/category/geen-onderdeel-van-een-categorie/page/2/",
+          "confidence_score": 0.4545,
+          "needs_review": true,
+          "match_type": "url_low",
+          "risk_score": 1.0755
+        },
+        {
+          "old_url": "https://www.ebp.be/nl/renovatie-leonardtunnel_mobiliteit-en-openbare-werken-agentschap-wegen-en-verkeer-afdeling-wegen-en-verkeer-antwerpen_16112022_23019467",
+          "new_url": "https://www.ebp.be/nl/verklarende_woorden/awv-agentschap-wegen-en-verkeer/",
+          "confidence_score": 0.438,
+          "needs_review": true,
+          "match_type": "url_low",
+          "risk_score": 1.069
+        },
+        {
+          "old_url": "https://www.ebp.be/fr/accordcadre-de-travaux-de-voiries-et-d\u00e9gouttages-2022_ville-de-binche_20022022_21638803",
+          "new_url": "https://www.ebp.be/fr/formation-privee/laccord-cadre-vers-une-mise-en-oeuvre-souple-et-efficace/",
+          "confidence_score": 0.4524,
+          "needs_review": true,
+          "match_type": "url_low",
+          "risk_score": 1.0646
+        }
+      ]
+    }
+  ],
+  "quote_activity": [
+    {
+      "source_session_id": "0edf6c7b-043d-4acd-8bdf-3986721b3642",
+      "quote_id": "b9c33afe-4997-499a-b146-aff07217b88e",
+      "status": "draft",
+      "created_at": "2026-03-13T12:56:06.331484+00:00",
+      "checkout_created_at": null,
+      "paid_at": null,
+      "deep_session_id": null,
+      "stripe_checkout_session_id": null
+    },
+    {
+      "source_session_id": "6cd2af17-a20f-49d9-b7f5-81eba870cdf7",
+      "quote_id": "a25f9f86-1d74-42b3-9ac2-40faae6dfa9b",
+      "status": "draft",
+      "created_at": "2026-03-13T15:31:07.674738+00:00",
+      "checkout_created_at": null,
+      "paid_at": null,
+      "deep_session_id": null,
+      "stripe_checkout_session_id": null
+    }
+  ],
+  "deep_preview_activity": [
+    {
+      "source_session_id": "0edf6c7b-043d-4acd-8bdf-3986721b3642",
+      "present": false,
+      "status": null,
+      "preview_session_id": null,
+      "created_at": null,
+      "updated_at": null,
+      "completed_at": null,
+      "error_message": null,
+      "candidate_old_url_count": 0,
+      "visible_item_count": 0,
+      "locked_teaser_count": 0
+    },
+    {
+      "source_session_id": "6cd2af17-a20f-49d9-b7f5-81eba870cdf7",
+      "present": false,
+      "status": null,
+      "preview_session_id": null,
+      "created_at": null,
+      "updated_at": null,
+      "completed_at": null,
+      "error_message": null,
+      "candidate_old_url_count": 0,
+      "visible_item_count": 0,
+      "locked_teaser_count": 0
+    }
+  ],
+  "funnel_verdicts": [
+    {
+      "session_id": "0edf6c7b-043d-4acd-8bdf-3986721b3642",
+      "preview_queue_attempt_likely": false,
+      "preview_status": null,
+      "preview_no_attempt_reason_code": "unknown_no_db_evidence",
+      "preview_no_attempt_reason": "All visible gates pass in current data, but no deep_match_previews row exists. Likely worker-side queue path did not persist (runtime logs unavailable).",
+      "preview_gate_checks": {
+        "feature_flag_enabled_now": true,
+        "source_is_url_only_non_preview": true,
+        "user_plan_is_free_now": true,
+        "meets_page_threshold": true,
+        "embeddings_configured_now": true,
+        "existing_preview_row_present": false,
+        "below_daily_cap_estimate": true,
+        "candidate_count_ge_4": true,
+        "candidate_source_count_ge_4": true,
+        "new_context_count_ge_2": true
+      },
+      "preview_candidate_diagnostics": {
+        "billable_pages": 159,
+        "risky_candidate_count": 77,
+        "candidate_source_url_count": 77,
+        "estimated_new_context_url_count": 159,
+        "recent_preview_count_24h_before_anchor": 0,
+        "preview_daily_cap": 2
+      },
+      "checkout_began": false,
+      "checkout_reason": "No checkout_created_at / checkout session ID; quote did not progress past current status.",
+      "payment_completed": false,
+      "payment_reason": "No paid_at / paid status evidence."
+    },
+    {
+      "session_id": "6cd2af17-a20f-49d9-b7f5-81eba870cdf7",
+      "preview_queue_attempt_likely": false,
+      "preview_status": null,
+      "preview_no_attempt_reason_code": "unknown_no_db_evidence",
+      "preview_no_attempt_reason": "All visible gates pass in current data, but no deep_match_previews row exists. Likely worker-side queue path did not persist (runtime logs unavailable).",
+      "preview_gate_checks": {
+        "feature_flag_enabled_now": true,
+        "source_is_url_only_non_preview": true,
+        "user_plan_is_free_now": true,
+        "meets_page_threshold": true,
+        "embeddings_configured_now": true,
+        "existing_preview_row_present": false,
+        "below_daily_cap_estimate": true,
+        "candidate_count_ge_4": true,
+        "candidate_source_count_ge_4": true,
+        "new_context_count_ge_2": true
+      },
+      "preview_candidate_diagnostics": {
+        "billable_pages": 1237,
+        "risky_candidate_count": 131,
+        "candidate_source_url_count": 131,
+        "estimated_new_context_url_count": 1237,
+        "recent_preview_count_24h_before_anchor": 0,
+        "preview_daily_cap": 2
+      },
+      "checkout_began": false,
+      "checkout_reason": "No checkout_created_at / checkout session ID; quote did not progress past current status.",
+      "payment_completed": false,
+      "payment_reason": "No paid_at / paid status evidence."
+    }
+  ],
+  "concise_verdict": "Analyzed 2 source session(s): preview evidence on 0, checkout began on 0, payment completed on 0. Missing requested sessions: none.",
+  "config_snapshot": {
+    "ENABLE_DEEP_MATCH_PREVIEW_now": true,
+    "DEEP_MATCH_BACKGROUND_MIN_PAGES_now": 50,
+    "PREVIEW_MAX_JOBS_PER_USER_PER_DAY_now": 2,
+    "OPENAI_API_KEY_present_now": true
+  }
+}

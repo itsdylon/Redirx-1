@@ -2,11 +2,15 @@ from flask import Blueprint, request, jsonify
 import os
 from uuid import UUID
 import numpy as np
-from backend.services.pipeline_runner import run_pipeline, read_csv
+from backend.services.pipeline_runner import generate_project_name, run_pipeline, read_csv
 from backend.services.results_formatter import format_results_response, calculate_path_similarity
 from backend.services.auth_service import require_auth
 from backend.services.deep_preview_service import DeepPreviewService
-from backend.services.pricing_service import PricingService
+from backend.services.pricing_service import (
+    DIRECT_DEEP_UNPAID_EXPIRY_HOURS,
+    PricingService,
+)
+from backend.services.stripe_service import StripeService
 from backend.services.job_limits import (
     ContentJobUrlCapExceeded,
     validate_content_job_url_counts,
@@ -74,6 +78,33 @@ def _reject_if_content_url_cap_exceeded(
 
 
 def _build_preview_copy(total_convincing_fixes: int, locked_count: int) -> dict[str, str]:
+    return _build_preview_copy_for_status(
+        status='completed',
+        total_convincing_fixes=total_convincing_fixes,
+        locked_count=locked_count,
+    )
+
+
+def _build_preview_copy_for_status(
+    *,
+    status: str,
+    total_convincing_fixes: int,
+    locked_count: int,
+) -> dict[str, str]:
+    if status == 'awaiting_opt_in':
+        return {
+            'headline': 'Enable Deep Match Accuracy Check',
+            'subheadline': (
+                'Before we run Deep Match preview, confirm scraping defenses are '
+                'temporarily disabled for this project scope.'
+            ),
+            'cta_primary': 'Start Deep Match Accuracy Check',
+            'cta_secondary': 'View Pricing',
+            'lock_overlay': (
+                'Confirm scraping-access readiness to run Deep Match preview safely.'
+            ),
+        }
+
     return {
         'headline': 'Deep Match found redirect mistakes Quick Match missed.',
         'subheadline': (
@@ -95,6 +126,81 @@ def _derive_locked_count(
 ) -> int:
     inferred_locked = max(0, total_convincing_fixes - max(0, visible_count))
     return max(max(0, locked_teaser_count), inferred_locked)
+
+
+def _truncate_old_url_for_preview(url: str) -> str:
+    value = (url or "").strip()
+    if not value:
+        return "..."
+    return f"{value[:3]}..."
+
+
+def _build_content_preview_response(formatted_response: dict) -> dict:
+    mappings = formatted_response.get("mappings") or []
+    exact_count = len([
+        row for row in mappings
+        if str(row.get("matchType") or "") == "exact_url"
+    ])
+    high_count = len([
+        row for row in mappings
+        if str(row.get("matchType") or "") != "exact_url"
+        and str(row.get("confidenceBand") or "") == "high"
+    ])
+    medium_count = len([
+        row for row in mappings
+        if str(row.get("confidenceBand") or "") == "medium"
+    ])
+    low_count = len([
+        row for row in mappings
+        if str(row.get("confidenceBand") or "") == "low"
+    ])
+
+    comparable_scores = [
+        int(row.get("confidence", 0))
+        for row in mappings
+        if str(row.get("matchType") or "") != "exact_url"
+    ]
+    average_confidence = (
+        int(round(sum(comparable_scores) / len(comparable_scores)))
+        if comparable_scores
+        else 100
+    )
+
+    redacted_rows = []
+    for row in mappings:
+        redacted_rows.append({
+            "id": str(row.get("id") or ""),
+            "oldUrl": _truncate_old_url_for_preview(str(row.get("oldUrl") or "")),
+            "newUrl": "",
+            "confidence": 0,
+            "confidenceBand": str(row.get("confidenceBand") or "low"),
+            "matchScore": 0,
+            "matchType": str(row.get("matchType") or "semantic"),
+            "approved": False,
+            "warnings": [],
+            "pathSimilarity": 0,
+            "titleSimilarity": 0,
+            "contentSimilarity": 0,
+            "previewRedacted": True,
+        })
+
+    return {
+        **formatted_response,
+        "mappings": redacted_rows,
+        "preview_mode": True,
+        "preview_summary": {
+            "match_count": len(mappings),
+            "average_confidence": average_confidence,
+            "confidence_distribution": {
+                "exact": exact_count,
+                "high": high_count,
+                "medium": medium_count,
+                "low": low_count,
+            },
+            "exact_match_count": exact_count,
+            "redaction": "server_side",
+        },
+    }
 
 
 @pipeline_blueprint.route("/process", methods=["POST"])
@@ -248,6 +354,323 @@ def process_csv():
         }), 500
 
 
+@pipeline_blueprint.route("/projects/direct-deep/start", methods=["POST"])
+@limiter.limit("20 per hour")
+@require_auth
+def start_direct_deep():
+    """
+    Stage a Direct Deep Match project and generate pricing before payment.
+
+    This endpoint does NOT queue a Deep Match run. It stores uploaded URLs on a
+    completed source session, creates/refreshes a quote, and sends the user to
+    checkout first. The paid Deep Match run is queued from webhook processing.
+    """
+    if "old_csv" not in request.files or "new_csv" not in request.files:
+        return jsonify({
+            "success": False,
+            "code": "direct_deep_files_required",
+            "error": "Both 'old_csv' and 'new_csv' files are required",
+            "user_message": "Upload both old and new URL files before starting Deep Match.",
+            "retryable": False,
+            "next_action": "upload_files",
+        }), 400
+
+    old_csv = request.files["old_csv"]
+    new_csv = request.files["new_csv"]
+
+    too_large = _reject_if_too_large(old_csv, "old_csv")
+    if too_large:
+        return too_large
+    too_large = _reject_if_too_large(new_csv, "new_csv")
+    if too_large:
+        return too_large
+
+    if old_csv.filename == '' or new_csv.filename == '':
+        return jsonify({
+            "success": False,
+            "code": "direct_deep_files_required",
+            "error": "Both files are required",
+            "user_message": "Upload both old and new URL files before starting Deep Match.",
+            "retryable": False,
+            "next_action": "upload_files",
+        }), 400
+
+    allowed_extensions = {'.csv', '.txt'}
+    old_ext = '.' + old_csv.filename.rsplit('.', 1)[-1].lower() if '.' in old_csv.filename else ''
+    new_ext = '.' + new_csv.filename.rsplit('.', 1)[-1].lower() if '.' in new_csv.filename else ''
+    if old_ext not in allowed_extensions or new_ext not in allowed_extensions:
+        return jsonify({
+            "success": False,
+            "code": "direct_deep_invalid_file_type",
+            "error": "Only CSV/TXT files are supported",
+            "user_message": "Upload CSV or TXT URL files for both old and new sites.",
+            "retryable": False,
+            "next_action": "fix_input",
+        }), 400
+
+    user_id = str(request.user.id)
+    quota_db = UserQuotaDB()
+    user_plan = quota_db.get_plan(user_id)
+    if user_plan != "free":
+        return jsonify({
+            "success": False,
+            "code": "direct_deep_plan_not_supported",
+            "error": "Direct Deep Match is only for free/tool users",
+            "user_message": "Agency and enterprise users can run Deep Match directly from the standard upload flow.",
+            "retryable": False,
+            "next_action": "run_standard_deep_match",
+        }), 403
+
+    try:
+        parsed_old_urls = read_csv(old_csv)
+        parsed_new_urls = read_csv(new_csv)
+    except ValueError as e:
+        return jsonify({
+            "success": False,
+            "code": "direct_deep_invalid_csv",
+            "error": str(e),
+            "user_message": str(e),
+            "retryable": False,
+            "next_action": "fix_input",
+        }), 400
+
+    cap_error = _reject_if_content_url_cap_exceeded(
+        parsed_old_urls,
+        parsed_new_urls,
+        "content",
+    )
+    if cap_error:
+        return cap_error
+
+    pricing_service = PricingService()
+    expired_count = pricing_service.expire_stale_unpaid_direct_deep_quotes(
+        user_id=user_id,
+        older_than_hours=DIRECT_DEEP_UNPAID_EXPIRY_HOURS,
+    )
+    active_unpaid = pricing_service.get_active_unpaid_direct_deep_quote(user_id=user_id)
+    if active_unpaid:
+        return jsonify({
+            "success": False,
+            "code": "direct_deep_unpaid_run_exists",
+            "error": "An unpaid Deep Match run is already active",
+            "user_message": (
+                "You already have an unpaid Deep Match run. Complete checkout for that run "
+                "or wait until it expires before starting another."
+            ),
+            "retryable": False,
+            "next_action": "complete_checkout",
+            "quote_id": active_unpaid.get("id"),
+            "source_session_id": active_unpaid.get("source_session_id"),
+            "deep_session_id": active_unpaid.get("deep_session_id"),
+        }), 409
+
+    try:
+        source_session_id = MigrationSessionDB().create_session(
+            user_id=user_id,
+            project_name=generate_project_name(new_csv),
+            old_urls=parsed_old_urls,
+            new_urls=parsed_new_urls,
+            pipeline_type="url_only",
+            requires_payment_unlock=True,
+            status="completed",
+        )
+
+        quote = pricing_service.create_or_refresh_quote(
+            source_session_id=source_session_id,
+            user_id=user_id,
+        )
+
+        return jsonify({
+            "success": True,
+            "session_id": str(source_session_id),
+            "pipeline_type": "url_only",
+            "locked": False,
+            "source_session_id": str(source_session_id),
+            "quote_id": quote.get("id"),
+            "quote_status": quote.get("status"),
+            "deep_session_id": quote.get("deep_session_id"),
+            "expired_unpaid_quotes": expired_count,
+        }), 200
+
+    except ContentJobUrlCapExceeded as e:
+        return jsonify(e.to_api_payload()), 422
+    except ValueError as e:
+        return jsonify({
+            "success": False,
+            "code": "direct_deep_start_failed",
+            "error": str(e),
+            "user_message": str(e),
+            "retryable": False,
+            "next_action": "retry",
+        }), 400
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "code": "direct_deep_start_failed",
+            "error": f"Unexpected error: {str(e)}",
+            "user_message": "Unable to start Deep Match right now. Please try again.",
+            "retryable": True,
+            "next_action": "retry",
+        }), 500
+
+
+@pipeline_blueprint.route("/projects/content-match/start", methods=["POST"])
+@limiter.limit("20 per hour")
+@require_auth
+def start_content_match():
+    """
+    Start Content Based Matching immediately (results-first flow).
+
+    Free users:
+      - One active unpaid content-match quote at a time
+      - Job starts immediately with requires_payment_unlock=True
+      - Quote is created upfront for purchase on results
+
+    Agency/Enterprise users:
+      - Standard content job (no payment lock)
+    """
+    if "old_csv" not in request.files or "new_csv" not in request.files:
+        return jsonify({
+            "success": False,
+            "code": "content_match_files_required",
+            "error": "Both 'old_csv' and 'new_csv' files are required",
+            "user_message": "Upload both old and new URL files before starting Content Match.",
+            "retryable": False,
+            "next_action": "upload_files",
+        }), 400
+
+    old_csv = request.files["old_csv"]
+    new_csv = request.files["new_csv"]
+
+    too_large = _reject_if_too_large(old_csv, "old_csv")
+    if too_large:
+        return too_large
+    too_large = _reject_if_too_large(new_csv, "new_csv")
+    if too_large:
+        return too_large
+
+    if old_csv.filename == '' or new_csv.filename == '':
+        return jsonify({
+            "success": False,
+            "code": "content_match_files_required",
+            "error": "Both files are required",
+            "user_message": "Upload both old and new URL files before starting Content Match.",
+            "retryable": False,
+            "next_action": "upload_files",
+        }), 400
+
+    allowed_extensions = {'.csv', '.txt'}
+    old_ext = '.' + old_csv.filename.rsplit('.', 1)[-1].lower() if '.' in old_csv.filename else ''
+    new_ext = '.' + new_csv.filename.rsplit('.', 1)[-1].lower() if '.' in new_csv.filename else ''
+    if old_ext not in allowed_extensions or new_ext not in allowed_extensions:
+        return jsonify({
+            "success": False,
+            "code": "content_match_invalid_file_type",
+            "error": "Only CSV/TXT files are supported",
+            "user_message": "Upload CSV or TXT URL files for both old and new sites.",
+            "retryable": False,
+            "next_action": "fix_input",
+        }), 400
+
+    user_id = str(request.user.id)
+    user_plan = UserQuotaDB().get_plan(user_id)
+    requires_unlock = user_plan == "free"
+    pricing_service = PricingService()
+
+    if requires_unlock:
+        expired_count = pricing_service.expire_stale_unpaid_direct_deep_quotes(
+            user_id=user_id,
+            older_than_hours=DIRECT_DEEP_UNPAID_EXPIRY_HOURS,
+        )
+        active_unpaid = pricing_service.get_active_unpaid_direct_deep_quote(user_id=user_id)
+        if active_unpaid:
+            return jsonify({
+                "success": False,
+                "code": "content_match_unpaid_run_exists",
+                "error": "An unpaid Content Match run is already active",
+                "user_message": (
+                    "You already have an unpaid Content Match run. Complete checkout for that run "
+                    "or wait until it expires before starting another."
+                ),
+                "retryable": False,
+                "next_action": "complete_checkout",
+                "quote_id": active_unpaid.get("id"),
+                "source_session_id": active_unpaid.get("source_session_id"),
+                "deep_session_id": active_unpaid.get("deep_session_id"),
+                "expired_unpaid_quotes": expired_count,
+            }), 409
+
+    try:
+        parsed_old_urls = read_csv(old_csv)
+        parsed_new_urls = read_csv(new_csv)
+    except ValueError as e:
+        return jsonify({
+            "success": False,
+            "code": "content_match_invalid_csv",
+            "error": str(e),
+            "user_message": str(e),
+            "retryable": False,
+            "next_action": "fix_input",
+        }), 400
+
+    cap_error = _reject_if_content_url_cap_exceeded(
+        parsed_old_urls,
+        parsed_new_urls,
+        "content",
+    )
+    if cap_error:
+        return cap_error
+
+    try:
+        session_id, is_duplicate = run_pipeline(
+            old_csv,
+            new_csv,
+            user_id=user_id,
+            force=False,
+            pipeline_type="content",
+            old_urls=parsed_old_urls,
+            new_urls=parsed_new_urls,
+            requires_payment_unlock=requires_unlock,
+        )
+
+        quote = None
+        if requires_unlock:
+            quote = pricing_service.create_or_refresh_quote(
+                source_session_id=session_id,
+                user_id=user_id,
+            )
+
+        payload = {
+            "success": True,
+            "session_id": str(session_id),
+            "pipeline_type": "content",
+            "is_duplicate": bool(is_duplicate),
+            "locked": bool(requires_unlock),
+            "source_session_id": str(session_id),
+        }
+
+        if quote:
+            payload.update({
+                "quote_id": quote.get("id"),
+                "quote_status": quote.get("status"),
+                "deep_session_id": quote.get("deep_session_id"),
+            })
+
+        return jsonify(payload), 200
+
+    except ContentJobUrlCapExceeded as e:
+        return jsonify(e.to_api_payload()), 422
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "code": "content_match_start_failed",
+            "error": f"Unexpected error: {str(e)}",
+            "user_message": "Unable to start Content Match right now. Please try again.",
+            "retryable": True,
+            "next_action": "retry",
+        }), 500
+
+
 @pipeline_blueprint.route("/results/<session_id>", methods=["GET"])
 @require_auth
 def get_results(session_id: str):
@@ -291,12 +714,97 @@ def get_results(session_id: str):
                 "error": "Unauthorized: Session belongs to another user"
             }), 403
 
+        # Payment lock for free content-match runs:
+        # - url_only placeholder sources: no mappings until paid
+        # - content sources: return server-redacted preview until paid
+        requires_payment_unlock = bool(session_metadata.get('requires_payment_unlock'))
+        quote = None
+        quote_status = None
+        if requires_payment_unlock:
+            user_id = str(request.user.id)
+            user_plan = UserQuotaDB().get_plan(user_id)
+            pricing_service = PricingService()
+            try:
+                StripeService().reconcile_project_quote_for_source(
+                    source_session_id=str(session_uuid),
+                    user_id=user_id,
+                )
+            except Exception as reconcile_error:
+                print(
+                    "WARN: quote reconciliation skipped for session"
+                    f" {session_uuid}: {reconcile_error}"
+                )
+            quote = pricing_service.get_quote_for_source(session_uuid, user_id)
+            quote_status = str(quote.get("status") or "").lower() if quote else None
+            is_unlocked = quote_status == "paid"
+
+            if user_plan == "free" and not is_unlocked:
+                if str(session_metadata.get("pipeline_type") or "") == "content":
+                    source_status = str(session_metadata.get("status") or "").lower()
+                    if source_status not in {"completed", "permanently_failed"}:
+                        locked_response = format_results_response([], session_metadata)
+                        if "session" in locked_response:
+                            locked_response["session"]["requires_payment_unlock"] = True
+                        locked_response.update({
+                            "locked": True,
+                            "lock_reason": "payment_required",
+                            "source_session_id": str(session_uuid),
+                            "quote_id": quote.get("id") if quote else None,
+                            "quote_status": quote_status,
+                            "is_unlocked": False,
+                            "preview_mode": False,
+                        })
+                        return jsonify(locked_response), 200
+
+                    preview_mappings = URLMappingDB().get_mappings_by_session(session_uuid)
+                    preview_response = _build_content_preview_response(
+                        format_results_response(preview_mappings, session_metadata)
+                    )
+                    if "session" in preview_response:
+                        preview_response["session"]["requires_payment_unlock"] = True
+                    preview_response.update({
+                        "locked": True,
+                        "lock_reason": "payment_required",
+                        "source_session_id": str(session_uuid),
+                        "quote_id": quote.get("id") if quote else None,
+                        "quote_status": quote_status,
+                        "is_unlocked": False,
+                    })
+                    return jsonify(preview_response), 200
+
+                locked_response = format_results_response([], session_metadata)
+                if "session" in locked_response:
+                    locked_response["session"]["requires_payment_unlock"] = True
+                locked_response.update({
+                    "locked": True,
+                    "lock_reason": "payment_required",
+                    "source_session_id": str(session_uuid),
+                    "quote_id": quote.get("id") if quote else None,
+                    "quote_status": quote_status,
+                    "is_unlocked": False,
+                })
+                return jsonify(locked_response), 200
+
         # Get mappings for this session
         mapping_db = URLMappingDB()
         db_mappings = mapping_db.get_mappings_by_session(session_uuid)
 
         # Transform data for frontend
         response = format_results_response(db_mappings, session_metadata)
+        if "session" in response:
+            response["session"]["requires_payment_unlock"] = requires_payment_unlock
+        if requires_payment_unlock:
+            if quote is None:
+                quote = PricingService().get_quote_for_source(session_uuid, str(request.user.id))
+                quote_status = str(quote.get("status") or "").lower() if quote else None
+            response.update({
+                "locked": False,
+                "source_session_id": str(session_uuid),
+                "quote_id": quote.get("id") if quote else None,
+                "quote_status": quote_status,
+                "is_unlocked": quote_status == "paid",
+                "preview_mode": False,
+            })
 
         return jsonify(response), 200
 
@@ -407,11 +915,32 @@ def get_deep_preview(session_id: str):
                         "total_convincing_fixes": 0,
                         "visible_items": [],
                         "locked_teasers": [],
-                        **_build_preview_copy(total_convincing_fixes=0, locked_count=0),
+                        **_build_preview_copy_for_status(
+                            status=str(kickoff.get('status') or 'skipped'),
+                            total_convincing_fixes=0,
+                            locked_count=0,
+                        ),
                     }), 200
 
                 if not preview and kickoff.get('status') == 'not_applicable':
                     return _not_applicable(kickoff.get('reason') or "not_applicable")
+
+                if not preview and kickoff.get('status') == 'awaiting_opt_in':
+                    return jsonify({
+                        "success": True,
+                        "status": "awaiting_opt_in",
+                        "reason": kickoff.get('reason') or 'awaiting_opt_in',
+                        "source_session_id": str(session_uuid),
+                        "free_unlock_count": max(1, Config.PREVIEW_FREE_ROWS),
+                        "total_convincing_fixes": 0,
+                        "visible_items": [],
+                        "locked_teasers": [],
+                        **_build_preview_copy_for_status(
+                            status='awaiting_opt_in',
+                            total_convincing_fixes=0,
+                            locked_count=0,
+                        ),
+                    }), 200
 
             if not preview:
                 return jsonify({
@@ -477,7 +1006,11 @@ def get_deep_preview(session_id: str):
             "visible_items": visible_items,
             "locked_teasers": locked_teasers,
             "error_message": preview.get('error_message'),
-            **_build_preview_copy(total_convincing_fixes=total, locked_count=locked_count),
+            **_build_preview_copy_for_status(
+                status=status,
+                total_convincing_fixes=total,
+                locked_count=locked_count,
+            ),
         }
         return jsonify(payload), 200
 
@@ -485,6 +1018,102 @@ def get_deep_preview(session_id: str):
         return jsonify({
             "success": False,
             "error": f"Failed to retrieve deep preview: {str(e)}"
+        }), 500
+
+
+@pipeline_blueprint.route("/results/<session_id>/deep-preview/opt-in", methods=["POST"])
+@require_auth
+def confirm_deep_preview_opt_in(session_id: str):
+    """
+    Confirm scraping-defense opt-in and queue Deep Match preview for a source url_only session.
+    """
+    try:
+        try:
+            session_uuid = UUID(session_id)
+        except ValueError:
+            return jsonify({
+                "success": False,
+                "error": f"Invalid session_id format: {session_id}",
+            }), 400
+
+        body = request.get_json(silent=True) or {}
+        if body.get("acknowledged") is not True:
+            return jsonify({
+                "success": False,
+                "code": "deep_preview_opt_in_required",
+                "error": "acknowledged=true is required",
+                "user_message": (
+                    "Confirm that scraping defenses are disabled for this project before starting Deep Match preview."
+                ),
+                "retryable": False,
+                "next_action": "confirm_opt_in",
+            }), 400
+
+        session_db = MigrationSessionDB()
+        session = session_db.get_session(session_uuid)
+        user_id = str(request.user.id)
+        if session.get("user_id") != user_id:
+            return jsonify({
+                "success": False,
+                "error": "Unauthorized: Session belongs to another user",
+            }), 403
+        if session.get("is_preview"):
+            return jsonify({
+                "success": False,
+                "code": "deep_preview_opt_in_invalid_source",
+                "error": "Preview sessions cannot be opted in",
+                "user_message": "Deep Match preview opt-in only applies to Quick Match source sessions.",
+                "retryable": False,
+                "next_action": "refresh",
+            }), 400
+        if session.get("pipeline_type") != "url_only":
+            return jsonify({
+                "success": False,
+                "code": "deep_preview_opt_in_invalid_source",
+                "error": "Only url_only sessions support preview opt-in",
+                "user_message": "Deep Match preview opt-in only applies to Quick Match source sessions.",
+                "retryable": False,
+                "next_action": "refresh",
+            }), 400
+        if not Config.ENABLE_DEEP_MATCH_PREVIEW:
+            return jsonify({
+                "success": False,
+                "code": "deep_preview_feature_disabled",
+                "error": "Deep Match preview is disabled",
+                "user_message": "Deep Match preview is currently unavailable.",
+                "retryable": False,
+                "next_action": "retry_later",
+            }), 409
+        if UserQuotaDB().get_plan(user_id) != "free":
+            return jsonify({
+                "success": False,
+                "code": "deep_preview_opt_in_plan_not_supported",
+                "error": "Preview opt-in is only for free plan",
+                "user_message": "This Deep Match preview flow is only available on free plan Quick Match sessions.",
+                "retryable": False,
+                "next_action": "refresh",
+            }), 403
+
+        preview_service = DeepPreviewService()
+        kickoff = preview_service.maybe_queue_preview(
+            source_session_id=session_uuid,
+            user_id=user_id,
+            old_urls=session.get("old_urls") or [],
+            new_urls=session.get("new_urls") or [],
+            opted_in=True,
+        )
+
+        return jsonify({
+            "success": True,
+            "status": kickoff.get("status"),
+            "reason": kickoff.get("reason"),
+            "source_session_id": str(session_uuid),
+            "preview_session_id": kickoff.get("preview_session_id"),
+        }), 200
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": f"Failed to confirm deep preview opt-in: {str(e)}",
         }), 500
 
 
@@ -503,9 +1132,21 @@ def get_project_unlock_status(source_session_id: str):
                 "error": f"Invalid source_session_id format: {source_session_id}",
             }), 400
 
+        user_id = str(request.user.id)
+        try:
+            StripeService().reconcile_project_quote_for_source(
+                source_session_id=str(source_uuid),
+                user_id=user_id,
+            )
+        except Exception as reconcile_error:
+            print(
+                "WARN: unlock-status reconciliation skipped for source_session_id"
+                f" {source_uuid}: {reconcile_error}"
+            )
+
         status = PricingService().get_unlock_status(
             source_session_id=source_uuid,
-            user_id=str(request.user.id),
+            user_id=user_id,
         )
         return jsonify({"success": True, **status}), 200
     except ValueError as e:
@@ -586,6 +1227,16 @@ def get_alternatives(session_id: str, mapping_id: str):
                 "success": False,
                 "error": "Unauthorized: Session belongs to another user"
             }), 403
+
+        if bool(session.get("requires_payment_unlock")) and UserQuotaDB().get_plan(str(request.user.id)) == "free":
+            quote = PricingService().get_quote_for_source(session_uuid, str(request.user.id))
+            quote_status = str(quote.get("status") or "").lower() if quote else ""
+            if quote_status != "paid":
+                return jsonify({
+                    "success": True,
+                    "alternatives": [],
+                    "message": "Alternatives unlock after Content Match purchase for this project.",
+                }), 200
 
         if session.get('pipeline_type') == 'url_only':
             return jsonify({

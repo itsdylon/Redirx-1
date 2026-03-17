@@ -160,6 +160,53 @@ class DeepPreviewServiceTests(unittest.TestCase):
 
         self.assertEqual(len(convincing), 9)
 
+    def test_maybe_queue_preview_requires_explicit_opt_in_before_queueing(self):
+        source_session_id = uuid4()
+        service = DeepPreviewService.__new__(DeepPreviewService)
+        service.preview_db = Mock()
+        service.session_db = Mock()
+        service.mapping_db = Mock()
+        service.quota_db = Mock()
+        service.embedding_db = Mock()
+
+        service.session_db.get_session.return_value = {
+            "id": str(source_session_id),
+            "pipeline_type": "url_only",
+            "is_preview": False,
+            "project_name": "Test Project",
+        }
+        service.quota_db.get_plan.return_value = "free"
+        service.preview_db.get_by_source_session.return_value = None
+        service.preview_db.count_recent_for_user.return_value = 0
+        service.mapping_db.get_mappings_by_session.return_value = [
+            {
+                "old_url": f"https://old.example.com/page-{i}",
+                "new_url": f"https://new.example.com/wrong-{i}",
+                "confidence_score": 0.62,
+                "needs_review": True,
+                "match_type": "semantic_low",
+            }
+            for i in range(6)
+        ]
+
+        with unittest.mock.patch("backend.services.deep_preview_service.Config.ENABLE_DEEP_MATCH_PREVIEW", True), \
+             unittest.mock.patch("backend.services.deep_preview_service.Config.OPENAI_API_KEY", "test-key"), \
+             unittest.mock.patch("backend.services.deep_preview_service.Config.DEEP_MATCH_BACKGROUND_MIN_PAGES", 1), \
+             unittest.mock.patch("backend.services.deep_preview_service.Config.PREVIEW_MAX_OLD_CANDIDATES", 12), \
+             unittest.mock.patch("backend.services.deep_preview_service.Config.PREVIEW_MAX_NEW_URLS_FULL_SCAN", 300), \
+             unittest.mock.patch("backend.services.deep_preview_service.Config.PREVIEW_MAX_NEW_URLS_CAPPED", 180), \
+             unittest.mock.patch("backend.services.deep_preview_service.Config.PREVIEW_FREE_ROWS", 2):
+            result = service.maybe_queue_preview(
+                source_session_id=source_session_id,
+                user_id="user-1",
+                old_urls=[f"https://old.example.com/page-{i}" for i in range(6)],
+                new_urls=[f"https://new.example.com/page-{i}" for i in range(8)],
+                opted_in=False,
+            )
+
+        self.assertEqual(result["status"], "awaiting_opt_in")
+        service.session_db.create_session.assert_not_called()
+
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)

@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from decimal import Decimal, ROUND_HALF_UP
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import UUID
 
@@ -15,6 +15,7 @@ from redirx.database import SupabaseClient
 PRICING_VERSION = "v1_2026_03"
 USD = "usd"
 CONTACT_REQUIRED_PAGE_THRESHOLD = 100_000
+DIRECT_DEEP_UNPAID_EXPIRY_HOURS = 72
 
 
 @dataclass(frozen=True)
@@ -46,6 +47,15 @@ def _to_cents(amount: Decimal) -> int:
 def _to_decimal_string(amount: Decimal, places: int = 3) -> str:
     q = Decimal("1") if places == 0 else Decimal(f"1.{'0' * places}")
     return format(amount.quantize(q, rounding=ROUND_HALF_UP), "f")
+
+
+def _parse_iso_datetime(value: Any) -> datetime | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
 
 
 def calculate_graduated_price(page_count: int) -> dict[str, Any]:
@@ -125,7 +135,7 @@ class PricingService:
         source_session_id = str(source_session_id)
 
         session_result = self.client.table("migration_sessions").select(
-            "id,user_id,old_urls,new_urls,status,is_preview,pipeline_type"
+            "id,user_id,old_urls,new_urls,status,is_preview,pipeline_type,requires_payment_unlock"
         ).eq("id", source_session_id).maybe_single().execute()
 
         session = session_result.data if session_result else None
@@ -135,10 +145,16 @@ class PricingService:
             raise ValueError("Source session does not belong to this user")
         if session.get("is_preview"):
             raise ValueError("Preview sessions cannot be quoted")
-        if session.get("pipeline_type") != "url_only":
+
+        pipeline_type = str(session.get("pipeline_type") or "")
+        requires_unlock = bool(session.get("requires_payment_unlock"))
+        is_direct_deep_source = pipeline_type == "content" and requires_unlock
+
+        if pipeline_type == "url_only":
+            if (session.get("status") or "").lower() not in {"completed", "permanently_failed"}:
+                raise ValueError("Source session must be completed before quoting")
+        elif not is_direct_deep_source:
             raise ValueError("Only Quick Match source sessions can be quoted")
-        if (session.get("status") or "").lower() not in {"completed", "permanently_failed"}:
-            raise ValueError("Source session must be completed before quoting")
 
         old_urls = session.get("old_urls") or []
         new_urls = session.get("new_urls") or []
@@ -172,8 +188,9 @@ class PricingService:
         existing_data = existing.data if existing else None
         if existing_data:
             # Preserve paid state / linked deep session if quote already completed.
-            if existing_data.get("status") == "paid":
-                payload["status"] = "paid"
+            existing_status = str(existing_data.get("status") or "").lower()
+            if existing_status in {"paid", "checkout_created"}:
+                payload["status"] = existing_status
             if existing_data.get("deep_session_id"):
                 payload["deep_session_id"] = existing_data["deep_session_id"]
 
@@ -185,6 +202,74 @@ class PricingService:
         payload["created_at"] = _now_iso()
         result = self.client.table("project_pricing_quotes").insert(payload).execute()
         return result.data[0] if (result and result.data) else payload
+
+    def expire_stale_unpaid_direct_deep_quotes(
+        self,
+        *,
+        user_id: str,
+        older_than_hours: int = DIRECT_DEEP_UNPAID_EXPIRY_HOURS,
+    ) -> int:
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=max(1, older_than_hours))
+
+        result = self.client.table("project_pricing_quotes").select(
+            "id,source_session_id,status,created_at,updated_at,deep_session_id"
+        ).eq("user_id", user_id).in_(
+            "status", ["draft", "checkout_created"]
+        ).execute()
+
+        expired_count = 0
+        for quote in (result.data or []):
+            created_dt = _parse_iso_datetime(quote.get("created_at"))
+            updated_dt = _parse_iso_datetime(quote.get("updated_at"))
+            quote_ts = created_dt or updated_dt
+            if quote_ts is None or quote_ts > cutoff:
+                continue
+
+            source_session_id = quote.get("source_session_id")
+            if not source_session_id:
+                continue
+
+            source = self.client.table("migration_sessions").select(
+                "requires_payment_unlock"
+            ).eq(
+                "id", str(source_session_id)
+            ).maybe_single().execute()
+            if not source or not source.data or not bool(source.data.get("requires_payment_unlock")):
+                continue
+
+            self.client.table("project_pricing_quotes").update(
+                {
+                    "status": "expired",
+                    "updated_at": _now_iso(),
+                }
+            ).eq("id", str(quote["id"])).execute()
+            expired_count += 1
+
+        return expired_count
+
+    def get_active_unpaid_direct_deep_quote(self, *, user_id: str) -> dict[str, Any] | None:
+        result = self.client.table("project_pricing_quotes").select(
+            "id,source_session_id,deep_session_id,status,created_at,updated_at"
+        ).eq("user_id", user_id).in_(
+            "status", ["draft", "checkout_created"]
+        ).order(
+            "created_at", desc=True
+        ).execute()
+
+        for quote in (result.data or []):
+            source_session_id = quote.get("source_session_id")
+            if not source_session_id:
+                continue
+
+            source = self.client.table("migration_sessions").select(
+                "requires_payment_unlock"
+            ).eq(
+                "id", str(source_session_id)
+            ).maybe_single().execute()
+            if source and source.data and bool(source.data.get("requires_payment_unlock")):
+                return quote
+
+        return None
 
     def get_quote_for_source(self, source_session_id: UUID | str, user_id: str) -> dict[str, Any] | None:
         result = self.client.table("project_pricing_quotes").select("*").eq(

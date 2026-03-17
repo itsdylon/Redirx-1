@@ -209,6 +209,14 @@ Submit a test job via the production frontend and verify:
 - Worker logs show notification received
 - Job completes successfully
 
+PostHog conversion funnel smoke check:
+- Frontend service env includes `VITE_PUBLIC_POSTHOG_KEY` and `VITE_PUBLIC_POSTHOG_HOST`
+- Marketing site env includes `NEXT_PUBLIC_POSTHOG_KEY` and `NEXT_PUBLIC_POSTHOG_HOST`
+- Open `https://www.redirx.dev`, click a tracked CTA, and confirm PostHog requests fire
+- Confirm redirected app URL includes attribution params (`source`, `surface`, optional `campaign`)
+- On `https://app.redirx.dev` (`/quick-match`, `/login`, `/signup`, `/pricing`), confirm PostHog requests fire
+- Only sign off release after both domains are sending events
+
 ### 3.5 Concurrency Tuning Guidance
 
 - Effective scrape fanout per worker is approximately `WORKER_MAX_CONCURRENT * SCRAPER_MAX_CONCURRENT_TOTAL`.

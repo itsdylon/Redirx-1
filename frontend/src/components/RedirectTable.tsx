@@ -101,6 +101,8 @@ interface RedirectTableProps {
   totalRedirectsCount?: number;
   isLoading?: boolean;
   pipelineType?: string;
+  readOnly?: boolean;
+  previewMode?: boolean;
 }
 
 export function RedirectTable({
@@ -115,8 +117,11 @@ export function RedirectTable({
   onClearFilters,
   totalRedirectsCount = 0,
   isLoading = false,
-  pipelineType = 'content'
+  pipelineType = 'content',
+  readOnly = false,
+  previewMode = false,
 }: RedirectTableProps) {
+  const interactionDisabled = readOnly || previewMode;
   const isExactMatch = (redirect: RedirectMapping) =>
     redirect.matchType === 'exact_url';
 
@@ -129,13 +134,18 @@ export function RedirectTable({
         </Badge>
       );
     }
+
+    const confidenceLabel = pipelineType === 'url_only' && !previewMode
+      ? `(~${redirect.matchScore}%)`
+      : '';
+
     switch (redirect.confidenceBand) {
       case 'high':
-        return <Badge className="bg-green-100 text-green-800 border-green-300 dark:bg-green-900/30 dark:text-green-400 dark:border-green-700">High</Badge>;
+        return <Badge className="bg-green-100 text-green-800 border-green-300 dark:bg-green-900/30 dark:text-green-400 dark:border-green-700">{`High ${confidenceLabel}`.trim()}</Badge>;
       case 'medium':
-        return <Badge className="bg-yellow-100 text-yellow-800 border-yellow-300 dark:bg-yellow-900/30 dark:text-yellow-400 dark:border-yellow-700">Medium</Badge>;
+        return <Badge className="bg-yellow-100 text-yellow-800 border-yellow-300 dark:bg-yellow-900/30 dark:text-yellow-400 dark:border-yellow-700">{`Medium ${confidenceLabel}`.trim()}</Badge>;
       case 'low':
-        return <Badge className="bg-red-100 text-red-800 border-red-300 dark:bg-red-900/30 dark:text-red-400 dark:border-red-700">Low</Badge>;
+        return <Badge className="bg-red-100 text-red-800 border-red-300 dark:bg-red-900/30 dark:text-red-400 dark:border-red-700">{`Low ${confidenceLabel}`.trim()}</Badge>;
       default:
         return null;
     }
@@ -247,11 +257,13 @@ export function RedirectTable({
             <TableHead className="w-12"></TableHead>
             <TableHead className="w-12">
               <Checkbox
+                disabled={interactionDisabled}
                 checked={
                   redirects.length > 0 &&
                   redirects.every((r) => selectedRows.has(r.id))
                 }
                 onCheckedChange={(checked) => {
+                  if (interactionDisabled) return;
                   const shouldSelect = !!checked;
                   redirects.forEach((r) => {
                     const isSelected = selectedRows.has(r.id);
@@ -321,6 +333,7 @@ export function RedirectTable({
                   <Button
                     variant="ghost"
                     size="sm"
+                    disabled={interactionDisabled}
                     onClick={() => onToggleExpand(redirect.id)}
                   >
                     {expandedRow === redirect.id ? (
@@ -332,6 +345,7 @@ export function RedirectTable({
                 </TableCell>
                 <TableCell>
                   <Checkbox
+                    disabled={interactionDisabled}
                     checked={selectedRows.has(redirect.id)}
                     onCheckedChange={() => onToggleSelect(redirect.id)}
                   />
@@ -350,49 +364,57 @@ export function RedirectTable({
                   {getConfidenceBadge(redirect)}
                 </TableCell>
                 <TableCell className="text-center">
-                  <span className="text-foreground">{redirect.matchScore}%</span>
+                  <span className="text-foreground">{previewMode ? '—' : `${redirect.matchScore}%`}</span>
                 </TableCell>
                 <TableCell className="text-center">
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <button
-                        onClick={() => onApprove(redirect.id)}
-                        className={`mx-auto flex items-center justify-center rounded-md p-1 transition-colors ${
-                          redirect.approved
-                            ? 'text-green-600 hover:text-muted-foreground'
-                            : 'text-muted-foreground hover:text-green-600'
-                        }`}
-                      >
-                        {redirect.approved ? (
-                          <CheckCircle className="h-5 w-5" />
-                        ) : (
-                          <Circle className="h-5 w-5" />
-                        )}
-                      </button>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      {redirect.approved ? 'Click to unapprove' : 'Click to approve'}
-                    </TooltipContent>
-                  </Tooltip>
+                  {interactionDisabled ? (
+                    <span className="text-xs text-muted-foreground">Locked</span>
+                  ) : (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button
+                          onClick={() => onApprove(redirect.id)}
+                          className={`mx-auto flex items-center justify-center rounded-md p-1 transition-colors ${
+                            redirect.approved
+                              ? 'text-green-600 hover:text-muted-foreground'
+                              : 'text-muted-foreground hover:text-green-600'
+                          }`}
+                        >
+                          {redirect.approved ? (
+                            <CheckCircle className="h-5 w-5" />
+                          ) : (
+                            <Circle className="h-5 w-5" />
+                          )}
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        {redirect.approved ? 'Click to unapprove' : 'Click to approve'}
+                      </TooltipContent>
+                    </Tooltip>
+                  )}
                 </TableCell>
                 <TableCell>
-                  <div className="flex items-center justify-center gap-1">
-                    {getWarningIcons(redirect.warnings)}
-                  </div>
+                  {!interactionDisabled && (
+                    <div className="flex items-center justify-center gap-1">
+                      {getWarningIcons(redirect.warnings)}
+                    </div>
+                  )}
                 </TableCell>
                 <TableCell>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => onEdit(redirect)}
-                  >
-                    <Edit2 className="h-4 w-4" />
-                  </Button>
+                  {!interactionDisabled && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => onEdit(redirect)}
+                    >
+                      <Edit2 className="h-4 w-4" />
+                    </Button>
+                  )}
                 </TableCell>
               </TableRow>
 
               {/* Expanded Row Details */}
-              {expandedRow === redirect.id && (
+              {!interactionDisabled && expandedRow === redirect.id && (
                 <TableRow className="bg-muted">
                   <TableCell colSpan={9} className="p-6">
                     <AnimateIn>

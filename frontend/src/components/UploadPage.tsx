@@ -1,4 +1,4 @@
-import { uploadCSVs, type ContentUrlCapError } from "../api/pipeline";
+import { startDirectDeep, uploadCSVs, type ContentUrlCapError } from "../api/pipeline";
 import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { usePostHog } from '@posthog/react';
@@ -9,11 +9,12 @@ import { ToolLayout } from './ToolLayout';
 import { FileUploadZone } from './FileUploadZone';
 import { LoadingScreen } from './LoadingScreen';
 import { Button } from './ui/button';
-import { AlertTriangle, Loader2, Zap, Search, Info, ShieldAlert } from 'lucide-react';
+import { AlertTriangle, Loader2, Zap, Search, ShieldAlert } from 'lucide-react';
 import { validateFile, FileValidationResult } from '../utils/validation';
 import { appQueryClient } from '../queries/queryClient';
 import { queryKeys } from '../queries/queryKeys';
 import { CONTENT_MAX_URLS_PER_SITE } from '../api/config';
+import { buildConversionEventProps } from '../lib/analyticsAttribution';
 
 interface FileData {
   name: string;
@@ -25,6 +26,10 @@ interface BeginMatchingOptions {
   force?: boolean;
   skipWarningCheck?: boolean;
   skipScrapingWarning?: boolean;
+}
+
+interface BeginDirectDeepOptions {
+  skipWarningCheck?: boolean;
 }
 
 const SAMPLE_OLD_URLS = [
@@ -111,12 +116,14 @@ export function UploadPage({
   const sampleTutorialActive = tutorialActive && (sampleFromQuery || tutorialPath === 'sample');
   const effectivePipelineType = (isFreeUser || isQuickOnlyMode) ? 'url_only' : pipelineType;
   const Layout = layoutVariant === 'tool' ? ToolLayout : DashboardLayout;
-  const layoutTitle = isQuickOnlyMode ? 'Quick Match' : 'Upload CSV Files';
+  const layoutTitle = isQuickOnlyMode ? 'URL Based Matching' : 'Upload CSV Files';
   const oldRowCount = oldFileValidation?.rowCount ?? oldSiteFile?.rowCount ?? 0;
   const newRowCount = newFileValidation?.rowCount ?? newSiteFile?.rowCount ?? 0;
   const oldContentCapExceeded = effectivePipelineType === 'content' && oldRowCount > CONTENT_MAX_URLS_PER_SITE;
   const newContentCapExceeded = effectivePipelineType === 'content' && newRowCount > CONTENT_MAX_URLS_PER_SITE;
   const hasLocalContentCapViolation = oldContentCapExceeded || newContentCapExceeded;
+  const hasDirectDeepLocalCapViolation =
+    oldRowCount > CONTENT_MAX_URLS_PER_SITE || newRowCount > CONTENT_MAX_URLS_PER_SITE;
 
   useEffect(() => {
     if (isFreeUser || isQuickOnlyMode) {
@@ -192,6 +199,7 @@ export function UploadPage({
   // Scraping warning state (Deep Match only)
   const [showScrapingWarning, setShowScrapingWarning] = useState(false);
   const [scrapingWarningAcknowledged, setScrapingWarningAcknowledged] = useState(false);
+  const [pendingScrapingAction, setPendingScrapingAction] = useState<'standard' | 'direct_deep' | null>(null);
 
   const handleFileUpload = async (file: File, type: 'old' | 'new') => {
     setContentCapApiError(null);
@@ -248,6 +256,7 @@ export function UploadPage({
     setDuplicateSessionId(null);
     setShowScrapingWarning(false);
     setScrapingWarningAcknowledged(false);
+    setPendingScrapingAction(null);
 
     if (type === 'old') {
       setOldSiteFile(null);
@@ -266,6 +275,7 @@ export function UploadPage({
     skipWarningCheck = false,
     skipScrapingWarning = false,
   }: BeginMatchingOptions = {}) => {
+    setPendingScrapingAction('standard');
     if (sampleTutorialActive) {
       setError(null);
       setDuplicateSessionId(null);
@@ -318,6 +328,7 @@ export function UploadPage({
 
     // Show scraping warning for Deep Match (content pipeline)
     if (effectivePipelineType === 'content' && !skipScrapingWarning) {
+      setPendingScrapingAction('standard');
       setShowScrapingWarning(true);
       setScrapingWarningAcknowledged(false);
       return;
@@ -333,6 +344,10 @@ export function UploadPage({
 
     if (effectivePipelineType === 'url_only') {
       posthog?.capture('quick_match_upload_started', {
+        ...buildConversionEventProps({
+          plan: userPlan,
+          authenticated: !!user,
+        }),
         plan: userPlan,
         source: flowSource,
         pipeline_type: effectivePipelineType,
@@ -382,16 +397,91 @@ export function UploadPage({
     }
   };
 
+  const handleBeginDirectDeep = async ({
+    skipWarningCheck = false,
+  }: BeginDirectDeepOptions = {}) => {
+    setPendingScrapingAction('direct_deep');
+    if (!oldCsvFile || !newCsvFile) {
+      setError("Upload both CSV files first.");
+      return;
+    }
+
+    if (hasDirectDeepLocalCapViolation) {
+      const affectedFile: ContentUrlCapError['affected_file'] =
+        oldRowCount > CONTENT_MAX_URLS_PER_SITE && newRowCount > CONTENT_MAX_URLS_PER_SITE
+          ? 'both'
+          : oldRowCount > CONTENT_MAX_URLS_PER_SITE
+            ? 'old'
+            : 'new';
+      setContentCapApiError({
+        type: 'content_url_cap_exceeded',
+        message:
+          `Deep Match has a per-file limit of ${CONTENT_MAX_URLS_PER_SITE.toLocaleString()} URLs. ` +
+          'Split your CSVs or switch to Quick Match.',
+        reason_code:
+          affectedFile === 'both'
+            ? 'content_both_url_caps_exceeded'
+            : affectedFile === 'old'
+              ? 'content_old_url_cap_exceeded'
+              : 'content_new_url_cap_exceeded',
+        old_url_count: oldRowCount,
+        new_url_count: newRowCount,
+        max_old_urls: CONTENT_MAX_URLS_PER_SITE,
+        max_new_urls: CONTENT_MAX_URLS_PER_SITE,
+        affected_file: affectedFile,
+        retryable: false,
+      });
+      setError(null);
+      return;
+    }
+
+    if (!skipWarningCheck) {
+      const oldWarnings = oldFileValidation?.warnings || [];
+      const newWarnings = newFileValidation?.warnings || [];
+      if (oldWarnings.length > 0 || newWarnings.length > 0) {
+        setPendingWarnings({ old: oldWarnings, new: newWarnings });
+        return;
+      }
+    }
+
+    setError(null);
+    setContentCapApiError(null);
+    setDuplicateSessionId(null);
+    setPendingWarnings(null);
+    setIsUploading(true);
+
+    try {
+      const result = await startDirectDeep(oldCsvFile, newCsvFile);
+      void appQueryClient.invalidateQueries({ queryKey: queryKeys.dashboard.summary });
+      void appQueryClient.invalidateQueries({ queryKey: queryKeys.sessions.all });
+      navigate(`/pricing?source_session_id=${encodeURIComponent(result.source_session_id)}`);
+    } catch (err) {
+      console.error(err);
+      if (err instanceof Error) {
+        setError(err.message);
+      } else {
+        setError("Unable to start Deep Match checkout right now.");
+      }
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
   const handleProceedAnyway = () => {
     handleBeginMatching({ force: true, skipWarningCheck: true, skipScrapingWarning: true });
   };
 
   const handleProceedWithWarnings = () => {
+    if (pendingScrapingAction === 'direct_deep') {
+      handleBeginDirectDeep({ skipWarningCheck: true });
+      return;
+    }
     handleBeginMatching({ skipWarningCheck: true });
   };
 
   const handleCancelWarnings = () => {
     setPendingWarnings(null);
+    setPendingScrapingAction(null);
   };
 
   const handleConfirmScrapingWarning = () => {
@@ -402,6 +492,7 @@ export function UploadPage({
   const handleCancelScrapingWarning = () => {
     setShowScrapingWarning(false);
     setScrapingWarningAcknowledged(false);
+    setPendingScrapingAction(null);
   };
 
   const handlePipelineTypeChange = (nextType: 'content' | 'url_only') => {
@@ -412,6 +503,7 @@ export function UploadPage({
     setPendingWarnings(null);
     setContentCapApiError(null);
     setError(null);
+    setPendingScrapingAction(null);
   };
 
   const handleSwitchToQuickMatch = () => {
@@ -421,6 +513,7 @@ export function UploadPage({
     setPendingWarnings(null);
     setContentCapApiError(null);
     setError(null);
+    setPendingScrapingAction(null);
   };
 
   const bothFilesUploaded = oldSiteFile && newSiteFile;
@@ -428,6 +521,10 @@ export function UploadPage({
     (oldFileValidation && !oldFileValidation.valid) ||
     (newFileValidation && !newFileValidation.valid) ||
     hasLocalContentCapViolation;
+  const hasDirectDeepValidationErrors =
+    (oldFileValidation && !oldFileValidation.valid) ||
+    (newFileValidation && !newFileValidation.valid) ||
+    hasDirectDeepLocalCapViolation;
   const defaultContentCapMessage =
     `Deep Match has a per-file limit of ${CONTENT_MAX_URLS_PER_SITE.toLocaleString()} URLs. ` +
     'Split your CSV or switch to Quick Match.';
@@ -461,6 +558,9 @@ export function UploadPage({
           sessionId={currentSessionId}
           tutorialMode={sampleTutorialActive}
           minDisplayMs={sampleTutorialActive ? 4500 : 0}
+          pipelineType={effectivePipelineType}
+          oldUrlCount={oldRowCount}
+          newUrlCount={newRowCount}
         />
       </Layout>
     );
@@ -471,13 +571,21 @@ export function UploadPage({
       <div className="max-w-5xl">
           {/* Headline / Subtitle */}
           {isQuickOnlyMode ? (
-            <div className="mb-8">
+            <div className="mb-8 space-y-3">
               <h1 className="text-3xl font-semibold tracking-tight text-foreground md:text-4xl">
-                Free Redirect Map Generator
+                URL Based Redirect Matching
               </h1>
-              <p className="mt-3 text-muted-foreground">
+              <p className="text-muted-foreground">
                 Upload two sitemaps. Get matched redirects in seconds.
               </p>
+              <details className="rounded-md border border-border bg-card px-4 py-3 text-sm">
+                <summary className="cursor-pointer font-medium text-foreground">How it works</summary>
+                <div className="mt-2 space-y-1 text-muted-foreground">
+                  <p>1. Upload old and new URL files.</p>
+                  <p>2. Review confidence scores and edit mappings.</p>
+                  <p>3. Export redirect rules in your format.</p>
+                </div>
+              </details>
             </div>
           ) : (
             <div className="mb-8">
@@ -490,50 +598,7 @@ export function UploadPage({
           )}
 
           {/* Pipeline Type Selector / Tier Banner */}
-          {isQuickOnlyMode ? (
-            <div className="mb-6 border border-blue-500/30 bg-blue-500/5 p-4 space-y-4">
-              <div>
-                <div>
-                  <div className="font-medium text-blue-600 dark:text-blue-400">Quick Match Workflow</div>
-                  <p className="text-sm text-muted-foreground mt-1">
-                    Run URL-only matching now, then unlock Deep Match from results only if you need stronger fixes.
-                  </p>
-                </div>
-              </div>
-              <div className="grid grid-cols-1 gap-2 text-sm md:grid-cols-3">
-                <div className="border border-border bg-card p-3">
-                  <div className="font-medium text-foreground">1. Upload</div>
-                  <p className="text-xs text-muted-foreground mt-1">Drop old and new URL files.</p>
-                </div>
-                <div className="border border-border bg-card p-3">
-                  <div className="font-medium text-foreground">2. Review</div>
-                  <p className="text-xs text-muted-foreground mt-1">Validate confidence and approve mappings.</p>
-                </div>
-                <div className="border border-border bg-card p-3">
-                  <div className="font-medium text-foreground">3. Export</div>
-                  <p className="text-xs text-muted-foreground mt-1">Download redirect rules in your format.</p>
-                </div>
-              </div>
-            </div>
-          ) : isFreeUser ? (
-            <div className="mb-6 border border-blue-500/30 bg-blue-500/5 p-4 flex items-start gap-3">
-              <Info className="h-5 w-5 text-blue-500 flex-shrink-0 mt-0.5" />
-              <div>
-                <div className="font-medium text-blue-600 dark:text-blue-400">Free Plan: Quick Match</div>
-                <p className="text-sm text-muted-foreground mt-1">
-                  Quick Match is always free. Unlock Deep Match per project or choose the Agency plan for recurring migrations.
-                </p>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="mt-3"
-                  onClick={() => navigate('/pricing')}
-                >
-                  View Pricing
-                </Button>
-              </div>
-            </div>
-          ) : (
+          {!isQuickOnlyMode && !isFreeUser && (
             <div className="mb-6 grid grid-cols-2 gap-4">
               <button
                 onClick={() => handlePipelineTypeChange('content')}
@@ -698,19 +763,27 @@ export function UploadPage({
             <div className="mb-6 border border-orange-500 bg-orange-500/10 p-4 flex items-start gap-3">
               <ShieldAlert className="h-5 w-5 text-orange-500 flex-shrink-0 mt-0.5" />
               <div className="flex-1">
-                <div className="font-medium text-orange-600 dark:text-orange-400">Disable Rate Limiting Before Scanning</div>
+                <div className="font-medium text-orange-600 dark:text-orange-400">Deep Match Consent: Scraping Access Required</div>
                 <p className="text-sm text-muted-foreground mt-1">
-                  Deep Match will send many requests to scrape pages on your old and new sites. If your sites have anti-spam, rate limiting, or bot protection enabled, the requests may be blocked — which can cause incomplete or failed results.
+                  Deep Match sends automated crawl requests to your old and new sites so we can compare real page content. If anti-spam or WAF protections stay enabled, scans will fail or return partial results.
                 </p>
-                <div className="mt-3 text-sm text-muted-foreground">
-                  <p className="font-medium text-foreground mb-2">Before proceeding, make sure you have:</p>
-                  <ul className="list-disc list-inside space-y-1">
-                    <li>Disabled rate limiting or WAF rules on both sites</li>
-                    <li>Whitelisted automated traffic (e.g., Cloudflare Bot Fight Mode, Sucuri, Wordfence)</li>
-                  </ul>
-                  <p className="mt-2 text-xs text-muted-foreground">
-                    Pages behind CAPTCHAs or challenge screens will not be scraped unless these protections are temporarily disabled. You can re-enable all protections after the scan completes.
+
+                <div className="mt-3 border border-destructive/60 bg-destructive/10 p-3">
+                  <p className="text-sm font-semibold text-destructive">
+                    Required before starting: disable spam/bot protection (Wordfence, Cloudflare bot fight/challenge mode, etc.) OR whitelist Redirx scraper traffic.
                   </p>
+                  <p className="mt-1 text-xs text-destructive/90">
+                    If not, firewalls can block the crawl and may automatically blacklist Redirx server IPs.
+                  </p>
+                </div>
+
+                <div className="mt-3 text-sm text-muted-foreground">
+                  <p className="font-medium text-foreground mb-2">Trust and safety details:</p>
+                  <ul className="list-disc list-inside space-y-1">
+                    <li>Scanned page data is used only for matching and then deleted after processing.</li>
+                    <li>Redirx respects `robots.txt` directives while crawling.</li>
+                    <li>You can re-enable firewall and anti-bot protections immediately after the scan finishes.</li>
+                  </ul>
                 </div>
                 <label className="flex items-center gap-2 mt-4 cursor-pointer select-none">
                   <input
@@ -720,7 +793,7 @@ export function UploadPage({
                     className="h-4 w-4 rounded border-border accent-primary"
                   />
                   <span className="text-sm text-foreground">
-                    I've disabled rate limiting and bot protection on my sites
+                    I confirm protections are disabled or Redirx traffic is explicitly whitelisted for this scan
                   </span>
                 </label>
                 <div className="flex gap-3 mt-3">
@@ -821,10 +894,10 @@ export function UploadPage({
               {isUploading
                 ? 'Processing...'
                 : (isFreeUser || isQuickOnlyMode)
-                  ? 'Begin Quick Match →'
+                  ? 'Match My URLs →'
                   : pipelineType === 'content'
                     ? 'Begin Deep Match →'
-                    : 'Begin Quick Match →'
+                    : 'Match My URLs →'
               }
             </Button>
             {hasValidationErrors && (
@@ -833,6 +906,31 @@ export function UploadPage({
                   ? 'Deep Match URL limit exceeded. Split your CSVs or switch to Quick Match.'
                   : 'Please fix validation errors before proceeding'}
               </p>
+            )}
+
+            {isQuickOnlyMode && (
+              <div className="mt-3 text-center">
+                <button
+                  type="button"
+                  onClick={() => navigate('/content-match')}
+                  className="text-xs text-muted-foreground underline underline-offset-4 disabled:cursor-not-allowed disabled:opacity-50 hover:text-foreground"
+                >
+                  Need higher-accuracy matching? Try content based matching →
+                </button>
+              </div>
+            )}
+
+            {isFreeUser && !tutorialActive && !isQuickOnlyMode && (
+              <div className="mt-3 text-center">
+                <button
+                  type="button"
+                  onClick={() => handleBeginDirectDeep()}
+                  disabled={!bothFilesUploaded || hasDirectDeepValidationErrors || isUploading}
+                  className="text-xs text-muted-foreground underline underline-offset-4 disabled:cursor-not-allowed disabled:opacity-50 hover:text-foreground"
+                >
+                  {isUploading ? 'Starting Deep Match...' : 'Already know you need Deep Match? Start one directly.'}
+                </button>
+              </div>
             )}
           </div>
       </div>

@@ -20,20 +20,16 @@ vi.mock('react-router-dom', async (importOriginal) => {
 });
 
 const mockUploadCSVs = vi.fn();
+const mockStartDirectDeep = vi.fn();
+const mockUseAuth = vi.fn();
 vi.mock('../api/pipeline', () => ({
   uploadCSVs: (...args: unknown[]) => mockUploadCSVs(...args),
+  startDirectDeep: (...args: unknown[]) => mockStartDirectDeep(...args),
   QuotaExceededError: class {},
 }));
 
 vi.mock('../contexts/AuthContext', () => ({
-  useAuth: () => ({
-    user: {
-      id: 'user-1',
-      email: 'test@example.com',
-      plan: 'agency',
-    },
-    loading: false,
-  }),
+  useAuth: () => mockUseAuth(),
 }));
 
 vi.mock('../contexts/OnboardingContext', () => ({
@@ -139,7 +135,22 @@ function removeFromZone(label: string) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockUseAuth.mockReturnValue({
+    user: {
+      id: 'user-1',
+      email: 'test@example.com',
+      plan: 'agency',
+    },
+    loading: false,
+  });
   mockUploadCSVs.mockResolvedValue({ session_id: 'session-123', is_duplicate: false });
+  mockStartDirectDeep.mockResolvedValue({
+    success: true,
+    session_id: 'session-direct-123',
+    source_session_id: 'session-direct-123',
+    pipeline_type: 'url_only',
+    locked: false,
+  });
 });
 
 describe('UploadPage — rendering', () => {
@@ -168,8 +179,17 @@ describe('UploadPage — rendering', () => {
 
   it('renders quick-only start mode without deep/quick selector cards', () => {
     render(<UploadPage quickOnly />);
-    expect(screen.getByText('Quick Match Workflow')).toBeInTheDocument();
-    expect(screen.queryByText('Deep Match')).not.toBeInTheDocument();
+    expect(screen.getByText('URL Based Redirect Matching')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Deep Match$/ })).not.toBeInTheDocument();
+  });
+
+  it('shows a content-based matching CTA in quick-only mode', async () => {
+    const user = userEvent.setup();
+    render(<UploadPage quickOnly />);
+
+    await user.click(screen.getByRole('button', { name: /Try content based matching/i }));
+
+    expect(mockNavigate).toHaveBeenCalledWith('/content-match');
   });
 });
 
@@ -362,7 +382,7 @@ describe('UploadPage — API submission', () => {
 
     // Switch to Quick Match to avoid the scraping warning flow
     await user.click(screen.getByText('Quick Match'));
-    await user.click(screen.getByRole('button', { name: /Begin Quick Match/ }));
+    await user.click(screen.getByRole('button', { name: /Match My URLs/ }));
 
     await waitFor(() => {
       expect(mockUploadCSVs).toHaveBeenCalledTimes(1);
@@ -372,6 +392,30 @@ describe('UploadPage — API submission', () => {
     const sentOldFile = mockUploadCSVs.mock.calls[0][0] as File;
     expect(sentOldFile.name).toBe('sitemap.txt');
     expect(sentOldFile.type).toBe('text/plain');
+  });
+
+  it('hides direct deep shortcut in quick-only mode', async () => {
+    mockUseAuth.mockReturnValue({
+      user: {
+        id: 'user-1',
+        email: 'test@example.com',
+        plan: 'free',
+      },
+      loading: false,
+    });
+
+    render(<UploadPage quickOnly />);
+
+    const oldCsv = textFile('https://old.com/page1\nhttps://old.com/page2\n', 'old.csv');
+    const newCsv = textFile('https://new.com/page1\nhttps://new.com/page2\n', 'new.csv');
+
+    uploadToZone('Old Site CSV', oldCsv);
+    uploadToZone('New Site CSV', newCsv);
+
+    expect(
+      screen.queryByRole('button', { name: /Already know you need Deep Match\? Start one directly/i }),
+    ).not.toBeInTheDocument();
+    expect(mockStartDirectDeep).not.toHaveBeenCalled();
   });
 
   it('shows scraping warning for Deep Match before submitting', async () => {
@@ -393,7 +437,7 @@ describe('UploadPage — API submission', () => {
 
     // Scraping warning should appear
     await waitFor(() => {
-      expect(screen.getByText(/Disable Rate Limiting/)).toBeInTheDocument();
+      expect(screen.getByText(/Deep Match Consent/i)).toBeInTheDocument();
     });
 
     // API should NOT have been called yet
@@ -421,11 +465,11 @@ describe('UploadPage — API submission', () => {
     await user.click(screen.getByRole('button', { name: /Begin Deep Match/ }));
 
     await waitFor(() => {
-      expect(screen.getByText(/Disable Rate Limiting/)).toBeInTheDocument();
+      expect(screen.getByText(/Deep Match Consent/i)).toBeInTheDocument();
     });
 
     await user.click(
-      screen.getByRole('checkbox', { name: /I've disabled rate limiting and bot protection on my sites/i })
+      screen.getByRole('checkbox', { name: /protections are disabled or redirx traffic is explicitly whitelisted/i })
     );
     await user.click(screen.getByRole('button', { name: /Proceed with Deep Match/ }));
 
@@ -447,7 +491,7 @@ describe('UploadPage — API submission', () => {
     await waitFor(() => {
       expect(screen.getByTestId('loading-screen')).toHaveTextContent('new-run');
     });
-    expect(screen.queryByText(/Disable Rate Limiting/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Deep Match Consent/i)).not.toBeInTheDocument();
   });
 
   it('keeps the begin button disabled when one file has a validation error', async () => {
@@ -497,10 +541,10 @@ describe('UploadPage — API submission', () => {
     await user.click(screen.getByRole('button', { name: /Switch to Quick Match/ }));
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /Begin Quick Match/ })).not.toBeDisabled();
+      expect(screen.getByRole('button', { name: /Match My URLs/ })).not.toBeDisabled();
     });
 
-    await user.click(screen.getByRole('button', { name: /Begin Quick Match/ }));
+    await user.click(screen.getByRole('button', { name: /Match My URLs/ }));
 
     await waitFor(() => {
       expect(screen.getByText(/File Warnings Detected/)).toBeInTheDocument();
@@ -536,10 +580,10 @@ describe('UploadPage — API submission', () => {
 
     await user.click(screen.getByRole('button', { name: /Begin Deep Match/ }));
     await waitFor(() => {
-      expect(screen.getByText(/Disable Rate Limiting Before Scanning/)).toBeInTheDocument();
+      expect(screen.getByText(/Deep Match Consent/i)).toBeInTheDocument();
     });
     await user.click(
-      screen.getByRole('checkbox', { name: /I've disabled rate limiting and bot protection on my sites/i })
+      screen.getByRole('checkbox', { name: /protections are disabled or redirx traffic is explicitly whitelisted/i })
     );
     await user.click(screen.getByRole('button', { name: /Proceed with Deep Match/ }));
 

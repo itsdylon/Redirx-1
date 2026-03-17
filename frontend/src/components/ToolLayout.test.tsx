@@ -19,7 +19,7 @@ function LocationEcho() {
 function renderLayout(initialEntry: string) {
   return render(
     <MemoryRouter initialEntries={[initialEntry]}>
-      <ToolLayout title="Quick Match">
+      <ToolLayout title="URL Based Matching">
         <LocationEcho />
       </ToolLayout>
     </MemoryRouter>,
@@ -35,18 +35,18 @@ describe('ToolLayout navigation', () => {
     });
   });
 
-  it('marks Quick Match as active on review routes and renders breadcrumb', () => {
+  it('marks Tools as active on review routes and renders breadcrumb', () => {
     renderLayout('/review/session-1');
 
     const primaryNav = screen.getByRole('navigation', { name: 'Primary' });
-    const quickMatchButton = within(primaryNav).getByRole('button', { name: 'Quick Match' });
+    const toolsButton = within(primaryNav).getByRole('button', { name: 'Tools' });
     const projectHistoryButton = within(primaryNav).getByRole('button', { name: 'Project History' });
 
-    expect(quickMatchButton).toHaveAttribute('aria-current', 'page');
+    expect(toolsButton).toHaveAttribute('aria-current', 'page');
     expect(projectHistoryButton).not.toHaveAttribute('aria-current');
 
     const breadcrumbNav = screen.getByRole('navigation', { name: 'Breadcrumb' });
-    expect(within(breadcrumbNav).getByText('Quick Match')).toBeInTheDocument();
+    expect(within(breadcrumbNav).getByText('URL Based Matching')).toBeInTheDocument();
     expect(within(breadcrumbNav).getByText('Review Redirects')).toBeInTheDocument();
   });
 
@@ -54,11 +54,11 @@ describe('ToolLayout navigation', () => {
     renderLayout('/projects');
 
     const primaryNav = screen.getByRole('navigation', { name: 'Primary' });
-    const quickMatchButton = within(primaryNav).getByRole('button', { name: 'Quick Match' });
+    const toolsButton = within(primaryNav).getByRole('button', { name: 'Tools' });
     const projectHistoryButton = within(primaryNav).getByRole('button', { name: 'Project History' });
 
     expect(projectHistoryButton).toHaveAttribute('aria-current', 'page');
-    expect(quickMatchButton).not.toHaveAttribute('aria-current');
+    expect(toolsButton).not.toHaveAttribute('aria-current');
     expect(screen.queryByRole('navigation', { name: 'Breadcrumb' })).not.toBeInTheDocument();
   });
 
@@ -68,8 +68,8 @@ describe('ToolLayout navigation', () => {
     expect(screen.getByText('Project Pricing')).toBeInTheDocument();
   });
 
-  it('does not render breadcrumb on quick-match root', () => {
-    renderLayout('/quick-match');
+  it('does not render breadcrumb on url-match root', () => {
+    renderLayout('/url-match');
     expect(screen.queryByRole('navigation', { name: 'Breadcrumb' })).not.toBeInTheDocument();
   });
 
@@ -83,7 +83,7 @@ describe('ToolLayout navigation', () => {
     const labels = within(mobileNav)
       .getAllByRole('button')
       .map((button) => button.textContent?.trim());
-    expect(labels.slice(0, 2)).toEqual(['Quick Match', 'Project History']);
+    expect(labels.slice(0, 3)).toEqual(['URL Based Matching', 'Content Based Matching', 'Project History']);
 
     await user.click(within(mobileNav).getByRole('button', { name: 'Project History' }));
     expect(screen.getByTestId('location')).toHaveTextContent('/projects');
@@ -91,7 +91,7 @@ describe('ToolLayout navigation', () => {
 
   it('uses a profile dropdown for email and logout instead of inline navbar text', async () => {
     const user = userEvent.setup();
-    renderLayout('/quick-match');
+    renderLayout('/url-match');
 
     expect(screen.queryByText('tool@example.com')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Logout' })).not.toBeInTheDocument();

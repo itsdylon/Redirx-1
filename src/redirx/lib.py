@@ -64,9 +64,17 @@ class Pipeline:
             stages.UrlPruneStage(),
             stages.BlogPruneStage(),
             stages.ExactUrlMatchStage(session_id=session_id),
-            stages.WebScraperStage(),
+            stages.WebScraperStage(
+                session_id=session_id,
+                progress_stage=4,
+                total_stages=7,
+            ),
             stages.HtmlPruneStage(),
-            stages.EmbedStage(session_id=session_id),
+            stages.EmbedStage(
+                session_id=session_id,
+                progress_stage=6,
+                total_stages=7,
+            ),
             stages.PairingStage(session_id=session_id),
         ]
 

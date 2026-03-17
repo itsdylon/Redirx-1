@@ -10,6 +10,7 @@ import { OAuthProviderIcon } from './OAuthProviderIcon';
 import { CheckCircle2, Circle } from 'lucide-react';
 import { calculatePasswordStrength, validateEmail } from '../utils/validation';
 import { consumeAuthRedirect, setAuthRedirect } from '../lib/authRedirect';
+import { buildConversionEventProps } from '../lib/analyticsAttribution';
 
 export function SignupPage() {
   type OAuthProvider = 'google' | 'github';
@@ -49,6 +50,17 @@ export function SignupPage() {
   useEffect(() => {
     setAuthRedirect(redirectParam);
   }, [redirectParam]);
+
+  useEffect(() => {
+    posthog?.capture('signup_page_viewed', {
+      ...buildConversionEventProps({
+        plan: null,
+        authenticated: false,
+      }),
+      source: sourceParam || null,
+      redirect: redirectParam || null,
+    });
+  }, [posthog, redirectParam, sourceParam]);
 
   // Calculate password strength in real-time
   const passwordStrength = useMemo(
@@ -124,10 +136,14 @@ export function SignupPage() {
     try {
       const result = await register(email, password, fullName);
 
-      if (sourceParam === 'quick-match') {
+      if (sourceParam === 'quick-match' || sourceParam === 'url-match') {
         posthog?.capture('signup_from_quick_match', {
+          ...buildConversionEventProps({
+            plan: null,
+            authenticated: false,
+          }),
           source: sourceParam,
-          redirect: redirectParam || '/quick-match',
+          redirect: redirectParam || '/url-match',
           email_confirmation_required: result.emailConfirmationRequired,
         });
       }

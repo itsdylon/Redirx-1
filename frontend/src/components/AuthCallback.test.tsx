@@ -1,12 +1,20 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { AuthCallback } from './AuthCallback';
 
 const mockCompleteOAuthCallback = vi.fn();
+const mockCapture = vi.fn();
+
+vi.mock('@posthog/react', () => ({
+  usePostHog: () => ({
+    capture: mockCapture,
+  }),
+}));
 
 vi.mock('../contexts/AuthContext', () => ({
   useAuth: () => ({
+    user: null,
     completeOAuthCallback: mockCompleteOAuthCallback,
   }),
 }));
@@ -27,14 +35,24 @@ function renderCallback(initialPath = '/auth/callback') {
 describe('AuthCallback', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    localStorage.clear();
   });
 
   it('completes callback and navigates to resolved redirect', async () => {
     mockCompleteOAuthCallback.mockResolvedValueOnce('/quick-match');
     renderCallback();
 
-    expect(await screen.findByText('Quick Match Route')).toBeInTheDocument();
-    expect(mockCompleteOAuthCallback).toHaveBeenCalledTimes(1);
+    await waitFor(() => {
+      expect(mockCompleteOAuthCallback).toHaveBeenCalledTimes(1);
+    });
+    expect(screen.queryByText('Sign-in Failed')).not.toBeInTheDocument();
+    expect(mockCapture).toHaveBeenCalledWith(
+      'auth_callback_success',
+      expect.objectContaining({
+        authenticated: true,
+        redirect: '/quick-match',
+      }),
+    );
   });
 
   it('renders provider error returned in callback URL', async () => {
@@ -43,6 +61,12 @@ describe('AuthCallback', () => {
     expect(await screen.findByText('Sign-in Failed')).toBeInTheDocument();
     expect(screen.getByText('The user denied access')).toBeInTheDocument();
     expect(mockCompleteOAuthCallback).not.toHaveBeenCalled();
+    expect(mockCapture).toHaveBeenCalledWith(
+      'auth_callback_failed',
+      expect.objectContaining({
+        authenticated: false,
+      }),
+    );
   });
 
   it('renders callback completion errors', async () => {
@@ -51,5 +75,11 @@ describe('AuthCallback', () => {
 
     expect(await screen.findByText('Sign-in Failed')).toBeInTheDocument();
     expect(screen.getByText('Unable to establish session.')).toBeInTheDocument();
+    expect(mockCapture).toHaveBeenCalledWith(
+      'auth_callback_failed',
+      expect.objectContaining({
+        error_message: 'Unable to establish session.',
+      }),
+    );
   });
 });

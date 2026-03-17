@@ -31,6 +31,7 @@ interface ReviewToolbarProps {
   filteredCount: number;
   searchInputRef?: React.RefObject<HTMLInputElement>;
   tutorialExportHighlight?: boolean;
+  exportDisabled?: boolean;
 }
 
 export function ReviewToolbar({
@@ -47,6 +48,7 @@ export function ReviewToolbar({
   filteredCount,
   searchInputRef,
   tutorialExportHighlight = false,
+  exportDisabled = false,
 }: ReviewToolbarProps) {
   return (
     <div className="bg-card border border-border p-4 flex items-center gap-4 flex-wrap">
@@ -119,6 +121,7 @@ export function ReviewToolbar({
           <Button
             variant="outline"
             onClick={onExportClick}
+            disabled={exportDisabled}
             className={tutorialExportHighlight ? 'border-[#26D99D] text-[#0B6B4C] dark:text-[#D8FFF2] ring-2 ring-[#26D99D]/80 ring-offset-2 ring-offset-background bg-[#26D99D]/10 dark:bg-[#26D99D]/18' : ''}
           >
             <Download className="h-4 w-4 mr-2" />
@@ -126,7 +129,7 @@ export function ReviewToolbar({
           </Button>
         </TooltipTrigger>
         <TooltipContent>
-          <p>Export redirects ({formatShortcut('E')})</p>
+          <p>{exportDisabled ? 'Purchase required before export' : `Export redirects (${formatShortcut('E')})`}</p>
         </TooltipContent>
       </Tooltip>
 

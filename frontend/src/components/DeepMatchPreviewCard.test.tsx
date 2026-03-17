@@ -151,4 +151,38 @@ describe('DeepMatchPreviewCard', () => {
 
     expect(container).toBeEmptyDOMElement();
   });
+
+  it('requires acknowledgement before starting preview opt-in', async () => {
+    const user = userEvent.setup();
+    const onOptIn = vi.fn().mockResolvedValue(undefined);
+    render(
+      <DeepMatchPreviewCard
+        preview={makeCompletedPreview({
+          status: 'awaiting_opt_in',
+          visible_items: [],
+          locked_teasers: [],
+          total_convincing_fixes: 0,
+          cta_primary: 'Start Deep Match Accuracy Check',
+        })}
+        onOptIn={onOptIn}
+      />,
+    );
+
+    const startButton = screen.getByRole('button', { name: /Start Deep Match Accuracy Check/i });
+    expect(startButton).not.toBeDisabled();
+    await user.click(startButton);
+
+    const proceedButton = screen.getByRole('button', { name: /Proceed with Deep Match/i });
+    expect(proceedButton).toBeDisabled();
+
+    await user.click(
+      screen.getByRole('checkbox', {
+        name: /protections are disabled or redirx traffic is whitelisted/i,
+      }),
+    );
+    expect(proceedButton).not.toBeDisabled();
+
+    await user.click(proceedButton);
+    expect(onOptIn).toHaveBeenCalledWith('session-123');
+  });
 });

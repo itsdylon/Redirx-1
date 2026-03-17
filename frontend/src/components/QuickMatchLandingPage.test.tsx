@@ -53,7 +53,7 @@ describe('QuickMatchLandingPage', () => {
     expect(mockCapture).toHaveBeenCalledWith(
       'quick_match_tool_viewed',
       expect.objectContaining({
-        source: 'quick-match',
+        source: 'url-match',
       }),
     );
 
@@ -65,11 +65,11 @@ describe('QuickMatchLandingPage', () => {
         target: 'signup',
       }),
     );
-    expect(mockNavigate).toHaveBeenCalledWith('/signup?redirect=%2Fquick-match&source=quick-match');
-    expect(localStorage.getItem('auth_redirect')).toBe('/quick-match');
+    expect(mockNavigate).toHaveBeenCalledWith('/signup?redirect=%2Furl-match&source=url-match');
+    expect(localStorage.getItem('auth_redirect')).toBe('/url-match');
   });
 
-  it('starts OAuth directly from quick-match gate', async () => {
+  it('starts OAuth directly from url-match gate', async () => {
     mockStartOAuth.mockImplementationOnce(() => new Promise(() => {}));
     const user = userEvent.setup();
     renderPage();
@@ -82,10 +82,10 @@ describe('QuickMatchLandingPage', () => {
         target: 'google',
       }),
     );
-    expect(mockStartOAuth).toHaveBeenCalledWith('google', '/quick-match', 'quick-match');
+    expect(mockStartOAuth).toHaveBeenCalledWith('google', '/url-match', 'url-match');
     expect(screen.getByRole('button', { name: 'Connecting...' })).toBeDisabled();
-    expect(localStorage.getItem('auth_redirect')).toBe('/quick-match');
-    expect(mockNavigate).not.toHaveBeenCalledWith('/signup?redirect=%2Fquick-match&source=quick-match');
+    expect(localStorage.getItem('auth_redirect')).toBe('/url-match');
+    expect(mockNavigate).not.toHaveBeenCalledWith('/signup?redirect=%2Furl-match&source=url-match');
   });
 
   it('renders authenticated quick upload experience', async () => {

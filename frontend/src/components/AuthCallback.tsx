@@ -1,14 +1,17 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { usePostHog } from '@posthog/react';
 import { Card } from './ui/card';
 import { Button } from './ui/button';
 import { useAuth } from '../contexts/AuthContext';
+import { buildConversionEventProps } from '../lib/analyticsAttribution';
 
 export function AuthCallback() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
-  const { completeOAuthCallback } = useAuth();
+  const posthog = usePostHog();
+  const { user, completeOAuthCallback } = useAuth();
 
   const parseCallbackError = (): string | null => {
     const searchParams = new URLSearchParams(window.location.search);
@@ -48,14 +51,35 @@ export function AuthCallback() {
       try {
         const callbackError = parseCallbackError();
         if (callbackError) {
+          posthog?.capture('auth_callback_failed', {
+            ...buildConversionEventProps({
+              plan: user?.plan,
+              authenticated: false,
+            }),
+            error_message: callbackError,
+          });
           setError(callbackError);
           return;
         }
 
         const redirect = await completeOAuthCallback();
+        posthog?.capture('auth_callback_success', {
+          ...buildConversionEventProps({
+            plan: user?.plan,
+            authenticated: true,
+          }),
+          redirect,
+        });
         navigate(redirect, { replace: true });
       } catch (err: any) {
         console.error('Auth callback error:', err);
+        posthog?.capture('auth_callback_failed', {
+          ...buildConversionEventProps({
+            plan: user?.plan,
+            authenticated: false,
+          }),
+          error_message: err?.message || 'Unable to complete sign-in. Please try again.',
+        });
         setError(err.message || 'Unable to complete sign-in. Please try again.');
       } finally {
         setLoading(false);
@@ -63,7 +87,7 @@ export function AuthCallback() {
     };
 
     handleCallback();
-  }, [completeOAuthCallback, navigate]);
+  }, [completeOAuthCallback, navigate, posthog]);
 
   if (loading) {
     return (

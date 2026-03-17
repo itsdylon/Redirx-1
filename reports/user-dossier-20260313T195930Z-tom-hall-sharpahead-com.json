@@ -1,0 +1,370 @@
+{
+  "auth_user": {
+    "created_at": "2026-03-13T12:54:57.966685+00:00",
+    "email": "tom.hall@sharpahead.com",
+    "email_confirmed_at": "2026-03-13T12:55:06.717777+00:00",
+    "id": "aa9c9869-92eb-4aa1-80e0-4f149b3d780e",
+    "last_sign_in_at": "2026-03-13T15:29:52.103375+00:00",
+    "provider": "email"
+  },
+  "data_sources": {
+    "agency_usage_events": [],
+    "deep_match_previews": [],
+    "migration_sessions": [
+      {
+        "approved_mappings": 0,
+        "created_at": "2026-03-13T15:30:07.223827",
+        "current_stage": 4,
+        "id": "6cd2af17-a20f-49d9-b7f5-81eba870cdf7",
+        "is_preview": false,
+        "last_error": null,
+        "new_url_count": 1237,
+        "old_url_count": 1001,
+        "pipeline_type": "url_only",
+        "project_name": "ebp.be project",
+        "source_session_id": null,
+        "stage_name": "Matching URLs by similarity",
+        "status": "completed",
+        "total_mappings": 0,
+        "total_stages": 4
+      },
+      {
+        "approved_mappings": 0,
+        "created_at": "2026-03-13T12:55:31.294209",
+        "current_stage": 4,
+        "id": "0edf6c7b-043d-4acd-8bdf-3986721b3642",
+        "is_preview": false,
+        "last_error": null,
+        "new_url_count": 159,
+        "old_url_count": 87,
+        "pipeline_type": "url_only",
+        "project_name": "redgravesearch.com project",
+        "source_session_id": null,
+        "stage_name": "Matching URLs by similarity",
+        "status": "completed",
+        "total_mappings": 0,
+        "total_stages": 4
+      }
+    ],
+    "project_pricing_quotes": [
+      {
+        "billable_pages": 1237,
+        "checkout_created_at": null,
+        "created_at": "2026-03-13T15:31:07.674738+00:00",
+        "currency": "usd",
+        "deep_session_id": null,
+        "id": "a25f9f86-1d74-42b3-9ac2-40faae6dfa9b",
+        "paid_at": null,
+        "pricing_version": "v1_2026_03",
+        "source_session_id": "6cd2af17-a20f-49d9-b7f5-81eba870cdf7",
+        "status": "draft",
+        "stripe_checkout_session_id": null,
+        "stripe_payment_intent_id": null,
+        "subtotal_cents": 8685,
+        "updated_at": "2026-03-13T15:31:07.59758+00:00"
+      },
+      {
+        "billable_pages": 159,
+        "checkout_created_at": null,
+        "created_at": "2026-03-13T12:56:06.331484+00:00",
+        "currency": "usd",
+        "deep_session_id": null,
+        "id": "b9c33afe-4997-499a-b146-aff07217b88e",
+        "paid_at": null,
+        "pricing_version": "v1_2026_03",
+        "source_session_id": "0edf6c7b-043d-4acd-8bdf-3986721b3642",
+        "status": "draft",
+        "stripe_checkout_session_id": null,
+        "stripe_payment_intent_id": null,
+        "subtotal_cents": 1590,
+        "updated_at": "2026-03-13T12:56:06.273154+00:00"
+      }
+    ],
+    "stripe_webhook_events_attributed": [],
+    "stripe_webhook_events_global_sample": [
+      {
+        "attribution": "global-unlinked",
+        "event_type": "checkout.session.completed",
+        "processed_at": "2026-02-19T17:46:09.022629+00:00",
+        "stripe_event_id": "evt_1T...tWlx"
+      },
+      {
+        "attribution": "global-unlinked",
+        "event_type": "checkout.session.completed",
+        "processed_at": "2026-02-19T17:46:43.620483+00:00",
+        "stripe_event_id": "evt_1T...87fG"
+      },
+      {
+        "attribution": "global-unlinked",
+        "event_type": "checkout.session.completed",
+        "processed_at": "2026-02-19T17:55:19.068657+00:00",
+        "stripe_event_id": "evt_1T...rVVl"
+      },
+      {
+        "attribution": "global-unlinked",
+        "event_type": "checkout.session.completed",
+        "processed_at": "2026-02-19T17:57:08.939399+00:00",
+        "stripe_event_id": "evt_1T...s14A"
+      },
+      {
+        "attribution": "global-unlinked",
+        "event_type": "checkout.session.completed",
+        "processed_at": "2026-03-06T04:36:46.92138+00:00",
+        "stripe_event_id": "evt_1T...Dfxm"
+      },
+      {
+        "attribution": "global-unlinked",
+        "event_type": "checkout.session.completed",
+        "processed_at": "2026-03-06T04:56:45.887632+00:00",
+        "stripe_event_id": "evt_1T...tDxk"
+      },
+      {
+        "attribution": "global-unlinked",
+        "event_type": "customer.subscription.updated",
+        "processed_at": "2026-03-06T05:32:07.436478+00:00",
+        "stripe_event_id": "evt_1T...vEQe"
+      },
+      {
+        "attribution": "global-unlinked",
+        "event_type": "checkout.session.completed",
+        "processed_at": "2026-03-06T05:54:29.387425+00:00",
+        "stripe_event_id": "evt_1T...ZL09"
+      },
+      {
+        "attribution": "global-unlinked",
+        "event_type": "checkout.session.completed",
+        "processed_at": "2026-03-11T16:23:24.762756+00:00",
+        "stripe_event_id": "evt_1T...JdcE"
+      },
+      {
+        "attribution": "global-unlinked",
+        "event_type": "checkout.session.completed",
+        "processed_at": "2026-03-11T16:32:09.215905+00:00",
+        "stripe_event_id": "evt_1T...zF7S"
+      }
+    ]
+  },
+  "funnel_summary": {
+    "checkout_started": 0,
+    "deep_sessions": 0,
+    "paid_quotes": 0,
+    "preview_rows": 0,
+    "quick_match_sessions": 2,
+    "quotes": 2
+  },
+  "generated_at": "2026-03-13T19:59:30.445429+00:00",
+  "lookup_input": "tom.hall@sharpahead.com",
+  "timeline": [
+    {
+      "at_america_new_york": "2026-03-13 08:54:57 AM EDT",
+      "at_utc": "2026-03-13 12:54:57 UTC",
+      "detail": {
+        "user_id": "aa9c9869-92eb-4aa1-80e0-4f149b3d780e"
+      },
+      "event": "auth_user_created"
+    },
+    {
+      "at_america_new_york": "2026-03-13 08:55:06 AM EDT",
+      "at_utc": "2026-03-13 12:55:06 UTC",
+      "detail": {
+        "email": "tom.hall@sharpahead.com"
+      },
+      "event": "email_confirmed"
+    },
+    {
+      "at_america_new_york": "2026-03-13 08:55:31 AM EDT",
+      "at_utc": "2026-03-13 12:55:31 UTC",
+      "detail": {
+        "is_preview": false,
+        "pipeline_type": "url_only",
+        "session_id": "0edf6c7b-043d-4acd-8bdf-3986721b3642",
+        "status": "completed"
+      },
+      "event": "session_created"
+    },
+    {
+      "at_america_new_york": "2026-03-13 08:56:06 AM EDT",
+      "at_utc": "2026-03-13 12:56:06 UTC",
+      "detail": {
+        "quote_id": "b9c33afe-4997-499a-b146-aff07217b88e",
+        "source_session_id": "0edf6c7b-043d-4acd-8bdf-3986721b3642",
+        "status": "draft"
+      },
+      "event": "quote_created"
+    },
+    {
+      "at_america_new_york": "2026-03-13 11:29:52 AM EDT",
+      "at_utc": "2026-03-13 15:29:52 UTC",
+      "detail": {
+        "provider": "email"
+      },
+      "event": "last_sign_in"
+    },
+    {
+      "at_america_new_york": "2026-03-13 11:30:07 AM EDT",
+      "at_utc": "2026-03-13 15:30:07 UTC",
+      "detail": {
+        "is_preview": false,
+        "pipeline_type": "url_only",
+        "session_id": "6cd2af17-a20f-49d9-b7f5-81eba870cdf7",
+        "status": "completed"
+      },
+      "event": "session_created"
+    },
+    {
+      "at_america_new_york": "2026-03-13 11:31:07 AM EDT",
+      "at_utc": "2026-03-13 15:31:07 UTC",
+      "detail": {
+        "quote_id": "a25f9f86-1d74-42b3-9ac2-40faae6dfa9b",
+        "source_session_id": "6cd2af17-a20f-49d9-b7f5-81eba870cdf7",
+        "status": "draft"
+      },
+      "event": "quote_created"
+    }
+  ],
+  "url_mapping_summary": {
+    "avg_confidence": 0.6005,
+    "confidence_bands": {
+      "high": 42,
+      "low": 160,
+      "medium": 8,
+      "unknown": 0
+    },
+    "match_types": {
+      "exact_url": 2,
+      "slug_match": 38,
+      "url_high": 6,
+      "url_low": 126,
+      "url_medium": 38
+    },
+    "needs_review": 164,
+    "risky_samples": [
+      {
+        "confidence_score": 0.4034,
+        "created_at": "2026-03-13T15:30:17.669434",
+        "id": "ce80b626-f6f0-4e29-b857-44e711fc3f37",
+        "match_type": "url_low",
+        "needs_review": true,
+        "new_url": "https://www.ebp.be/fr/verklarende_woorden/awv-agentschap-wegen-en-verkeer/",
+        "old_url": "https://www.ebp.be/nl/n124-hoogstraten-structureel-onderhoud_mobiliteit-en-openbare-werken-agentschap-wegen-en-verkeer-afdeling-wegen-en-verkeer-antwerpen_08112022_22978992",
+        "session_id": "6cd2af17-a20f-49d9-b7f5-81eba870cdf7"
+      },
+      {
+        "confidence_score": 0.4035,
+        "created_at": "2026-03-13T15:30:17.599643",
+        "id": "77da71b4-057b-462c-a102-402754784331",
+        "match_type": "url_low",
+        "needs_review": true,
+        "new_url": "https://www.ebp.be/nl/verklarende_woorden/niet-openbare-procedure/",
+        "old_url": "https://www.ebp.be/nl/bda-overheidsopdracht-openbare-of-niet-openbare-procedure/overheidsopdrachten-sofico-20515853/",
+        "session_id": "6cd2af17-a20f-49d9-b7f5-81eba870cdf7"
+      },
+      {
+        "confidence_score": 0.407,
+        "created_at": "2026-03-13T15:30:17.481362",
+        "id": "c3233161-470c-416d-ae40-c51091175bce",
+        "match_type": "url_low",
+        "needs_review": true,
+        "new_url": "https://www.ebp.be/fr/verklarende_woorden/vereenvoudigde-onderhandelingsprocedure-met-voorafgaande-bekendmaking/",
+        "old_url": "https://www.ebp.be/fr/uitnodiging-tot-indienen-offerte-inhuur-hoogwerkers-vereenvoudigde-onderhandelingsprocedure-met-voorafgaande-bekendmaking_vrt_05072022_22333692",
+        "session_id": "6cd2af17-a20f-49d9-b7f5-81eba870cdf7"
+      },
+      {
+        "confidence_score": 0.4333,
+        "created_at": "2026-03-13T12:55:35.162839",
+        "id": "d93e0871-2931-4d63-9468-4fba608d0949",
+        "match_type": "url_low",
+        "needs_review": true,
+        "new_url": "https://redgravesearch.com/executive-search/",
+        "old_url": "https://redgravesearch.com/publications/partnering-with-executive-search-firm/",
+        "session_id": "0edf6c7b-043d-4acd-8bdf-3986721b3642"
+      },
+      {
+        "confidence_score": 0.438,
+        "created_at": "2026-03-13T15:30:17.358243",
+        "id": "e3df8e96-f3ec-49c5-bfea-9222f949bb61",
+        "match_type": "url_low",
+        "needs_review": true,
+        "new_url": "https://www.ebp.be/nl/verklarende_woorden/awv-agentschap-wegen-en-verkeer/",
+        "old_url": "https://www.ebp.be/nl/renovatie-leonardtunnel_mobiliteit-en-openbare-werken-agentschap-wegen-en-verkeer-afdeling-wegen-en-verkeer-antwerpen_16112022_23019467",
+        "session_id": "6cd2af17-a20f-49d9-b7f5-81eba870cdf7"
+      },
+      {
+        "confidence_score": 0.4524,
+        "created_at": "2026-03-13T15:30:17.131132",
+        "id": "fcbdc67c-0a87-441f-9d1e-72b7672ef01d",
+        "match_type": "url_low",
+        "needs_review": true,
+        "new_url": "https://www.ebp.be/fr/formation-privee/laccord-cadre-vers-une-mise-en-oeuvre-souple-et-efficace/",
+        "old_url": "https://www.ebp.be/fr/accordcadre-de-travaux-de-voiries-et-d\u00e9gouttages-2022_ville-de-binche_20022022_21638803",
+        "session_id": "6cd2af17-a20f-49d9-b7f5-81eba870cdf7"
+      },
+      {
+        "confidence_score": 0.4524,
+        "created_at": "2026-03-13T15:30:17.22107",
+        "id": "2850c530-252d-4d0d-8349-07c5a226733b",
+        "match_type": "url_low",
+        "needs_review": true,
+        "new_url": "https://www.ebp.be/nl/verklarende_woorden/prospection-du-marche-consultation-prealable-du-marche/",
+        "old_url": "https://www.ebp.be/nl/ecole-de-sauveniere-refection-de-la-cour-primaires_ville-de-gembloux_15122022_23171643",
+        "session_id": "6cd2af17-a20f-49d9-b7f5-81eba870cdf7"
+      },
+      {
+        "confidence_score": 0.4527,
+        "created_at": "2026-03-13T15:30:17.042279",
+        "id": "9c1d63ce-66c5-42a1-a626-02f52240893d",
+        "match_type": "url_low",
+        "needs_review": true,
+        "new_url": "https://www.ebp.be/nl/openbare-opleiding/duurzaam-aanbesteden-scoor-met-groene-overheidsopdrachten/",
+        "old_url": "https://www.ebp.be/nl/meerjarig-open-contract-van-bepaalde-duur-4-jaar-v_mrmpcs-algemene-directie-material-resources-divisie-overheidsopdrachten-sectie-cis-onderse_23122022_23214390",
+        "session_id": "6cd2af17-a20f-49d9-b7f5-81eba870cdf7"
+      },
+      {
+        "confidence_score": 0.4545,
+        "created_at": "2026-03-13T15:30:16.830722",
+        "id": "81667114-f694-497a-afe0-d3976d92e554",
+        "match_type": "url_low",
+        "needs_review": true,
+        "new_url": "https://www.ebp.be/fr/decouvrez-vos-opportunites-dans-les-marches-publics-et-les-projets-de-construction/",
+        "old_url": "https://www.ebp.be/fr/construction-dune-voirie-portuaire-et-amenagements-dans-la-concession-hublet-a-floriffoux_port-autonome-de-namur_23052022_22121761",
+        "session_id": "6cd2af17-a20f-49d9-b7f5-81eba870cdf7"
+      },
+      {
+        "confidence_score": 0.4545,
+        "created_at": "2026-03-13T15:30:16.909892",
+        "id": "22eddd43-b9d4-480f-ac22-6df43211c225",
+        "match_type": "url_low",
+        "needs_review": true,
+        "new_url": "https://www.ebp.be/nl/category/geen-onderdeel-van-een-categorie/page/2/",
+        "old_url": "https://www.ebp.be/nl/egouttage-de-la-rue-de-verviers_aide_14122022_23165582",
+        "session_id": "6cd2af17-a20f-49d9-b7f5-81eba870cdf7"
+      }
+    ],
+    "total_mappings": 210
+  },
+  "user_profile": {
+    "company": null,
+    "created_at": "2026-03-13T12:54:57.966349+00:00",
+    "email": "tom.hall@sharpahead.com",
+    "full_name": "Tom Hall",
+    "id": "aa9c9869-92eb-4aa1-80e0-4f149b3d780e",
+    "onboarding_completed_at": null,
+    "onboarding_started_at": null,
+    "onboarding_status": "not_started",
+    "plan": "free",
+    "stripe_subscription_status": null,
+    "trial_expires_at": null,
+    "updated_at": "2026-03-13T14:07:38.435059+00:00",
+    "welcome_email_sent": true
+  },
+  "warnings": [],
+  "what_we_do_not_know": [
+    "`stripe_webhook_events` rows do not expose reliable per-user linkage in current schema; only global sample is shown."
+  ],
+  "what_we_know": [
+    "Auth user exists with provider `email`.",
+    "Collected 2 migration sessions and 210 url mappings for this user.",
+    "Funnel progression: quick=2, preview=0, quote=2, checkout=0, paid=0, deep=0.",
+    "Collected 2 pricing quote rows, 0 deep preview rows, and 0 agency usage rows."
+  ]
+}

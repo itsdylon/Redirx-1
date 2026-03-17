@@ -124,7 +124,7 @@ export async function getAlternatives(sessionId: string, mappingId: string): Pro
   }
 }
 
-export async function getResults(sessionId: string) {
+export async function getResults(sessionId: string): Promise<ResultsResponse> {
   try {
     const response = await fetch(
       `${API_BASE_URL}/api/results/${sessionId}`,
@@ -152,6 +152,46 @@ export async function getResults(sessionId: string) {
   }
 }
 
+export interface ResultsResponse {
+  success: boolean;
+  mappings: any[];
+  stats: {
+    total: number;
+    high: number;
+    medium: number;
+    low: number;
+    approved: number;
+    approvalProgress: number;
+  };
+  session?: {
+    id: string;
+    status: string;
+    created_at: string;
+    user_id: string;
+    pipeline_type: 'content' | 'url_only' | string;
+    requires_payment_unlock?: boolean;
+  };
+  locked?: boolean;
+  lock_reason?: string;
+  source_session_id?: string;
+  quote_id?: string | null;
+  quote_status?: string | null;
+  is_unlocked?: boolean;
+  preview_mode?: boolean;
+  preview_summary?: {
+    match_count: number;
+    average_confidence: number;
+    confidence_distribution: {
+      exact: number;
+      high: number;
+      medium: number;
+      low: number;
+    };
+    exact_match_count: number;
+    redaction: 'server_side' | string;
+  };
+}
+
 export interface DeepPreviewVisibleItem {
   old_url: string;
   current_target_url: string;
@@ -176,7 +216,7 @@ export interface DeepPreviewLockedTeaser {
 
 export interface DeepPreviewResponse {
   success: boolean;
-  status: 'queued' | 'processing' | 'completed' | 'failed' | 'skipped' | 'not_applicable';
+  status: 'awaiting_opt_in' | 'queued' | 'processing' | 'completed' | 'failed' | 'skipped' | 'not_applicable';
   reason?: string;
   source_session_id: string;
   free_unlock_count: number;
@@ -200,6 +240,110 @@ export async function getDeepPreview(sessionId: string): Promise<DeepPreviewResp
         headers: getAuthHeaders()
       }
     );
+
+    if (!response.ok) {
+      const userError = await handleApiError(null, response);
+      throw new Error(userError.message);
+    }
+
+    return await response.json();
+  } catch (error: any) {
+    if (error instanceof TypeError || error.name === 'AbortError') {
+      const userError = await handleApiError(error);
+      throw new Error(userError.message);
+    }
+    throw error;
+  }
+}
+
+export async function confirmDeepPreviewOptIn(sessionId: string): Promise<{ success: boolean; status: string; reason?: string; source_session_id: string; preview_session_id?: string }> {
+  try {
+    const response = await fetch(
+      `${API_BASE_URL}/api/results/${sessionId}/deep-preview/opt-in`,
+      {
+        method: "POST",
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ acknowledged: true }),
+      }
+    );
+
+    if (!response.ok) {
+      const userError = await handleApiError(null, response);
+      throw new Error(userError.message);
+    }
+
+    return await response.json();
+  } catch (error: any) {
+    if (error instanceof TypeError || error.name === 'AbortError') {
+      const userError = await handleApiError(error);
+      throw new Error(userError.message);
+    }
+    throw error;
+  }
+}
+
+export interface DirectDeepStartResponse {
+  success: boolean;
+  session_id: string;
+  pipeline_type: 'url_only';
+  locked: boolean;
+  source_session_id: string;
+  quote_id?: string;
+  quote_status?: string;
+  deep_session_id?: string | null;
+  expired_unpaid_quotes?: number;
+}
+
+export interface ContentMatchStartResponse {
+  success: boolean;
+  session_id: string;
+  pipeline_type: 'content';
+  is_duplicate: boolean;
+  locked: boolean;
+  source_session_id: string;
+  quote_id?: string;
+  quote_status?: string;
+  deep_session_id?: string | null;
+}
+
+export async function startDirectDeep(oldFile: File, newFile: File): Promise<DirectDeepStartResponse> {
+  const formData = new FormData();
+  formData.append("old_csv", oldFile);
+  formData.append("new_csv", newFile);
+
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/projects/direct-deep/start`, {
+      method: "POST",
+      headers: getAuthHeadersMultipart(),
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const userError = await handleApiError(null, response);
+      throw new Error(userError.message);
+    }
+
+    return await response.json();
+  } catch (error: any) {
+    if (error instanceof TypeError || error.name === 'AbortError') {
+      const userError = await handleApiError(error);
+      throw new Error(userError.message);
+    }
+    throw error;
+  }
+}
+
+export async function startContentMatch(oldFile: File, newFile: File): Promise<ContentMatchStartResponse> {
+  const formData = new FormData();
+  formData.append("old_csv", oldFile);
+  formData.append("new_csv", newFile);
+
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/projects/content-match/start`, {
+      method: "POST",
+      headers: getAuthHeadersMultipart(),
+      body: formData,
+    });
 
     if (!response.ok) {
       const userError = await handleApiError(null, response);

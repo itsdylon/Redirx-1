@@ -23,6 +23,7 @@ vi.mock('./components/AccountPage', () => ({ AccountPage: () => <div>Account Pag
 vi.mock('./components/Settings', () => ({ Settings: () => <div>Settings Page</div> }));
 vi.mock('./components/PricingPage', () => ({ PricingPage: () => <div>Pricing Page</div> }));
 vi.mock('./components/DemoPage', () => ({ DemoPage: () => <div>Demo Page</div> }));
+vi.mock('./components/ContentMatchPage', () => ({ ContentMatchPage: () => <div>Content Match Route</div> }));
 vi.mock('./components/QuickMatchLandingPage', () => ({
   QuickMatchLandingPage: () => <div>Quick Match Route</div>,
 }));
@@ -70,6 +71,12 @@ describe('App routing', () => {
     mockUseAuth.mockReturnValue({ user: null, loading: false });
     renderAt('/quick-match');
     expect(await screen.findByText('Quick Match Route')).toBeInTheDocument();
+  });
+
+  it('routes /content-match for unauthenticated users', async () => {
+    mockUseAuth.mockReturnValue({ user: null, loading: false });
+    renderAt('/content-match');
+    expect(await screen.findByText('Content Match Route')).toBeInTheDocument();
   });
 
   it('routes /quick-match for authenticated tool users', async () => {
@@ -132,13 +139,19 @@ describe('App routing', () => {
     expect(await screen.findByText('Review Page (dashboard)')).toBeInTheDocument();
   });
 
-  it('redirects tool users from /pricing without source session id', async () => {
+  it('allows tool users on /pricing without source session id', async () => {
     mockUseAuth.mockReturnValue({
       loading: false,
       user: { id: 'u1', email: 'tool@example.com', plan: 'free' },
     });
     renderAt('/pricing');
-    expect(await screen.findByText('Quick Match Route')).toBeInTheDocument();
+    expect(await screen.findByText('Pricing Page')).toBeInTheDocument();
+  });
+
+  it('allows unauthenticated users on /pricing', async () => {
+    mockUseAuth.mockReturnValue({ user: null, loading: false });
+    renderAt('/pricing');
+    expect(await screen.findByText('Pricing Page')).toBeInTheDocument();
   });
 
   it('allows tool users on /pricing with source session id', async () => {

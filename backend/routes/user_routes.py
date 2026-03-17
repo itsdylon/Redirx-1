@@ -240,6 +240,54 @@ def get_user_sessions():
         }), 500
 
 
+@user_blueprint.route("/sessions/<session_id>/source-files", methods=["GET"])
+@limiter.limit("120 per minute")
+@require_auth
+def get_source_session_files(session_id):
+    """
+    Return source session file metadata and URL lists for cross-tool preloading.
+    """
+    session_db = MigrationSessionDB()
+
+    try:
+        result = session_db.client.table("migration_sessions").select(
+            "id,user_id,project_name,pipeline_type,status,old_urls,new_urls"
+        ).eq("id", session_id).maybe_single().execute()
+
+        session = result.data if result else None
+        if not session:
+            return jsonify({
+                "success": False,
+                "error": "Session not found",
+            }), 404
+
+        if session.get("user_id") != str(request.user.id):
+            return jsonify({
+                "success": False,
+                "error": "Unauthorized: Session belongs to another user",
+            }), 403
+
+        old_urls = session.get("old_urls") or []
+        new_urls = session.get("new_urls") or []
+
+        return jsonify({
+            "success": True,
+            "session_id": str(session.get("id")),
+            "project_name": session.get("project_name") or "Untitled",
+            "pipeline_type": session.get("pipeline_type"),
+            "status": session.get("status"),
+            "old_url_count": len(old_urls),
+            "new_url_count": len(new_urls),
+            "old_urls": old_urls,
+            "new_urls": new_urls,
+        }), 200
+    except Exception as exc:
+        return jsonify({
+            "success": False,
+            "error": str(exc),
+        }), 500
+
+
 @user_blueprint.route("/sessions/<session_id>", methods=["PUT"])
 @limiter.limit("60 per minute")
 @require_auth

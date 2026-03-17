@@ -14,6 +14,8 @@
   - `VITE_SUPABASE_URL` (required): Supabase project URL for client auth.
   - `VITE_SUPABASE_ANON_KEY` (required): Supabase anon/public key.
   - `VITE_API_BASE_URL` (optional): API origin. Defaults to same-origin.
+  - `VITE_PUBLIC_POSTHOG_KEY` (required for analytics): PostHog project API key.
+  - `VITE_PUBLIC_POSTHOG_HOST` (required for analytics): PostHog host (`https://us.i.posthog.com` or `https://eu.i.posthog.com`).
   - `VITE_CONTENT_MAX_URLS_PER_SITE` (optional): Deep Match per-file URL cap used for pre-submit UX blocking. Defaults to `5000`.
 
   OAuth callback URL is computed as `${window.location.origin}/auth/callback`.

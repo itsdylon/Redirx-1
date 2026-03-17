@@ -6,11 +6,11 @@ import { ReviewInterface } from './ReviewInterface';
 
 const mockUseAuth = vi.fn();
 const mockGetResults = vi.fn();
-const mockGetDeepPreview = vi.fn();
 const mockGetProjectUnlockStatus = vi.fn();
+const mockCapture = vi.fn();
 
 vi.mock('@posthog/react', () => ({
-  usePostHog: () => ({ capture: vi.fn() }),
+  usePostHog: () => ({ capture: mockCapture }),
 }));
 
 vi.mock('react-hotkeys-hook', () => ({
@@ -32,7 +32,6 @@ vi.mock('../contexts/OnboardingContext', () => ({
 
 vi.mock('../api/pipeline', () => ({
   getResults: (...args: unknown[]) => mockGetResults(...args),
-  getDeepPreview: (...args: unknown[]) => mockGetDeepPreview(...args),
 }));
 
 vi.mock('../api/billing', () => ({
@@ -63,11 +62,11 @@ vi.mock('./KeyboardShortcutsDialog', () => ({
   KeyboardShortcutsDialog: () => null,
 }));
 
-vi.mock('./DeepMatchPreviewCard', () => ({
-  DeepMatchPreviewCard: () => null,
+vi.mock('./DeepMatchPrompt', () => ({
+  DeepMatchPrompt: () => <div>Deep Match Prompt</div>,
 }));
 
-function renderReviewPage() {
+function renderReviewPage(initialPath = '/review/session-1') {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: { retry: false },
@@ -76,7 +75,7 @@ function renderReviewPage() {
 
   return render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={['/review/session-1']}>
+      <MemoryRouter initialEntries={[initialPath]}>
         <Routes>
           <Route path="/review/:sessionId" element={<ReviewInterface layoutVariant="tool" />} />
         </Routes>
@@ -112,7 +111,6 @@ describe('ReviewInterface regression', () => {
         },
       ],
     });
-    mockGetDeepPreview.mockResolvedValue(null);
     mockGetProjectUnlockStatus.mockResolvedValue(null);
   });
 
@@ -126,5 +124,91 @@ describe('ReviewInterface regression', () => {
     expect(screen.queryByText('Navigate back to previous projects or return to the main tool page.')).not.toBeInTheDocument();
     expect(screen.getByRole('navigation', { name: 'Primary' })).toBeInTheDocument();
     expect(screen.getByRole('navigation', { name: 'Breadcrumb' })).toBeInTheDocument();
+  });
+
+  it('renders locked content paywall panel for unpaid direct deep sessions', async () => {
+    mockGetResults.mockResolvedValue({
+      success: true,
+      locked: true,
+      quote_status: 'draft',
+      source_session_id: 'session-1',
+      session: { id: 'session-1', pipeline_type: 'content', requires_payment_unlock: true },
+      mappings: [],
+      stats: { total: 0, high: 0, medium: 0, low: 0, approved: 0, approvalProgress: 0 },
+    });
+
+    renderReviewPage();
+
+    await waitFor(() => {
+      expect(mockGetResults).toHaveBeenCalledWith('session-1');
+    });
+
+    expect(
+      await screen.findByText('Deep Match Prompt'),
+    ).toBeInTheDocument();
+  });
+
+  it('tracks successful checkout return when unlock=success is present', async () => {
+    renderReviewPage('/review/session-1?unlock=success');
+
+    await waitFor(() => {
+      expect(mockGetResults).toHaveBeenCalledWith('session-1');
+    });
+
+    expect(mockCapture).toHaveBeenCalledWith(
+      'project_checkout_returned_success',
+      expect.objectContaining({
+        source_session_id: 'session-1',
+        return_path: 'review',
+      }),
+    );
+  });
+
+  it('redirects checkout return from staged source session to paid deep session', async () => {
+    mockGetResults.mockImplementation(async (requestedSessionId: string) => {
+      if (requestedSessionId === 'session-1') {
+        return {
+          success: true,
+          session: {
+            id: 'session-1',
+            pipeline_type: 'url_only',
+            requires_payment_unlock: true,
+          },
+          mappings: [],
+          stats: { total: 0, high: 0, medium: 0, low: 0, approved: 0, approvalProgress: 0 },
+        };
+      }
+
+      return {
+        success: true,
+        session: {
+          id: 'deep-session-1',
+          pipeline_type: 'content',
+          requires_payment_unlock: false,
+        },
+        mappings: [],
+        stats: { total: 0, high: 0, medium: 0, low: 0, approved: 0, approvalProgress: 0 },
+      };
+    });
+
+    mockGetProjectUnlockStatus.mockResolvedValue({
+      source_session_id: 'session-1',
+      has_quote: true,
+      quote_id: 'quote-1',
+      quote_status: 'paid',
+      contact_required: false,
+      billable_pages: 10,
+      subtotal_cents: 1200,
+      currency: 'usd',
+      is_unlocked: true,
+      deep_session_id: 'deep-session-1',
+      deep_session_status: 'pending',
+    });
+
+    renderReviewPage('/review/session-1?unlock=success');
+
+    await waitFor(() => {
+      expect(mockGetResults).toHaveBeenCalledWith('deep-session-1');
+    });
   });
 });

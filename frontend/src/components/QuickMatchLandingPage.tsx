@@ -19,31 +19,31 @@ export function QuickMatchLandingPage() {
 
   useEffect(() => {
     posthog?.capture('quick_match_tool_viewed', {
-      source: 'quick-match',
+      source: 'url-match',
       plan: user?.plan || 'anonymous',
     });
   }, [posthog, user?.plan]);
 
   const goToAuth = (target: 'signup' | 'login') => {
-    setAuthRedirect('/quick-match');
+    setAuthRedirect('/url-match');
     posthog?.capture('quick_match_auth_gate_clicked', {
-      source: 'quick-match',
+      source: 'url-match',
       target,
     });
-    navigate(`/${target}?redirect=${encodeURIComponent('/quick-match')}&source=quick-match`);
+    navigate(`/${target}?redirect=${encodeURIComponent('/url-match')}&source=url-match`);
   };
 
   const startQuickMatchOAuth = async (provider: OAuthProvider) => {
     setOauthError('');
     setOauthLoading(provider);
-    setAuthRedirect('/quick-match');
+    setAuthRedirect('/url-match');
     posthog?.capture('quick_match_auth_gate_clicked', {
-      source: 'quick-match',
+      source: 'url-match',
       target: provider,
     });
 
     try {
-      await startOAuth(provider, '/quick-match', 'quick-match');
+      await startOAuth(provider, '/url-match', 'url-match');
     } catch (error) {
       if (error instanceof Error && error.message) {
         setOauthError(error.message);
@@ -55,15 +55,15 @@ export function QuickMatchLandingPage() {
   };
 
   if (user) {
-    return <UploadPage quickOnly flowSource="quick-match" layoutVariant="tool" />;
+    return <UploadPage quickOnly flowSource="url-match" layoutVariant="tool" />;
   }
 
   return (
-    <ToolLayout title="Quick Match">
+    <ToolLayout title="URL Based Matching">
       <section className="mx-auto max-w-5xl">
         <div className="mb-8 text-center">
           <h1 className="text-3xl font-semibold tracking-tight text-foreground md:text-4xl">
-            Free Redirect Map Generator
+            URL Based Redirect Matching
           </h1>
           <p className="mt-3 text-muted-foreground">
             Upload two sitemaps. Get matched redirects in seconds.
@@ -116,7 +116,7 @@ export function QuickMatchLandingPage() {
 
               <div className="mt-6 flex justify-center">
                 <Button disabled size="lg" className="min-w-[220px]">
-                  Match URLs →
+                  Match My URLs →
                 </Button>
               </div>
 
@@ -189,7 +189,7 @@ export function QuickMatchLandingPage() {
 
         <section className="mt-10 border-t border-border pt-6 text-sm text-muted-foreground">
           <p>
-            RedirX Quick Match maps old URLs to new URLs from sitemap or CSV uploads and produces
+            RedirX URL Based Matching maps old URLs to new URLs from sitemap or CSV uploads and produces
             review-ready redirect suggestions.
           </p>
           <ol className="mt-4 list-decimal space-y-1 pl-5">

@@ -14,6 +14,8 @@
 │   - VITE_SUPABASE_URL                                        │
 │   - VITE_SUPABASE_ANON_KEY                                   │
 │   - VITE_API_BASE_URL                                        │
+│   - VITE_PUBLIC_POSTHOG_KEY                                  │
+│   - VITE_PUBLIC_POSTHOG_HOST                                 │
 └─────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────┐
@@ -204,6 +206,10 @@ VITE_SUPABASE_ANON_KEY=eyJxxx...           # Use anon key here
 
 # Production only (dev uses Vite proxy)
 VITE_API_BASE_URL=https://api.redirx.onrender.com
+
+# PostHog conversion funnel analytics (required)
+VITE_PUBLIC_POSTHOG_KEY=phc_xxx
+VITE_PUBLIC_POSTHOG_HOST=https://us.i.posthog.com
 ```
 
 ---
@@ -232,6 +238,13 @@ pending ──────→ processing ──────→ completed
 ```
 - Never stuck in 'pending' if worker is running
 - If stuck in 'processing' >15min, worker likely crashed
+
+### 5. Post-Deploy Analytics Smoke Check
+1. Open `https://www.redirx.dev` and click a tracked CTA (`Try it Free` or `Get Started`).
+2. Confirm browser network requests include PostHog events on `www.redirx.dev`.
+3. Confirm redirect to `https://app.redirx.dev/...` carries attribution params (`source`, `surface`, optional `campaign`).
+4. Confirm PostHog events fire on app routes (`/quick-match`, `/login`, `/signup`, `/pricing`).
+5. Do not sign off the release until analytics traffic is verified on both domains.
 
 ---
 

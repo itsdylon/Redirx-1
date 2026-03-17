@@ -14,7 +14,7 @@ interface DashboardLayoutProps {
 export function DashboardLayout({ title, children }: DashboardLayoutProps) {
   const navigate = useNavigate();
   const { logout, user } = useAuth();
-  const createJobPath = isAgencyPlan(user?.plan) ? '/upload' : '/quick-match';
+  const createJobPath = isAgencyPlan(user?.plan) ? '/upload' : '/url-match';
 
   const handleLogout = async () => {
     await logout();

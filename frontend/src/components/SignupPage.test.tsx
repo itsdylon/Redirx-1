@@ -6,10 +6,11 @@ import { SignupPage } from './SignupPage';
 
 const mockRegister = vi.fn();
 const mockStartOAuth = vi.fn();
+const mockCapture = vi.fn();
 
 vi.mock('@posthog/react', () => ({
   usePostHog: () => ({
-    capture: vi.fn(),
+    capture: mockCapture,
   }),
 }));
 
@@ -35,6 +36,7 @@ function renderSignupPage(initialPath = '/signup') {
 describe('SignupPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    localStorage.clear();
   });
 
   it('renders OAuth provider actions', () => {
@@ -43,6 +45,19 @@ describe('SignupPage', () => {
     expect(screen.getByRole('button', { name: 'Continue with Google' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Continue with GitHub' })).toBeInTheDocument();
     expect(screen.getByText('or continue with email')).toBeInTheDocument();
+  });
+
+  it('tracks signup page view', () => {
+    renderSignupPage('/signup?redirect=%2Fquick-match&source=quick-match');
+
+    expect(mockCapture).toHaveBeenCalledWith(
+      'signup_page_viewed',
+      expect.objectContaining({
+        source: 'quick-match',
+        redirect: '/quick-match',
+        authenticated: false,
+      }),
+    );
   });
 
   it('starts OAuth flow with redirect/source context and disables submit while connecting', async () => {

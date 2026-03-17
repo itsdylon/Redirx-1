@@ -42,10 +42,13 @@ export function ToolLayout({ title, children }: ToolLayoutProps) {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const agencyUser = isAgencyPlan(user?.plan);
   const hasSourceSessionId = new URLSearchParams(location.search).has('source_session_id');
-  const isQuickMatchActive =
+  const isUrlToolActive =
+    location.pathname === '/url-match' ||
     location.pathname === '/quick-match' ||
     location.pathname.startsWith('/review/') ||
     location.pathname.startsWith('/pricing');
+  const isContentToolActive = location.pathname === '/content-match';
+  const isToolsActive = isUrlToolActive || isContentToolActive;
   const isProjectHistoryActive = location.pathname === '/projects';
   const showBreadcrumb =
     location.pathname.startsWith('/review/') ||
@@ -60,7 +63,7 @@ export function ToolLayout({ title, children }: ToolLayoutProps) {
     navigate('/login');
   };
 
-  const handlePrimaryNavigate = (path: '/quick-match' | '/projects') => {
+  const handlePrimaryNavigate = (path: '/url-match' | '/content-match' | '/projects') => {
     setMobileNavOpen(false);
     navigate(path);
   };
@@ -92,15 +95,26 @@ export function ToolLayout({ title, children }: ToolLayoutProps) {
               {user ? (
                 <>
                   <nav aria-label="Primary" className="hidden items-center gap-1 md:flex">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className={navButtonClass(isQuickMatchActive)}
-                      aria-current={isQuickMatchActive ? 'page' : undefined}
-                      onClick={() => handlePrimaryNavigate('/quick-match')}
-                    >
-                      Quick Match
-                    </Button>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className={navButtonClass(isToolsActive)}
+                          aria-current={isToolsActive ? 'page' : undefined}
+                        >
+                          Tools
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="start" className="w-64">
+                        <DropdownMenuItem onClick={() => handlePrimaryNavigate('/url-match')}>
+                          URL Based Matching (Free)
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => handlePrimaryNavigate('/content-match')}>
+                          Content Based Matching
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                     <Button
                       variant="ghost"
                       size="sm"
@@ -152,17 +166,25 @@ export function ToolLayout({ title, children }: ToolLayoutProps) {
                       <SheetHeader>
                         <SheetTitle>Navigation</SheetTitle>
                         <SheetDescription>
-                          Move between Quick Match and your project history.
+                          Move between URL Based Matching, Content Based Matching, and project history.
                         </SheetDescription>
                       </SheetHeader>
                       <nav aria-label="Primary mobile" className="flex flex-col gap-1 px-4">
                         <Button
                           variant="ghost"
-                          className={cn('justify-start', navButtonClass(isQuickMatchActive))}
-                          aria-current={isQuickMatchActive ? 'page' : undefined}
-                          onClick={() => handlePrimaryNavigate('/quick-match')}
+                          className={cn('justify-start', navButtonClass(isUrlToolActive))}
+                          aria-current={isUrlToolActive ? 'page' : undefined}
+                          onClick={() => handlePrimaryNavigate('/url-match')}
                         >
-                          Quick Match
+                          URL Based Matching
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          className={cn('justify-start', navButtonClass(isContentToolActive))}
+                          aria-current={isContentToolActive ? 'page' : undefined}
+                          onClick={() => handlePrimaryNavigate('/content-match')}
+                        >
+                          Content Based Matching
                         </Button>
                         <Button
                           variant="ghost"
@@ -192,16 +214,31 @@ export function ToolLayout({ title, children }: ToolLayoutProps) {
                 </>
               ) : (
                 <>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="ghost" size="sm">
+                        Tools
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-64">
+                      <DropdownMenuItem onClick={() => navigate('/url-match')}>
+                        URL Based Matching (Free)
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => navigate('/content-match')}>
+                        Content Based Matching
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                   <Button
                     variant="ghost"
                     size="sm"
-                    onClick={() => navigate('/login?redirect=%2Fquick-match&source=quick-match')}
+                    onClick={() => navigate('/login?redirect=%2Furl-match&source=url-match')}
                   >
                     Log in
                   </Button>
                   <Button
                     size="sm"
-                    onClick={() => navigate('/signup?redirect=%2Fquick-match&source=quick-match')}
+                    onClick={() => navigate('/signup?redirect=%2Furl-match&source=url-match')}
                   >
                     Sign up
                   </Button>
@@ -216,7 +253,7 @@ export function ToolLayout({ title, children }: ToolLayoutProps) {
                 <BreadcrumbList>
                   <BreadcrumbItem>
                     <BreadcrumbLink asChild>
-                      <Link to="/quick-match">Quick Match</Link>
+                      <Link to="/url-match">URL Based Matching</Link>
                     </BreadcrumbLink>
                   </BreadcrumbItem>
                   <BreadcrumbSeparator />

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 from uuid import UUID
@@ -62,9 +63,10 @@ class DeepPreviewService:
         user_id: str,
         old_urls: list[str],
         new_urls: list[str],
+        opted_in: bool = False,
     ) -> dict[str, Any]:
         """
-        Build and queue a preview content job when eligible.
+        Initialize or queue a preview content job when eligible.
         Returns a summary dict with status and details.
         """
         if not Config.ENABLE_DEEP_MATCH_PREVIEW:
@@ -102,8 +104,12 @@ class DeepPreviewService:
             return {'status': 'skipped', 'reason': 'missing_embeddings_config'}
 
         existing = self.preview_db.get_by_source_session(source_session_id)
-        if existing and existing.get('status') in ('queued', 'processing', 'completed'):
-            return {'status': existing.get('status'), 'reason': 'already_exists'}
+        if existing:
+            existing_status = str(existing.get('status') or '').lower()
+            if existing_status in ('queued', 'processing', 'completed'):
+                return {'status': existing_status, 'reason': 'already_exists'}
+            if existing_status == 'awaiting_opt_in' and not opted_in:
+                return {'status': 'awaiting_opt_in', 'reason': 'awaiting_opt_in'}
 
         if self.preview_db.count_recent_for_user(user_id, within_hours=24) >= Config.PREVIEW_MAX_JOBS_PER_USER_PER_DAY:
             self.preview_db.upsert_source_preview(
@@ -158,6 +164,20 @@ class DeepPreviewService:
             )
             return {'status': 'skipped', 'reason': 'insufficient_new_context'}
 
+        if not opted_in:
+            self.preview_db.upsert_source_preview(
+                source_session_id=source_session_id,
+                user_id=user_id,
+                status='awaiting_opt_in',
+                free_unlock_count=max(1, Config.PREVIEW_FREE_ROWS),
+                candidate_old_urls=candidate_old_urls,
+            )
+            return {
+                'status': 'awaiting_opt_in',
+                'reason': 'awaiting_opt_in',
+                'candidate_count': len(candidate_old_urls),
+            }
+
         source_name = session.get('project_name') or 'Project'
         preview_session_id = self.session_db.create_session(
             user_id=user_id,
@@ -176,6 +196,7 @@ class DeepPreviewService:
             preview_session_id=preview_session_id,
             free_unlock_count=max(1, Config.PREVIEW_FREE_ROWS),
             candidate_old_urls=candidate_old_urls,
+            opt_in_confirmed_at=datetime.now(timezone.utc).isoformat(),
         )
 
         return {

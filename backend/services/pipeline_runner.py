@@ -144,6 +144,7 @@ def run_pipeline(
     pipeline_type: str = 'content',
     old_urls: Optional[List[str]] = None,
     new_urls: Optional[List[str]] = None,
+    requires_payment_unlock: bool = False,
 ) -> tuple[Optional[str], bool]:
     """
     Queue a Redirx pipeline job for background processing.
@@ -163,6 +164,7 @@ def run_pipeline(
         pipeline_type: 'content' (default) or 'url_only' (free tier)
         old_urls: Optional pre-parsed old URL list (skips CSV parsing when provided)
         new_urls: Optional pre-parsed new URL list (skips CSV parsing when provided)
+        requires_payment_unlock: Whether to lock content results until quote is paid.
 
     Returns:
         Tuple of (session_id, is_duplicate) where:
@@ -211,6 +213,7 @@ def run_pipeline(
         new_urls=new_urls,
         idempotency_key=idempotency_key,
         pipeline_type=pipeline_type,
+        requires_payment_unlock=requires_payment_unlock,
     )
 
     print(f"[API] Created job {session_id} with {len(old_urls)} old URLs and {len(new_urls)} new URLs", flush=True)

@@ -1,4 +1,4 @@
-import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { Routes, Route, Navigate } from 'react-router-dom';
 import { useAuth } from './contexts/AuthContext';
 import { LoginPage } from './components/LoginPage';
 import { SignupPage } from './components/SignupPage';
@@ -12,12 +12,12 @@ import { Settings } from './components/Settings';
 import { PricingPage } from './components/PricingPage';
 import { DemoPage } from './components/DemoPage';
 import { QuickMatchLandingPage } from './components/QuickMatchLandingPage';
+import { ContentMatchPage } from './components/ContentMatchPage';
 import { Toaster } from './components/ui/sonner';
 import { isEnterprisePlan } from './lib/plans';
 import {
   ROUTES,
   canAccessDashboard,
-  canAccessPricing,
   canAccessQuickMatch,
   canAccessSettingsAndAccount,
   canAccessUpload,
@@ -26,9 +26,7 @@ import {
 
 export default function App() {
   const { user, loading } = useAuth();
-  const location = useLocation();
   const authedHome = getAuthedHomeRoute(user?.plan);
-  const pricingSourceSessionId = new URLSearchParams(location.search).get('source_session_id');
   const reviewLayoutVariant = isEnterprisePlan(user?.plan) ? 'dashboard' : 'tool';
 
   // Show loading state while checking authentication
@@ -56,6 +54,18 @@ export default function App() {
         element={<AuthCallback />}
       />
       <Route
+        path={ROUTES.urlMatch}
+        element={
+          user
+            ? (
+              canAccessQuickMatch(user?.plan)
+                ? <QuickMatchLandingPage />
+                : <Navigate to={`${ROUTES.upload}?mode=url_only`} replace />
+            )
+            : <QuickMatchLandingPage />
+        }
+      />
+      <Route
         path={ROUTES.quickMatch}
         element={
           user
@@ -68,6 +78,10 @@ export default function App() {
         }
       />
       <Route
+        path={ROUTES.contentMatch}
+        element={<ContentMatchPage />}
+      />
+      <Route
         path={ROUTES.demo}
         element={<DemoPage />}
       />
@@ -75,13 +89,13 @@ export default function App() {
       {/* Protected routes */}
       <Route
         path={ROUTES.root}
-        element={user ? <Navigate to={authedHome} replace /> : <Navigate to={ROUTES.quickMatch} replace />}
+        element={user ? <Navigate to={authedHome} replace /> : <Navigate to={ROUTES.urlMatch} replace />}
       />
       <Route
         path={ROUTES.dashboard}
         element={
           user
-            ? (canAccessDashboard(user?.plan) ? <Dashboard /> : <Navigate to={ROUTES.quickMatch} replace />)
+            ? (canAccessDashboard(user?.plan) ? <Dashboard /> : <Navigate to={ROUTES.urlMatch} replace />)
             : <Navigate to={ROUTES.login} replace />
         }
       />
@@ -93,7 +107,7 @@ export default function App() {
         path={ROUTES.upload}
         element={
           user
-            ? (canAccessUpload(user?.plan) ? <UploadPage /> : <Navigate to={ROUTES.quickMatch} replace />)
+            ? (canAccessUpload(user?.plan) ? <UploadPage /> : <Navigate to={ROUTES.urlMatch} replace />)
             : <Navigate to={ROUTES.login} replace />
         }
       />
@@ -108,22 +122,14 @@ export default function App() {
             ? (
               canAccessSettingsAndAccount(user?.plan)
                 ? <Settings />
-                : <Navigate to={ROUTES.quickMatch} replace />
+                : <Navigate to={ROUTES.urlMatch} replace />
             )
             : <Navigate to={ROUTES.login} replace />
         }
       />
       <Route
         path={ROUTES.pricing}
-        element={
-          user
-            ? (
-              canAccessPricing(user?.plan, pricingSourceSessionId)
-                ? <PricingPage />
-                : <Navigate to={ROUTES.quickMatch} replace />
-            )
-            : <Navigate to={ROUTES.login} replace />
-        }
+        element={<PricingPage />}
       />
       <Route
         path={ROUTES.account}
@@ -132,7 +138,7 @@ export default function App() {
             ? (
               canAccessSettingsAndAccount(user?.plan)
                 ? <AccountPage />
-                : <Navigate to={ROUTES.quickMatch} replace />
+                : <Navigate to={ROUTES.urlMatch} replace />
             )
             : <Navigate to={ROUTES.login} replace />
         }

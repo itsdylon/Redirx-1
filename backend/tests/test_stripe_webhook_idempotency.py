@@ -1,5 +1,6 @@
 import unittest
 from unittest.mock import Mock, patch
+from types import SimpleNamespace
 
 from backend.services.stripe_service import StripeService
 
@@ -109,6 +110,68 @@ class StripeWebhookIdempotencyTests(unittest.TestCase):
             stripe_payment_intent_id="pi_1",
         )
         service._queue_deep_session_for_quote.assert_called_once()
+
+    def test_project_checkout_completion_does_not_queue_when_deep_session_already_attached(self):
+        service = StripeService.__new__(StripeService)
+        service.pricing_service = Mock()
+        service.pricing_service.get_quote_by_id.return_value = {
+            "id": "quote-2",
+            "status": "paid",
+            "deep_session_id": "deep-session-existing",
+            "source_session_id": "22222222-2222-2222-2222-222222222222",
+        }
+        service.pricing_service.get_quote_by_checkout_session = Mock(return_value=None)
+        service.pricing_service.mark_paid = Mock()
+        service._queue_deep_session_for_quote = Mock(return_value="should-not-run")
+
+        service._handle_project_checkout_completion(
+            {
+                "id": "cs_quoted_2",
+                "payment_intent": "pi_2",
+                "metadata": {"quote_id": "quote-2"},
+            }
+        )
+
+        service.pricing_service.mark_paid.assert_not_called()
+        service._queue_deep_session_for_quote.assert_not_called()
+
+    def test_queue_deep_session_reuses_locked_content_source_session(self):
+        service = StripeService.__new__(StripeService)
+        service.pricing_service = Mock()
+        service.session_db = Mock()
+
+        table = Mock()
+        table.select.return_value = table
+        table.eq.return_value = table
+        table.maybe_single.return_value = table
+        table.execute.return_value = SimpleNamespace(
+            data={
+                "id": "11111111-1111-1111-1111-111111111111",
+                "user_id": "user-1",
+                "project_name": "Project",
+                "old_urls": ["https://old.example.com/a"],
+                "new_urls": ["https://new.example.com/a"],
+                "pipeline_type": "content",
+                "requires_payment_unlock": True,
+            }
+        )
+
+        service.client = Mock()
+        service.client.table.return_value = table
+
+        deep_session_id = service._queue_deep_session_for_quote(
+            {
+                "id": "quote-1",
+                "source_session_id": "11111111-1111-1111-1111-111111111111",
+            }
+        )
+
+        self.assertEqual(deep_session_id, "11111111-1111-1111-1111-111111111111")
+        service.pricing_service.attach_deep_session.assert_called_once_with(
+            "quote-1",
+            "11111111-1111-1111-1111-111111111111",
+        )
+        service.session_db.create_session.assert_not_called()
 
 
 if __name__ == "__main__":

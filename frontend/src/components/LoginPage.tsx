@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, Link, useSearchParams } from 'react-router-dom';
+import { usePostHog } from '@posthog/react';
 import { useAuth } from '../contexts/AuthContext';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -8,6 +9,7 @@ import { OAuthProviderIcon } from './OAuthProviderIcon';
 import { validateEmail } from '../utils/validation';
 import { ApiError } from '../utils/errorHandler';
 import { consumeAuthRedirect, setAuthRedirect } from '../lib/authRedirect';
+import { buildConversionEventProps } from '../lib/analyticsAttribution';
 
 export function LoginPage() {
   type OAuthProvider = 'google' | 'github';
@@ -24,11 +26,13 @@ export function LoginPage() {
   const [resendError, setResendError] = useState('');
   const [resendCooldown, setResendCooldown] = useState(0);
 
-  const { login, startOAuth, resendConfirmationEmail } = useAuth();
+  const posthog = usePostHog();
+  const { user, login, startOAuth, resendConfirmationEmail } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const redirectParam = searchParams.get('redirect');
   const sourceParam = searchParams.get('source');
+  const hasUser = !!user;
 
   useEffect(() => {
     if (resendCooldown <= 0) {
@@ -45,6 +49,17 @@ export function LoginPage() {
   useEffect(() => {
     setAuthRedirect(redirectParam);
   }, [redirectParam]);
+
+  useEffect(() => {
+    posthog?.capture('login_page_viewed', {
+      ...buildConversionEventProps({
+        plan: user?.plan,
+        authenticated: hasUser,
+      }),
+      source: sourceParam || null,
+      redirect: redirectParam || null,
+    });
+  }, [hasUser, posthog, redirectParam, sourceParam, user?.plan]);
 
   const handleEmailBlur = () => {
     setEmailTouched(true);

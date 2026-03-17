@@ -1,13 +1,29 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { usePostHog } from '@posthog/react';
-import { Loader2, Lock } from 'lucide-react';
+import { Loader2, Lock, ShieldAlert } from 'lucide-react';
 import { Button } from './ui/button';
 import { Card } from './ui/card';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from './ui/dialog';
 import { type DeepPreviewResponse } from '../api/pipeline';
 
 interface DeepMatchPreviewCardProps {
   preview: DeepPreviewResponse;
+  onOptIn?: (sourceSessionId: string) => Promise<void> | void;
+  optInPending?: boolean;
+  context?: {
+    quickAverageConfidence: number;
+    mediumRiskCount: number;
+    lowRiskCount: number;
+    totalRows: number;
+  };
 }
 
 function confidencePct(value: number): string {
@@ -19,9 +35,16 @@ function derivedLockedCount(preview: DeepPreviewResponse): number {
   return Math.max(preview.locked_teasers.length, inferred);
 }
 
-export function DeepMatchPreviewCard({ preview }: DeepMatchPreviewCardProps) {
+export function DeepMatchPreviewCard({
+  preview,
+  onOptIn,
+  optInPending = false,
+  context,
+}: DeepMatchPreviewCardProps) {
   const navigate = useNavigate();
   const posthog = usePostHog();
+  const [optInChecked, setOptInChecked] = useState(false);
+  const [consentOpen, setConsentOpen] = useState(false);
   const queuedTracked = useRef(false);
   const readyTracked = useRef(false);
   const visibleTracked = useRef(false);
@@ -59,6 +82,12 @@ export function DeepMatchPreviewCard({ preview }: DeepMatchPreviewCardProps) {
     }
   }, [posthog, preview]);
 
+  useEffect(() => {
+    if (!consentOpen) {
+      setOptInChecked(false);
+    }
+  }, [consentOpen, preview.source_session_id]);
+
   const pricingHref = `/pricing?source_session_id=${encodeURIComponent(preview.source_session_id)}`;
 
   const goToUpgrade = (eventName: 'deep_preview_cta_primary_clicked' | 'deep_preview_cta_secondary_clicked') => {
@@ -73,6 +102,11 @@ export function DeepMatchPreviewCard({ preview }: DeepMatchPreviewCardProps) {
       source: 'deep_preview_card',
     });
     navigate(pricingHref);
+  };
+
+  const handleConfirmOptIn = async () => {
+    await onOptIn?.(preview.source_session_id);
+    setConsentOpen(false);
   };
 
   if (preview.status === 'not_applicable') {
@@ -95,6 +129,98 @@ export function DeepMatchPreviewCard({ preview }: DeepMatchPreviewCardProps) {
     );
   }
 
+  if (preview.status === 'awaiting_opt_in') {
+    const mediumRisk = context?.mediumRiskCount ?? 0;
+    const lowRisk = context?.lowRiskCount ?? 0;
+    const riskyTotal = mediumRisk + lowRisk;
+    const avgConfidence = Math.round(context?.quickAverageConfidence ?? 70);
+
+    return (
+      <>
+        <Card className="mt-4 border-orange-500/40 bg-orange-500/10 p-4">
+          <h3 className="font-semibold text-foreground">{preview.headline}</h3>
+          <p className="text-sm text-muted-foreground mt-1">
+            {preview.subheadline}
+          </p>
+          <p className="text-sm text-muted-foreground mt-3">
+            Your Quick Match run is fully visible below ({context?.totalRows ?? 0} rows). Current average confidence is
+            {' '}~{avgConfidence}% with {riskyTotal} medium/low-confidence mappings that Deep Match can re-evaluate against page content.
+          </p>
+
+          <div className="mt-4 flex flex-wrap gap-2">
+            <Button onClick={() => setConsentOpen(true)}>
+              {preview.cta_primary || 'Start Deep Match Accuracy Check'}
+            </Button>
+            <Button variant="outline" onClick={() => goToUpgrade('deep_preview_cta_secondary_clicked')}>
+              {preview.cta_secondary}
+            </Button>
+          </div>
+        </Card>
+
+        <Dialog open={consentOpen} onOpenChange={setConsentOpen}>
+          <DialogContent className="sm:max-w-xl">
+            <DialogHeader>
+              <DialogTitle>Deep Match Consent</DialogTitle>
+              <DialogDescription>
+                Confirm scraping access and trust details before we run content-aware matching.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-4">
+              <div className="border border-destructive/60 bg-destructive/10 p-3 rounded-sm">
+                <div className="flex items-start gap-2">
+                  <ShieldAlert className="h-5 w-5 text-destructive mt-0.5 shrink-0" />
+                  <div>
+                    <p className="text-sm font-semibold text-destructive">
+                      Critical setup required: disable spam/bot protection or whitelist Redirx scraper traffic before Deep Match.
+                    </p>
+                    <p className="text-xs text-destructive/90 mt-1">
+                      Firewalls like Wordfence or Cloudflare challenge mode can block the scraper and may blacklist Redirx server IPs if protections stay enabled.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-sm border border-border bg-card p-3">
+                <p className="text-sm font-medium text-foreground">Trust signals</p>
+                <ul className="mt-2 list-disc list-inside space-y-1 text-sm text-muted-foreground">
+                  <li>Scanned page data is used for matching and deleted after processing.</li>
+                  <li>Crawler behavior respects `robots.txt` directives.</li>
+                  <li>Protections can be re-enabled immediately after the run completes.</li>
+                </ul>
+              </div>
+
+              <label className="flex items-start gap-2 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={optInChecked}
+                  onChange={(e) => setOptInChecked(e.target.checked)}
+                  className="h-4 w-4 rounded border-border accent-primary mt-0.5"
+                />
+                <span className="text-sm text-foreground">
+                  I confirm protections are disabled or Redirx traffic is whitelisted for this scan window.
+                </span>
+              </label>
+            </div>
+
+            <DialogFooter className="gap-2 sm:gap-0">
+              <Button variant="outline" onClick={() => setConsentOpen(false)}>
+                Cancel
+              </Button>
+              <Button
+                disabled={!optInChecked || optInPending}
+                onClick={handleConfirmOptIn}
+              >
+                {optInPending && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+                Proceed with Deep Match
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </>
+    );
+  }
+
   if (preview.status === 'failed' || preview.status === 'skipped') {
     return (
       <Card className="mt-4 border-border bg-card p-4">
@@ -110,6 +236,12 @@ export function DeepMatchPreviewCard({ preview }: DeepMatchPreviewCardProps) {
     <Card className="mt-4 border-emerald-500/30 bg-emerald-500/5 p-4">
       <h3 className="text-foreground font-semibold">{preview.headline}</h3>
       <p className="text-sm text-muted-foreground mt-1">{preview.subheadline}</p>
+      <div className="mt-3 rounded-sm border border-emerald-500/40 bg-emerald-500/10 p-3">
+        <p className="text-sm font-medium text-foreground">Quick Match vs Deep Match (side-by-side)</p>
+        <p className="text-xs text-muted-foreground mt-1">
+          Left shows the current Quick Match target and confidence. Right shows what Deep Match found with content-level analysis.
+        </p>
+      </div>
 
       <div className="mt-4 space-y-2">
         {preview.visible_items.map((item) => (
@@ -120,12 +252,12 @@ export function DeepMatchPreviewCard({ preview }: DeepMatchPreviewCardProps) {
               <div className="rounded bg-muted/50 p-2">
                 <div className="text-xs text-muted-foreground">Quick Match Target</div>
                 <div className="text-xs font-mono break-all text-foreground">{item.current_target_url}</div>
-                <div className="text-xs text-muted-foreground mt-1">{confidencePct(item.quick_confidence)}</div>
+                <div className="text-xs text-muted-foreground mt-1">~{confidencePct(item.quick_confidence)} confidence</div>
               </div>
               <div className="rounded bg-emerald-500/10 p-2 border border-emerald-500/30">
                 <div className="text-xs text-muted-foreground">Deep Match Target</div>
                 <div className="text-xs font-mono break-all text-foreground">{item.deep_target_url}</div>
-                <div className="text-xs text-emerald-700 dark:text-emerald-400 mt-1">{confidencePct(item.deep_confidence)}</div>
+                <div className="text-xs text-emerald-700 dark:text-emerald-400 mt-1">~{confidencePct(item.deep_confidence)} confidence</div>
               </div>
             </div>
             <div className="mt-2 inline-flex items-center rounded-full border border-emerald-500/40 bg-emerald-500/10 px-2 py-1 text-xs font-semibold text-emerald-700 dark:text-emerald-400">

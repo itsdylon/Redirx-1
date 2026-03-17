@@ -192,6 +192,46 @@ class DeepPreviewRouteTests(unittest.TestCase):
         self.assertEqual(payload["free_unlock_count"], 2)
         self.assertEqual(payload["total_convincing_fixes"], 0)
 
+    def test_deep_preview_backfill_returns_awaiting_opt_in_when_eligible(self):
+        session_id = "45454545-4545-4545-4545-454545454545"
+        session_db = Mock()
+        session_db.get_session.return_value = {
+            "id": session_id,
+            "user_id": "user-1",
+            "pipeline_type": "url_only",
+            "is_preview": False,
+            "status": "completed",
+            "old_urls": ["https://old.example.com/a"],
+            "new_urls": ["https://new.example.com/a"],
+        }
+        quota_db = Mock()
+        quota_db.get_plan.return_value = "free"
+        preview_db = Mock()
+        preview_db.get_by_source_session.return_value = None
+        preview_service = Mock()
+        preview_service.maybe_queue_preview.return_value = {
+            "status": "awaiting_opt_in",
+            "reason": "awaiting_opt_in",
+        }
+
+        with patch("backend.services.auth_service.AuthService.verify_token", return_value=self.user):
+            with patch.object(Config, "ENABLE_DEEP_MATCH_PREVIEW", True):
+                with patch.object(Config, "PREVIEW_FREE_ROWS", 2):
+                    with patch("backend.routes.pipeline_routes.MigrationSessionDB", return_value=session_db):
+                        with patch("backend.routes.pipeline_routes.UserQuotaDB", return_value=quota_db):
+                            with patch("backend.routes.pipeline_routes.DeepMatchPreviewDB", return_value=preview_db):
+                                with patch("backend.routes.pipeline_routes.DeepPreviewService", return_value=preview_service):
+                                    response = self.client.get(
+                                        f"/api/results/{session_id}/deep-preview",
+                                        headers=self.headers,
+                                    )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertEqual(payload["status"], "awaiting_opt_in")
+        self.assertEqual(payload["reason"], "awaiting_opt_in")
+        self.assertEqual(payload["cta_primary"], "Start Deep Match Accuracy Check")
+
     def test_deep_preview_backfills_completed_session_and_returns_skipped(self):
         session_id = "55555555-5555-5555-5555-555555555555"
         session_db = Mock()
@@ -378,6 +418,90 @@ class DeepPreviewRouteTests(unittest.TestCase):
         self.assertEqual(payload["status"], "completed")
         self.assertEqual(payload["total_convincing_fixes"], 4)
         preview_service.finalize_preview.assert_called_once()
+
+    def test_deep_preview_opt_in_requires_acknowledgement(self):
+        session_id = "91919191-9191-9191-9191-919191919191"
+
+        with patch("backend.services.auth_service.AuthService.verify_token", return_value=self.user):
+            response = self.client.post(
+                f"/api/results/{session_id}/deep-preview/opt-in",
+                headers=self.headers,
+                json={},
+            )
+
+        self.assertEqual(response.status_code, 400)
+        payload = response.get_json()
+        self.assertEqual(payload["code"], "deep_preview_opt_in_required")
+
+    def test_deep_preview_opt_in_enforces_ownership(self):
+        session_id = "92929292-9292-9292-9292-929292929292"
+        session_db = Mock()
+        session_db.get_session.return_value = {
+            "id": session_id,
+            "user_id": "different-user",
+            "pipeline_type": "url_only",
+            "is_preview": False,
+            "status": "completed",
+            "old_urls": ["https://old.example.com/a"],
+            "new_urls": ["https://new.example.com/a"],
+        }
+
+        with patch("backend.services.auth_service.AuthService.verify_token", return_value=self.user):
+            with patch("backend.routes.pipeline_routes.MigrationSessionDB", return_value=session_db):
+                response = self.client.post(
+                    f"/api/results/{session_id}/deep-preview/opt-in",
+                    headers=self.headers,
+                    json={"acknowledged": True},
+                )
+
+        self.assertEqual(response.status_code, 403)
+        payload = response.get_json()
+        self.assertFalse(payload["success"])
+        self.assertIn("Unauthorized", payload["error"])
+
+    def test_deep_preview_opt_in_is_idempotent_for_existing_preview(self):
+        session_id = "93939393-9393-9393-9393-939393939393"
+        session_db = Mock()
+        session_db.get_session.return_value = {
+            "id": session_id,
+            "user_id": "user-1",
+            "pipeline_type": "url_only",
+            "is_preview": False,
+            "status": "completed",
+            "old_urls": ["https://old.example.com/a"],
+            "new_urls": ["https://new.example.com/a"],
+        }
+        quota_db = Mock()
+        quota_db.get_plan.return_value = "free"
+        preview_service = Mock()
+        preview_service.maybe_queue_preview.return_value = {
+            "status": "queued",
+            "reason": "already_exists",
+            "preview_session_id": "94949494-9494-9494-9494-949494949494",
+        }
+
+        with patch("backend.services.auth_service.AuthService.verify_token", return_value=self.user):
+            with patch.object(Config, "ENABLE_DEEP_MATCH_PREVIEW", True):
+                with patch("backend.routes.pipeline_routes.MigrationSessionDB", return_value=session_db):
+                    with patch("backend.routes.pipeline_routes.UserQuotaDB", return_value=quota_db):
+                        with patch("backend.routes.pipeline_routes.DeepPreviewService", return_value=preview_service):
+                            response = self.client.post(
+                                f"/api/results/{session_id}/deep-preview/opt-in",
+                                headers=self.headers,
+                                json={"acknowledged": True},
+                            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertTrue(payload["success"])
+        self.assertEqual(payload["status"], "queued")
+        preview_service.maybe_queue_preview.assert_called_once_with(
+            source_session_id=unittest.mock.ANY,
+            user_id="user-1",
+            old_urls=["https://old.example.com/a"],
+            new_urls=["https://new.example.com/a"],
+            opted_in=True,
+        )
 
 
 if __name__ == "__main__":

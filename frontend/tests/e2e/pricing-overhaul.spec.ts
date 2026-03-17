@@ -105,10 +105,14 @@ test.describe('Pricing Overhaul', () => {
     });
 
     await page.goto('/pricing?source_session_id=11111111-1111-1111-1111-111111111111');
-    await expect(page.getByText('Unlock Deep Match For This Project')).toBeVisible();
+    await expect(page.getByText('Deep Match Pricing For This Project')).toBeVisible();
+
+    await page.getByRole('checkbox', {
+      name: /disabled or whitelisted protections for this deep match run/i,
+    }).click();
 
     const checkoutUrlPromise = page.waitForURL('**/checkout-mock/project-session');
-    await page.getByRole('button', { name: 'Unlock Deep Match' }).click();
+    await page.getByRole('button', { name: /Purchase Deep Match/i }).click();
     await checkoutUrlPromise;
   });
 

@@ -33,8 +33,15 @@ vi.mock('./ToolLayout', () => ({
 }));
 
 const mockUseAuth = vi.fn();
+const mockCapture = vi.fn();
 vi.mock('../contexts/AuthContext', () => ({
   useAuth: () => mockUseAuth(),
+}));
+
+vi.mock('@posthog/react', () => ({
+  usePostHog: () => ({
+    capture: mockCapture,
+  }),
 }));
 
 const mockGetPricingEstimate = vi.fn();
@@ -154,15 +161,28 @@ describe('PricingPage', () => {
     const user = userEvent.setup();
     renderPage();
 
-    expect(await screen.findByText('Unlock Deep Match For This Project')).toBeInTheDocument();
-    const unlockButton = await screen.findByRole('button', { name: 'Unlock Deep Match' });
+    expect(await screen.findByText('Content Match Pricing For This Project')).toBeInTheDocument();
+    const purchaseButton = await screen.findByRole('button', { name: /Purchase Content Match/i });
+    expect(purchaseButton).toBeDisabled();
 
-    await user.click(unlockButton);
+    const checklist = screen.getByRole('checkbox', {
+      name: /disabled or whitelisted protections for this content match run/i,
+    });
+    await user.click(checklist);
+    expect(purchaseButton).not.toBeDisabled();
+
+    await user.click(purchaseButton);
 
     await waitFor(() => {
       expect(mockCreateProjectCheckout).toHaveBeenCalled();
       expect(mockNavigate).toHaveBeenCalledWith('/review/22222222-2222-2222-2222-222222222222');
     });
+    expect(mockCapture).toHaveBeenCalledWith(
+      'project_checkout_started',
+      expect.objectContaining({
+        source_session_id: '11111111-1111-1111-1111-111111111111',
+      }),
+    );
   });
 
   it('renders tool unlock-only mode for non-enterprise users', async () => {
@@ -189,7 +209,50 @@ describe('PricingPage', () => {
     renderPage();
 
     expect(await screen.findByTestId('tool-layout')).toBeInTheDocument();
-    expect(await screen.findByText('Unlock Deep Match For This Project')).toBeInTheDocument();
-    expect(screen.queryByText('Agency Plan')).not.toBeInTheDocument();
+    expect(await screen.findByText('Content Match Pricing For This Project')).toBeInTheDocument();
+    expect(screen.getByText('Agency Plan')).toBeInTheDocument();
+  });
+
+  it('renders estimator mode for logged-in tool users without source session id', async () => {
+    mockUseAuth.mockReturnValue({
+      user: { id: 'tool-1', email: 'tool@example.com', plan: 'free' },
+    });
+
+    renderPage();
+
+    expect(await screen.findByText('Project Pricing Estimator')).toBeInTheDocument();
+    expect(screen.getByTestId('tool-layout')).toBeInTheDocument();
+    expect(screen.getByText('Agency Plan')).toBeInTheDocument();
+  });
+
+  it('tracks cancelled project checkout return state from query param', async () => {
+    mockSearchParams.set('source_session_id', '11111111-1111-1111-1111-111111111111');
+    mockSearchParams.set('status', 'cancelled');
+    mockCreateProjectQuote.mockResolvedValue({
+      id: 'quote-1',
+      source_session_id: '11111111-1111-1111-1111-111111111111',
+      user_id: 'user-1',
+      old_url_count: 5000,
+      new_url_count: 4500,
+      billable_pages: 5000,
+      pricing_version: 'v1_2026_03',
+      currency: 'usd',
+      line_items: [],
+      subtotal_cents: 23000,
+      status: 'draft',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    });
+
+    renderPage();
+
+    expect(await screen.findByText('Content Match Pricing For This Project')).toBeInTheDocument();
+    expect(mockCapture).toHaveBeenCalledWith(
+      'project_checkout_returned_cancelled',
+      expect.objectContaining({
+        source_session_id: '11111111-1111-1111-1111-111111111111',
+        return_path: 'pricing',
+      }),
+    );
   });
 });

@@ -5,6 +5,8 @@ export const ROUTES = {
   login: '/login',
   signup: '/signup',
   authCallback: '/auth/callback',
+  urlMatch: '/url-match',
+  contentMatch: '/content-match',
   quickMatch: '/quick-match',
   dashboard: '/dashboard',
   projects: '/projects',
@@ -17,7 +19,7 @@ export const ROUTES = {
 } as const;
 
 export function getAuthedHomeRoute(plan?: string): string {
-  return isEnterprisePlan(plan) ? ROUTES.dashboard : ROUTES.quickMatch;
+  return isEnterprisePlan(plan) ? ROUTES.dashboard : ROUTES.urlMatch;
 }
 
 export function canAccessDashboard(plan?: string): boolean {
@@ -36,11 +38,10 @@ export function canAccessSettingsAndAccount(plan?: string): boolean {
   return isEnterprisePlan(plan);
 }
 
-export function canAccessPricing(plan?: string, sourceSessionId?: string | null): boolean {
-  if (isEnterprisePlan(plan)) return true;
-  return !!sourceSessionId;
+export function canAccessPricing(_plan?: string, _sourceSessionId?: string | null): boolean {
+  return true;
 }
 
 export function getRetryRouteForPlan(plan?: string): string {
-  return isEnterprisePlan(plan) ? ROUTES.upload : ROUTES.quickMatch;
+  return isEnterprisePlan(plan) ? ROUTES.upload : ROUTES.urlMatch;
 }

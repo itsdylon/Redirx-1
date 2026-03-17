@@ -19,16 +19,19 @@ import {
   TooltipTrigger,
 } from './ui/tooltip';
 import { toast } from 'sonner';
-import { Info } from 'lucide-react';
-import { getResults, getDeepPreview, type DeepPreviewResponse } from '../api/pipeline';
-import { getProjectUnlockStatus } from '../api/billing';
+import {
+  getResults,
+  type ResultsResponse,
+} from '../api/pipeline';
+import { getProjectUnlockStatus, type ProjectUnlockStatus } from '../api/billing';
 import { isMac } from '../lib/keyboard';
 import { isEnterprisePlan } from '../lib/plans';
 import { useOnboarding } from '../contexts/OnboardingContext';
 import { useAuth } from '../contexts/AuthContext';
-import { DeepMatchPreviewCard } from './DeepMatchPreviewCard';
+import { DeepMatchPrompt } from './DeepMatchPrompt';
 import { queryKeys } from '../queries/queryKeys';
 import { handleUnauthorizedAndRedirect } from '../queries/auth';
+import { buildConversionEventProps } from '../lib/analyticsAttribution';
 import {
   Dialog,
   DialogContent,
@@ -66,6 +69,7 @@ export interface RedirectMapping {
   pathSimilarity: number;
   titleSimilarity: number;
   contentSimilarity: number;
+  previewRedacted?: boolean;
 }
 
 interface ReviewInterfaceProps {
@@ -77,6 +81,7 @@ export function ReviewInterface({ layoutVariant = 'dashboard' }: ReviewInterface
   const navigate = useNavigate();
   const posthog = usePostHog();
   const { user } = useAuth();
+  const hasUser = !!user;
   const [searchParams] = useSearchParams();
   const {
     onboarding,
@@ -102,9 +107,8 @@ export function ReviewInterface({ layoutVariant = 'dashboard' }: ReviewInterface
   const [samplePreparationActive, setSamplePreparationActive] = useState(false);
   const PAGE_SIZE = 25;
   const Layout = layoutVariant === 'tool' ? ToolLayout : DashboardLayout;
-  const layoutTitle = 'Review Redirects';
+  const layoutTitle = pipelineType === 'content' ? 'Content Match Results' : 'URL Based Matching Results';
   const enterpriseUser = isEnterprisePlan(user?.plan);
-  const isFreeUser = (user?.plan || 'free') === 'free';
 
   // Refs for keyboard shortcuts
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -113,6 +117,8 @@ export function ReviewInterface({ layoutVariant = 'dashboard' }: ReviewInterface
   const hydratedSessionRef = useRef<string | null>(null);
   const resultsViewedTrackedRef = useRef(false);
   const quickMatchCompletedTrackedRef = useRef(false);
+  const checkoutSuccessTrackedRef = useRef(false);
+  const checkoutDeepRedirectedRef = useRef(false);
   const tutorialFromQuery = searchParams.get('tutorial') === '1';
   const tutorialActive = !!onboarding &&
     onboarding.onboarding_status === 'in_progress' &&
@@ -124,51 +130,48 @@ export function ReviewInterface({ layoutVariant = 'dashboard' }: ReviewInterface
     queryKey: queryKeys.results.bySession(sessionId || ''),
     queryFn: () => getResults(sessionId!),
     enabled: !!sessionId,
-  });
-
-  const deepPreviewEnabled = !!sessionId && pipelineType === 'url_only' && isFreeUser;
-  const deepPreviewQuery = useQuery({
-    queryKey: queryKeys.results.deepPreview(sessionId || ''),
-    queryFn: () => getDeepPreview(sessionId!),
-    enabled: deepPreviewEnabled,
     refetchInterval: (query) => {
-      const data = query.state.data as DeepPreviewResponse | undefined;
-      if (data?.status === 'queued' || data?.status === 'processing') {
-        return 4000;
-      }
-      return false;
+      const data = query.state.data as ResultsResponse | undefined;
+      if (!data?.locked) return false;
+      return 4000;
     },
   });
 
-  const deepPreview = deepPreviewEnabled ? deepPreviewQuery.data ?? null : null;
-  const deepPreviewError =
-    deepPreviewEnabled && deepPreviewQuery.error
-      ? (deepPreviewQuery.error instanceof Error
-          ? deepPreviewQuery.error.message
-          : 'Unable to load Deep Match preview.')
-      : null;
-
-  const unlockStatusEnabled = !!sessionId && pipelineType === 'url_only';
+  const isLockedResults = !!resultsQuery.data?.locked;
+  const lockedQuoteStatus = resultsQuery.data?.quote_status || null;
+  const lockedSourceSessionId = resultsQuery.data?.source_session_id || sessionId || '';
+  const unlockStatusSourceId = pipelineType === 'url_only'
+    ? (sessionId || '')
+    : (isLockedResults ? lockedSourceSessionId : '');
+  const unlockStatusEnabled = !!unlockStatusSourceId;
   const unlockStatusQuery = useQuery({
-    queryKey: queryKeys.billing.unlockStatus(sessionId || ''),
-    queryFn: () => getProjectUnlockStatus(sessionId!),
+    queryKey: queryKeys.billing.unlockStatus(unlockStatusSourceId || ''),
+    queryFn: () => getProjectUnlockStatus(unlockStatusSourceId),
     enabled: unlockStatusEnabled,
     refetchInterval: (query) => {
       const data = query.state.data;
       if (!data) return false;
       if (data.quote_status === 'checkout_created') return 4000;
+      if (data.is_unlocked && !data.deep_session_id) return 4000;
       if (
         data.is_unlocked &&
-        (data.deep_session_status === 'pending' || data.deep_session_status === 'processing')
+        (
+          data.deep_session_status === 'pending' ||
+          data.deep_session_status === 'processing' ||
+          data.deep_session_status === 'queued'
+        )
       ) {
         return 4000;
       }
       return false;
     },
   });
-  const isDeepMatchUnlocked = !!unlockStatusQuery.data?.is_unlocked;
-  const showDeepMatchPreview = pipelineType === 'url_only' && isFreeUser && !!deepPreview && !isDeepMatchUnlocked;
-  const showDeepMatchPreviewError = pipelineType === 'url_only' && isFreeUser && !!deepPreviewError && !isDeepMatchUnlocked;
+  const unlockStatus = unlockStatusQuery.data as ProjectUnlockStatus | null;
+  const previewSummary = resultsQuery.data?.preview_summary ?? null;
+  const isContentPreviewMode =
+    pipelineType === 'content' &&
+    isLockedResults &&
+    !!resultsQuery.data?.preview_mode;
 
   const isLoading =
     resultsQuery.isLoading ||
@@ -178,6 +181,8 @@ export function ReviewInterface({ layoutVariant = 'dashboard' }: ReviewInterface
     hydratedSessionRef.current = null;
     resultsViewedTrackedRef.current = false;
     quickMatchCompletedTrackedRef.current = false;
+    checkoutSuccessTrackedRef.current = false;
+    checkoutDeepRedirectedRef.current = false;
     setRedirects([]);
     setPipelineType('content');
     setError(null);
@@ -226,23 +231,69 @@ export function ReviewInterface({ layoutVariant = 'dashboard' }: ReviewInterface
   }, [resultsQuery.error, navigate]);
 
   useEffect(() => {
-    if (!sessionId || pipelineType !== 'url_only' || quickMatchCompletedTrackedRef.current) {
+    const isDirectDeepSource = !!resultsQuery.data?.session?.requires_payment_unlock;
+    if (!sessionId || pipelineType !== 'url_only' || quickMatchCompletedTrackedRef.current || isDirectDeepSource) {
       return;
     }
 
     quickMatchCompletedTrackedRef.current = true;
     posthog?.capture('quick_match_completed', {
+      ...buildConversionEventProps({
+        plan: user?.plan,
+        authenticated: hasUser,
+      }),
       session_id: sessionId,
       pipeline_type: pipelineType,
       source: searchParams.get('source') || 'review',
-      plan: user?.plan || 'free',
     });
-  }, [pipelineType, posthog, searchParams, sessionId, user?.plan]);
+  }, [hasUser, pipelineType, posthog, resultsQuery.data?.session?.requires_payment_unlock, searchParams, sessionId, user?.plan]);
 
   useEffect(() => {
-    if (!deepPreviewQuery.error) return;
-    handleUnauthorizedAndRedirect(deepPreviewQuery.error, navigate);
-  }, [deepPreviewQuery.error, navigate]);
+    const checkoutReturnSuccess = searchParams.get('unlock') === 'success';
+    if (!checkoutReturnSuccess || checkoutSuccessTrackedRef.current) {
+      return;
+    }
+
+    checkoutSuccessTrackedRef.current = true;
+    posthog?.capture('project_checkout_returned_success', {
+      ...buildConversionEventProps({
+        plan: user?.plan,
+        authenticated: hasUser,
+      }),
+      source_session_id: sessionId || null,
+      return_path: 'review',
+    });
+  }, [hasUser, posthog, searchParams, sessionId, user?.plan]);
+
+  useEffect(() => {
+    const checkoutReturnSuccess = searchParams.get('unlock') === 'success';
+    if (!checkoutReturnSuccess || checkoutDeepRedirectedRef.current) {
+      return;
+    }
+    if (!sessionId || pipelineType !== 'url_only') {
+      return;
+    }
+    if (!resultsQuery.data?.session?.requires_payment_unlock) {
+      return;
+    }
+    if (!unlockStatus?.is_unlocked || !unlockStatus.deep_session_id) {
+      return;
+    }
+    if (unlockStatus.deep_session_id === sessionId) {
+      return;
+    }
+
+    checkoutDeepRedirectedRef.current = true;
+    navigate(`/review/${unlockStatus.deep_session_id}?unlock=success`, { replace: true });
+  }, [
+    navigate,
+    pipelineType,
+    resultsQuery.data?.session?.requires_payment_unlock,
+    searchParams,
+    sessionId,
+    unlockStatus?.deep_session_id,
+    unlockStatus?.is_unlocked,
+  ]);
 
   useEffect(() => {
     if (!unlockStatusQuery.error) return;
@@ -311,6 +362,7 @@ export function ReviewInterface({ layoutVariant = 'dashboard' }: ReviewInterface
   }, [showCoachmarks, tutorialActive]);
 
   const handleToggleSelect = (id: string) => {
+    if (isContentPreviewMode) return;
     const newSelected = new Set(selectedRows);
     if (newSelected.has(id)) {
       newSelected.delete(id);
@@ -321,20 +373,24 @@ export function ReviewInterface({ layoutVariant = 'dashboard' }: ReviewInterface
   };
 
   const handleToggleExpand = (id: string) => {
+    if (isContentPreviewMode) return;
     setExpandedRow(expandedRow === id ? null : id);
   };
 
   const handleEdit = (redirect: RedirectMapping) => {
+    if (isContentPreviewMode) return;
     setEditingRow(redirect);
   };
 
   const handleSaveEdit = (updatedRedirect: RedirectMapping) => {
+    if (isContentPreviewMode) return;
     setRedirects(redirects.map(r => r.id === updatedRedirect.id ? updatedRedirect : r));
     setEditingRow(null);
     toast.success('Redirect updated');
   };
 
   const handleBulkAction = (action: string) => {
+    if (isContentPreviewMode) return;
     if (action === 'approve-all-high') {
       const highConfidenceCount = redirects.filter(r => r.confidenceBand === 'high').length;
       setRedirects(redirects.map((r) =>
@@ -360,6 +416,10 @@ export function ReviewInterface({ layoutVariant = 'dashboard' }: ReviewInterface
 
 
   const handleExport = async (format: string, confidenceLevels: string[]) => {
+    if (isContentPreviewMode) {
+      toast.error('Purchase full results before exporting.');
+      return;
+    }
     // Generate filename
     const formatExtensions: Record<string, string> = {
       apache: '.htaccess',
@@ -394,6 +454,7 @@ export function ReviewInterface({ layoutVariant = 'dashboard' }: ReviewInterface
   };
 
   const handleApproveRow = (id: string) => {
+    if (isContentPreviewMode) return;
     const redirect = redirects.find(r => r.id === id);
     const newApproved = !redirect?.approved;
     setRedirects(redirects.map((r) =>
@@ -402,15 +463,27 @@ export function ReviewInterface({ layoutVariant = 'dashboard' }: ReviewInterface
     toast.success(newApproved ? 'Redirect approved' : 'Approval removed');
   };
 
-  const handleDeepUnlockClick = () => {
-    if (!sessionId) return;
+  const handlePricingPromptClick = ({
+    sourceSessionId,
+    state,
+  }: {
+    sourceSessionId: string;
+    state: string;
+  }) => {
+    if (!sourceSessionId) return;
+    posthog?.capture('pricing_prompt_clicked_from_review', {
+      source_session_id: sourceSessionId,
+      pipeline_type: pipelineType,
+      state,
+      plan: user?.plan || 'free',
+    });
     posthog?.capture('deep_unlock_clicked_from_review', {
-      session_id: sessionId,
+      session_id: sourceSessionId,
       pipeline_type: pipelineType,
       source: 'review',
       plan: user?.plan || 'free',
     });
-    navigate(`/pricing?source_session_id=${sessionId}`);
+    navigate(`/pricing?source_session_id=${sourceSessionId}`);
   };
 
   const filteredRedirects = redirects.filter((r) => {
@@ -471,6 +544,18 @@ export function ReviewInterface({ layoutVariant = 'dashboard' }: ReviewInterface
     approved: redirects.filter(r => r.approved).length,
     approvalProgress: redirects.length > 0 ? Math.round((redirects.filter(r => r.approved).length / redirects.length) * 100) : 0,
   };
+  const quickComparableRedirects = redirects.filter((r) => r.matchType !== 'exact_url');
+  const quickAverageConfidence = quickComparableRedirects.length > 0
+    ? Math.round(quickComparableRedirects.reduce((acc, row) => acc + row.matchScore, 0) / quickComparableRedirects.length)
+    : (previewSummary?.average_confidence ?? 100);
+  const lowConfidenceRows = quickComparableRedirects
+    .filter((r) => r.confidenceBand === 'low' || r.confidenceBand === 'medium')
+    .sort((a, b) => a.matchScore - b.matchScore);
+  const lowConfidenceSamples = lowConfidenceRows.slice(0, 3).map((row) => ({
+    oldUrl: row.oldUrl,
+    quickTargetUrl: row.newUrl,
+    quickScore: Math.round(row.matchScore),
+  }));
 
   // Keyboard shortcuts
   const modKey = isMac() ? 'meta' : 'ctrl';
@@ -484,10 +569,10 @@ export function ReviewInterface({ layoutVariant = 'dashboard' }: ReviewInterface
   // Ctrl/Cmd+E: Open export modal
   useHotkeys(`${modKey}+e`, (e) => {
     e.preventDefault();
-    if (!exportModalOpen) {
+    if (!exportModalOpen && !isContentPreviewMode) {
       setExportModalOpen(true);
     }
-  }, [exportModalOpen]);
+  }, [exportModalOpen, isContentPreviewMode]);
 
   // Escape: Close modals
   useHotkeys('escape', () => {
@@ -503,10 +588,11 @@ export function ReviewInterface({ layoutVariant = 'dashboard' }: ReviewInterface
   // Ctrl/Cmd+A: Select all visible redirects
   useHotkeys(`${modKey}+a`, (e) => {
     e.preventDefault();
+    if (isContentPreviewMode) return;
     const allVisibleIds = new Set(pageRedirects.map(r => r.id));
     setSelectedRows(allVisibleIds);
     toast.success(`Selected ${allVisibleIds.size} redirect${allVisibleIds.size !== 1 ? 's' : ''}`);
-  }, [pageRedirects]);
+  }, [isContentPreviewMode, pageRedirects]);
 
   // ?: Show keyboard shortcuts
   useHotkeys('shift+/', () => {
@@ -549,96 +635,21 @@ export function ReviewInterface({ layoutVariant = 'dashboard' }: ReviewInterface
             </div>
           )}
 
-          {/* URL-only pricing banner */}
-          {pipelineType === 'url_only' && (
-            <div className="mb-4 border border-blue-500/30 bg-blue-500/5 p-3 flex items-center gap-3">
-              <Info className="h-4 w-4 text-blue-500 flex-shrink-0" />
-              <p className="text-sm text-muted-foreground">
-                These results use Quick Match. Unlock Deep Match for semantic content analysis and alternative suggestions.
-              </p>
-            </div>
-          )}
-
-          {pipelineType === 'url_only' && unlockStatusEnabled && (
-            <div
-              className={`mb-4 border p-4 ${
-                isDeepMatchUnlocked
-                  ? 'border-emerald-500/40 bg-emerald-500/10'
-                  : 'border-border bg-card'
-              }`}
-            >
-              {unlockStatusQuery.isLoading ? (
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  Loading project unlock status...
-                </div>
-              ) : unlockStatusQuery.data ? (
-                <div className="space-y-3">
-                  {!unlockStatusQuery.data.has_quote && (
-                    <>
-                      <p className="text-sm text-muted-foreground">
-                        Get a one-time Deep Match quote for this project.
-                      </p>
-                      <Button onClick={handleDeepUnlockClick}>
-                        View Project Pricing
-                      </Button>
-                    </>
-                  )}
-
-                  {unlockStatusQuery.data.has_quote && !unlockStatusQuery.data.is_unlocked && !unlockStatusQuery.data.contact_required && (
-                    <>
-                      <p className="text-sm text-muted-foreground">
-                        Deep Match is locked for this project.
-                      </p>
-                      <Button onClick={handleDeepUnlockClick}>
-                        Unlock Deep Match
-                      </Button>
-                    </>
-                  )}
-
-                  {unlockStatusQuery.data.quote_status === 'checkout_created' && !unlockStatusQuery.data.is_unlocked && (
-                    <p className="text-sm text-muted-foreground">
-                      Payment submitted. Waiting for confirmation and deep-run queueing...
-                    </p>
-                  )}
-
-                  {unlockStatusQuery.data.contact_required && (
-                    <p className="text-sm text-muted-foreground">
-                      This project requires enterprise pricing. Contact sales from the pricing page.
-                    </p>
-                  )}
-
-                  {unlockStatusQuery.data.is_unlocked && (
-                    <>
-                      <p className="text-sm font-medium text-emerald-700 dark:text-emerald-300">Deep Match unlocked.</p>
-                      {unlockStatusQuery.data.deep_session_status === 'completed' &&
-                        unlockStatusQuery.data.deep_session_id && (
-                          <Button
-                            onClick={() => navigate(`/review/${unlockStatusQuery.data.deep_session_id}`)}
-                          >
-                            Open Deep Match Results
-                          </Button>
-                        )}
-                      {(unlockStatusQuery.data.deep_session_status === 'queued' ||
-                        unlockStatusQuery.data.deep_session_status === 'pending' ||
-                        unlockStatusQuery.data.deep_session_status === 'processing') && (
-                        <p className="text-sm text-emerald-700 dark:text-emerald-300">
-                          Deep Match is processing in the background. This page will refresh status automatically.
-                        </p>
-                      )}
-                    </>
-                  )}
-                </div>
-              ) : null}
-            </div>
-          )}
-
-          {showDeepMatchPreview && (
-            <DeepMatchPreviewCard preview={deepPreview} />
-          )}
-          {showDeepMatchPreviewError && (
-            <div className="mb-4 text-xs text-muted-foreground">{deepPreviewError}</div>
-          )}
+          <DeepMatchPrompt
+            pipelineType={pipelineType}
+            isLockedResults={isLockedResults}
+            lockedQuoteStatus={lockedQuoteStatus}
+            sourceSessionId={lockedSourceSessionId}
+            totalRedirects={stats.total}
+            quickAverageConfidence={quickAverageConfidence}
+            lowConfidenceCount={lowConfidenceRows.length}
+            lowConfidenceSamples={lowConfidenceSamples}
+            previewSummary={previewSummary}
+            unlockStatus={unlockStatus}
+            unlockLoading={unlockStatusQuery.isLoading}
+            onPricingClick={handlePricingPromptClick}
+            onViewDeepResults={(deepSessionId) => navigate(`/review/${deepSessionId}`)}
+          />
 
           {/* Stats Bar */}
           <StatsBar stats={stats} />
@@ -663,10 +674,11 @@ export function ReviewInterface({ layoutVariant = 'dashboard' }: ReviewInterface
             filteredCount={sortedRedirects.length}
             searchInputRef={searchInputRef}
             tutorialExportHighlight={tutorialActive && showCoachmarks && !isStepCompleted('export_redirects')}
+            exportDisabled={isContentPreviewMode}
           />
 
           {/* Table */}
-          <div className="mt-6">
+          <div className={`mt-6 ${isContentPreviewMode ? 'relative' : ''}`}>
           <RedirectTable
             redirects={pageRedirects}
             selectedRows={selectedRows}
@@ -680,14 +692,36 @@ export function ReviewInterface({ layoutVariant = 'dashboard' }: ReviewInterface
             totalRedirectsCount={redirects.length}
             isLoading={isLoading}
             pipelineType={pipelineType}
+            readOnly={isContentPreviewMode}
+            previewMode={isContentPreviewMode}
           />
 
+          {isContentPreviewMode && (
+            <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-background/45 backdrop-blur-[1.5px]">
+              <div className="rounded-md border border-border bg-card/95 px-4 py-3 text-sm text-foreground shadow-sm">
+                Full URLs and export unlock after purchase.
+              </div>
+            </div>
+          )}
+
           </div>
+
+          {pipelineType === 'url_only' && !isLockedResults && sessionId && (
+            <div className="mt-4 text-sm text-muted-foreground">
+              <button
+                type="button"
+                className="underline underline-offset-4 hover:text-foreground"
+                onClick={() => navigate(`/content-match?source_session_id=${encodeURIComponent(sessionId)}`)}
+              >
+                Want better results? Try content based matching →
+              </button>
+            </div>
+          )}
 
           {/* Bottom Controls */}
           <div className="mt-6 flex items-center justify-between border-t border-border pt-6 bg-card px-6 py-4">
             <div className="flex items-center gap-4">
-              <Select onValueChange={handleBulkAction}>
+              <Select onValueChange={handleBulkAction} disabled={isContentPreviewMode}>
                 <SelectTrigger className="w-[200px]">
                   <SelectValue placeholder="Bulk Actions" />
                 </SelectTrigger>
@@ -818,7 +852,7 @@ export function ReviewInterface({ layoutVariant = 'dashboard' }: ReviewInterface
               onClick={async () => {
                 await completeOnboarding();
                 setShowTutorialSuccess(false);
-                navigate(enterpriseUser ? '/upload' : '/quick-match');
+                navigate(enterpriseUser ? '/upload' : '/url-match');
               }}
             >
               Start Real Job Now

@@ -65,14 +65,7 @@ class StripeService:
     # Customer helpers
     # ---------------------------------------------------------------------
 
-    def _get_or_create_customer(self, user_id: str, email: str) -> str:
-        result = self.client.table("user_profiles").select(
-            "stripe_customer_id"
-        ).eq("id", user_id).maybe_single().execute()
-
-        if result and result.data and result.data.get("stripe_customer_id"):
-            return str(result.data["stripe_customer_id"])
-
+    def _create_and_persist_customer(self, user_id: str, email: str) -> str:
         customer = stripe.Customer.create(
             email=email,
             metadata={"supabase_user_id": user_id},
@@ -86,6 +79,44 @@ class StripeService:
         ).eq("id", user_id).execute()
 
         return str(customer.id)
+
+    def _get_or_create_customer(self, user_id: str, email: str) -> str:
+        result = self.client.table("user_profiles").select(
+            "stripe_customer_id"
+        ).eq("id", user_id).maybe_single().execute()
+
+        if result and result.data and result.data.get("stripe_customer_id"):
+            customer_id = str(result.data["stripe_customer_id"])
+            try:
+                existing_customer = stripe.Customer.retrieve(customer_id)
+                if not bool(getattr(existing_customer, "deleted", False)):
+                    return customer_id
+                logger.warning(
+                    "Stored Stripe customer is deleted; regenerating. user_id=%s customer_id=%s",
+                    user_id,
+                    customer_id,
+                )
+            except stripe.error.InvalidRequestError as exc:
+                code = str(getattr(exc, "code", "") or "")
+                message = str(exc)
+                is_missing_customer = code == "resource_missing" or "No such customer" in message
+                if not is_missing_customer:
+                    raise
+                logger.warning(
+                    "Stored Stripe customer is missing; regenerating. user_id=%s customer_id=%s error=%s",
+                    user_id,
+                    customer_id,
+                    message,
+                )
+
+            self.client.table("user_profiles").update(
+                {
+                    "stripe_customer_id": None,
+                    "updated_at": _now_iso(),
+                }
+            ).eq("id", user_id).execute()
+
+        return self._create_and_persist_customer(user_id, email)
 
     def _resolve_user_id_from_customer(self, customer_id: str) -> Optional[str]:
         if not customer_id:
@@ -246,6 +277,65 @@ class StripeService:
     # Webhooks
     # ---------------------------------------------------------------------
 
+    def _is_checkout_session_paid(self, session: Dict[str, Any]) -> bool:
+        payment_status = str(session.get("payment_status") or "").lower()
+        status = str(session.get("status") or "").lower()
+        return payment_status == "paid" and status == "complete"
+
+    def reconcile_project_quote_for_source(
+        self,
+        *,
+        source_session_id: str,
+        user_id: str,
+    ) -> Dict[str, Any] | None:
+        """
+        Best-effort reconciliation for quotes stuck in checkout_created.
+        Used by polling endpoints as a fallback when webhook delivery is delayed/missed.
+        """
+        quote = self.pricing_service.get_quote_for_source(source_session_id, user_id)
+        if not quote:
+            return None
+
+        status = str(quote.get("status") or "").lower()
+        if status != "checkout_created":
+            return quote
+
+        checkout_session_id = str(quote.get("stripe_checkout_session_id") or "").strip()
+        if not checkout_session_id:
+            return quote
+
+        try:
+            checkout_session = stripe.checkout.Session.retrieve(checkout_session_id)
+        except Exception as e:
+            logger.warning(
+                "Quote reconciliation failed to retrieve checkout session. quote_id=%s checkout_session_id=%s error=%s",
+                quote.get("id"),
+                checkout_session_id,
+                e,
+            )
+            return quote
+
+        if not self._is_checkout_session_paid(checkout_session):
+            return quote
+
+        self.pricing_service.mark_paid(
+            quote_id=str(quote["id"]),
+            stripe_payment_intent_id=checkout_session.get("payment_intent"),
+        )
+        refreshed = self.pricing_service.get_quote_by_id(str(quote["id"])) or quote
+
+        # Mirror webhook behavior so downstream UI can resolve deep session links.
+        if not refreshed.get("deep_session_id"):
+            self._queue_deep_session_for_quote(refreshed)
+            refreshed = self.pricing_service.get_quote_by_id(str(quote["id"])) or refreshed
+
+        logger.info(
+            "Recovered quote stuck in checkout_created via reconciliation. quote_id=%s checkout_session_id=%s",
+            quote.get("id"),
+            checkout_session_id,
+        )
+        return refreshed
+
     def _already_processed_webhook(self, event_id: str) -> bool:
         if not event_id:
             return False
@@ -279,12 +369,21 @@ class StripeService:
 
         source_session_id = str(quote.get("source_session_id"))
         source_result = self.client.table("migration_sessions").select(
-            "id,user_id,project_name,old_urls,new_urls"
+            "id,user_id,project_name,old_urls,new_urls,pipeline_type,requires_payment_unlock"
         ).eq("id", source_session_id).maybe_single().execute()
 
         source = source_result.data if source_result else None
         if not source:
             raise ValueError("Source session not found for paid quote")
+
+        # Results-first content-match flow: the source session itself is the deep
+        # session. Attach it instead of creating a duplicate run.
+        if (
+            str(source.get("pipeline_type") or "") == "content"
+            and bool(source.get("requires_payment_unlock"))
+        ):
+            self.pricing_service.attach_deep_session(str(quote["id"]), source_session_id)
+            return str(source_session_id)
 
         deep_session_id = self.session_db.create_session(
             user_id=str(source.get("user_id") or quote.get("user_id")),

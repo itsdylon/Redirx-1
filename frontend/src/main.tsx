@@ -7,12 +7,21 @@ import { AuthProvider } from "./contexts/AuthContext";
 import { AppWithToaster } from "./App.tsx";
 import { OnboardingProvider } from "./contexts/OnboardingContext";
 import { appQueryClient } from "./queries/queryClient";
+import { persistLandingAttributionFromUrl } from "./lib/analyticsAttribution";
 import "./styles/globals.css";
+
+persistLandingAttributionFromUrl();
+
+const hostName = typeof window !== "undefined" ? window.location.hostname : "";
+const cookieDomain = hostName.endsWith("redirx.dev") ? ".redirx.dev" : undefined;
 
 const posthogOptions = {
   api_host: import.meta.env.VITE_PUBLIC_POSTHOG_HOST,
   defaults: "2026-01-30",
-} as const;
+  capture_pageview: "history_change",
+  cross_subdomain_cookie: true,
+  ...(cookieDomain ? { cookie_domain: cookieDomain } : {}),
+};
 
 createRoot(document.getElementById("root")!).render(
   <PostHogProvider

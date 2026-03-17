@@ -643,6 +643,10 @@ VITE_SUPABASE_ANON_KEY=eyJxxx...
 ```bash
 # Only needed in production (dev uses Vite proxy)
 VITE_API_BASE_URL=https://api.redirx.onrender.com
+
+# PostHog conversion funnel analytics
+VITE_PUBLIC_POSTHOG_KEY=phc_xxx
+VITE_PUBLIC_POSTHOG_HOST=https://us.i.posthog.com
 ```
 
 ---
@@ -661,6 +665,8 @@ envVars:
   - VITE_SUPABASE_URL
   - VITE_SUPABASE_ANON_KEY
   - VITE_API_BASE_URL
+  - VITE_PUBLIC_POSTHOG_KEY
+  - VITE_PUBLIC_POSTHOG_HOST
 ```
 
 **Build Command:**
@@ -674,6 +680,8 @@ cd frontend && npm install && npm run build
 - `VITE_SUPABASE_URL`: Supabase project URL
 - `VITE_SUPABASE_ANON_KEY`: Supabase anon/public key
 - `VITE_API_BASE_URL`: Backend API URL (e.g., `https://redirx-api.onrender.com`)
+- `VITE_PUBLIC_POSTHOG_KEY`: PostHog project API key
+- `VITE_PUBLIC_POSTHOG_HOST`: PostHog host (`https://us.i.posthog.com` or `https://eu.i.posthog.com`)
 
 #### 2. Backend API (Web Service)
 ```yaml

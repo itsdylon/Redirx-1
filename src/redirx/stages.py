@@ -4,7 +4,7 @@ import aiohttp
 import asyncio
 import os
 from bs4 import BeautifulSoup
-from typing import Optional
+from typing import Optional, Callable
 from uuid import UUID, uuid4
 import numpy as np
 from openai import AsyncOpenAI
@@ -485,6 +485,10 @@ class WebScraperStage(Stage):
         self,
         max_total_concurrency: Optional[int] = None,
         max_site_concurrency: Optional[int] = None,
+        session_id: Optional[UUID] = None,
+        progress_stage: Optional[int] = None,
+        total_stages: Optional[int] = None,
+        progress_update_every: int = 10,
     ):
         super().__init__()
         if max_total_concurrency is None:
@@ -515,15 +519,77 @@ class WebScraperStage(Stage):
 
         self.max_total_concurrency = total
         self.max_site_concurrency = min(per_site, total)
+        self.session_id = session_id
+        self.progress_stage = progress_stage
+        self.total_stages = total_stages
+        self.progress_update_every = max(1, progress_update_every)
+        self.session_db = (
+            MigrationSessionDB()
+            if self.session_id is not None and self.progress_stage and self.total_stages
+            else None
+        )
+        self._last_reported_scraped = -1
+
+    def _publish_scrape_progress(
+        self,
+        *,
+        scraped_total: int,
+        scrape_goal: int,
+        old_scraped: int,
+        new_scraped: int,
+        force: bool = False,
+    ) -> None:
+        if (
+            self.session_db is None
+            or self.session_id is None
+            or self.progress_stage is None
+            or self.total_stages is None
+        ):
+            return
+
+        if self._last_reported_scraped == scraped_total:
+            return
+
+        should_publish = force or scraped_total == scrape_goal
+        if not should_publish:
+            should_publish = (scraped_total % self.progress_update_every) == 0
+
+        if not should_publish:
+            return
+
+        self._last_reported_scraped = scraped_total
+        stage_name = (
+            f"Scraping webpages ({scraped_total}/{scrape_goal} pages scraped, "
+            f"old {old_scraped}, new {new_scraped})"
+        )
+
+        try:
+            self.session_db.update_session_progress(
+                self.session_id,
+                self.progress_stage,
+                stage_name,
+                self.total_stages,
+            )
+        except Exception as exc:
+            print(f"⚠️  WebScraperStage: failed to publish progress update ({exc})", flush=True)
 
     async def execute(self, input: tuple[list[str], list[str]]) -> tuple[list[WebPage], list[WebPage]]:
         old_urls, new_urls = input
+        total_urls = len(old_urls) + len(new_urls)
+        self._last_reported_scraped = -1
 
         print(
             f"\nWebScraperStage: Scraping {len(old_urls)} old + {len(new_urls)} new URLs "
             f"(total concurrency={self.max_total_concurrency}, "
             f"per-site concurrency={self.max_site_concurrency})...",
             flush=True,
+        )
+        self._publish_scrape_progress(
+            scraped_total=0,
+            scrape_goal=total_urls,
+            old_scraped=0,
+            new_scraped=0,
+            force=True,
         )
 
         async with aiohttp.ClientSession() as session:
@@ -536,28 +602,67 @@ class WebScraperStage(Stage):
                     async with site_semaphore:
                         return await WebPage.scrape(session, url)
 
-            async def gather_old():
-                return await asyncio.gather(
-                    *[scrape_with_limits(url, old_site_semaphore) for url in old_urls]
+            async def scrape_with_meta(
+                url: str,
+                site: str,
+                index: int,
+                site_semaphore: asyncio.Semaphore,
+            ):
+                page = await scrape_with_limits(url, site_semaphore)
+                return site, index, page
+
+            old_webpages: list[Optional[WebPage]] = [None] * len(old_urls)
+            new_webpages: list[Optional[WebPage]] = [None] * len(new_urls)
+            tasks: list[asyncio.Task] = []
+
+            for idx, url in enumerate(old_urls):
+                tasks.append(
+                    asyncio.create_task(
+                        scrape_with_meta(url, "old", idx, old_site_semaphore)
+                    )
+                )
+            for idx, url in enumerate(new_urls):
+                tasks.append(
+                    asyncio.create_task(
+                        scrape_with_meta(url, "new", idx, new_site_semaphore)
+                    )
                 )
 
-            async def gather_new():
-                return await asyncio.gather(
-                    *[scrape_with_limits(url, new_site_semaphore) for url in new_urls]
+            scraped_total = 0
+            old_scraped = 0
+            new_scraped = 0
+
+            for finished in asyncio.as_completed(tasks):
+                site, index, page = await finished
+                if site == "old":
+                    old_webpages[index] = page
+                    old_scraped += 1
+                else:
+                    new_webpages[index] = page
+                    new_scraped += 1
+                scraped_total += 1
+                self._publish_scrape_progress(
+                    scraped_total=scraped_total,
+                    scrape_goal=total_urls,
+                    old_scraped=old_scraped,
+                    new_scraped=new_scraped,
                 )
 
-            async with asyncio.TaskGroup() as group:
-                old_task = group.create_task(gather_old())
-                new_task = group.create_task(gather_new())
-
-            old_webpages = old_task.result()
-            new_webpages = new_task.result()
+        old_webpages_final = [p for p in old_webpages if p is not None]
+        new_webpages_final = [p for p in new_webpages if p is not None]
+        self._publish_scrape_progress(
+            scraped_total=total_urls,
+            scrape_goal=total_urls,
+            old_scraped=len(old_webpages_final),
+            new_scraped=len(new_webpages_final),
+            force=True,
+        )
 
         # Log scraping results
-        old_success = sum(1 for p in old_webpages if len(p.html) > 0)
-        old_failed = len(old_webpages) - old_success
-        new_success = sum(1 for p in new_webpages if len(p.html) > 0)
-        new_failed = len(new_webpages) - new_success
+        old_success = sum(1 for p in old_webpages_final if len(p.html) > 0)
+        old_failed = len(old_webpages_final) - old_success
+        new_success = sum(1 for p in new_webpages_final if len(p.html) > 0)
+        new_failed = len(new_webpages_final) - new_success
 
         print(f"WebScraperStage: Old site - {old_success} succeeded, {old_failed} failed")
         print(f"WebScraperStage: New site - {new_success} succeeded, {new_failed} failed")
@@ -565,26 +670,26 @@ class WebScraperStage(Stage):
         # Log pages with empty HTML (scraping failures)
         if old_failed > 0:
             print(f"⚠️  WebScraperStage: Failed to scrape {old_failed} old pages:")
-            for page in old_webpages:
+            for page in old_webpages_final:
                 if len(page.html) == 0:
                     print(f"   - {page.url}")
 
         if new_failed > 0:
             print(f"⚠️  WebScraperStage: Failed to scrape {new_failed} new pages:")
-            for page in new_webpages:
+            for page in new_webpages_final:
                 if len(page.html) == 0:
                     print(f"   - {page.url}")
 
         # Log HTML sizes for successful scrapes
         if old_success > 0:
-            avg_old_size = sum(len(p.html) for p in old_webpages if len(p.html) > 0) / old_success
+            avg_old_size = sum(len(p.html) for p in old_webpages_final if len(p.html) > 0) / old_success
             print(f"WebScraperStage: Old pages avg HTML size: {int(avg_old_size)} bytes")
 
         if new_success > 0:
-            avg_new_size = sum(len(p.html) for p in new_webpages if len(p.html) > 0) / new_success
+            avg_new_size = sum(len(p.html) for p in new_webpages_final if len(p.html) > 0) / new_success
             print(f"WebScraperStage: New pages avg HTML size: {int(avg_new_size)} bytes")
 
-        return (old_webpages, new_webpages)
+        return (old_webpages_final, new_webpages_final)
 
 # =========================
 # HTML Prune Stage
@@ -657,12 +762,57 @@ class HtmlPruneStage(Stage):
 class EmbedStage(Stage):
     name = "Generating embeddings"
 
-    def __init__(self, session_id: Optional[UUID] = None):
+    def __init__(
+        self,
+        session_id: Optional[UUID] = None,
+        progress_stage: Optional[int] = None,
+        total_stages: Optional[int] = None,
+    ):
         super().__init__()
         self.session_id = session_id
         self.embedding_db = WebPageEmbeddingDB()
         self.session_db = MigrationSessionDB()
         self.openai_client: Optional[AsyncOpenAI] = None
+        self.progress_stage = progress_stage
+        self.total_stages = total_stages
+        self._last_reported_embeddings = -1
+
+    def _publish_embedding_progress(
+        self,
+        *,
+        generated_count: int,
+        target_count: int,
+        failed_count: int = 0,
+        force: bool = False,
+    ) -> None:
+        if (
+            self.session_id is None
+            or self.progress_stage is None
+            or self.total_stages is None
+        ):
+            return
+
+        if self._last_reported_embeddings == generated_count and not force:
+            return
+
+        self._last_reported_embeddings = generated_count
+        stage_name = f"Generating embeddings ({generated_count}/{target_count} generated)"
+        if failed_count > 0:
+            stage_name = (
+                f"Generating embeddings ({generated_count}/{target_count} generated, "
+                f"{failed_count} failed)"
+            )
+
+        try:
+            self.session_db.update_session_progress(
+                self.session_id,
+                self.progress_stage,
+                stage_name,
+                self.total_stages,
+            )
+        except Exception as exc:
+            if force:
+                print(f"⚠️  EmbedStage: failed to publish progress update ({exc})", flush=True)
 
     async def execute(
         self,
@@ -705,21 +855,55 @@ class EmbedStage(Stage):
 
         total_success = 0
         total_failure = 0
+        expected_count = len(valid_old_pages) + len(valid_new_pages)
+        generated_so_far = 0
+        failed_so_far = 0
+        self._last_reported_embeddings = -1
+
+        self._publish_embedding_progress(
+            generated_count=0,
+            target_count=expected_count,
+            failed_count=0,
+            force=True,
+        )
+
+        def on_batch_complete(batch_success: int, batch_failure: int) -> None:
+            nonlocal generated_so_far, failed_so_far
+            generated_so_far += batch_success
+            failed_so_far += batch_failure
+            self._publish_embedding_progress(
+                generated_count=generated_so_far,
+                target_count=expected_count,
+                failed_count=failed_so_far,
+            )
 
         try:
             if valid_old_pages:
-                success, failure = await self._process_pages(valid_old_pages, "old")
+                success, failure = await self._process_pages(
+                    valid_old_pages,
+                    "old",
+                    on_batch_complete=on_batch_complete,
+                )
                 total_success += success
                 total_failure += failure
             if valid_new_pages:
-                success, failure = await self._process_pages(valid_new_pages, "new")
+                success, failure = await self._process_pages(
+                    valid_new_pages,
+                    "new",
+                    on_batch_complete=on_batch_complete,
+                )
                 total_success += success
                 total_failure += failure
         finally:
             if self.openai_client:
                 await self.openai_client.close()
 
-        expected_count = len(valid_old_pages) + len(valid_new_pages)
+        self._publish_embedding_progress(
+            generated_count=total_success,
+            target_count=expected_count,
+            failed_count=total_failure,
+            force=True,
+        )
         print(f"EmbedStage: Successfully generated {total_success}/{expected_count} embeddings", flush=True)
 
         if total_failure > 0:
@@ -729,7 +913,12 @@ class EmbedStage(Stage):
 
         return input
 
-    async def _process_pages(self, pages: list[WebPage], site_type: str):
+    async def _process_pages(
+        self,
+        pages: list[WebPage],
+        site_type: str,
+        on_batch_complete: Optional[Callable[[int, int], None]] = None,
+    ):
         batch_size = 10
         success_count = 0
         failure_count = 0
@@ -742,13 +931,21 @@ class EmbedStage(Stage):
             )
 
             # Count successes and failures
+            batch_success = 0
+            batch_failure = 0
             for result in results:
                 if isinstance(result, Exception):
                     failure_count += 1
+                    batch_failure += 1
                 elif result:
                     success_count += 1
+                    batch_success += 1
                 else:
                     failure_count += 1
+                    batch_failure += 1
+
+            if on_batch_complete:
+                on_batch_complete(batch_success, batch_failure)
 
         if failure_count > 0:
             print(f"⚠️  EmbedStage: {failure_count} pages failed to embed")

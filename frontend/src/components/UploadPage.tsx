@@ -7,6 +7,8 @@ import { useOnboarding } from '../contexts/OnboardingContext';
 import { DashboardLayout } from './DashboardLayout';
 import { ToolLayout } from './ToolLayout';
 import { FileUploadZone } from './FileUploadZone';
+import { DomainDiscoveryPanel } from './DomainDiscoveryPanel';
+import type { DiscoveryResponse } from '../api/discovery';
 import { LoadingScreen } from './LoadingScreen';
 import { Button } from './ui/button';
 import { AlertTriangle, Loader2, Zap, Search, Info, ShieldAlert } from 'lucide-react';
@@ -100,6 +102,7 @@ export function UploadPage({
   const [newFileValidation, setNewFileValidation] = useState<FileValidationResult | null>(null);
   const [pendingWarnings, setPendingWarnings] = useState<{ old: string[], new: string[] } | null>(null);
   const [showCoachmarks, setShowCoachmarks] = useState(false);
+  const [ingestMode, setIngestMode] = useState<'domains' | 'csv'>('domains');
 
   const tutorialFromQuery = searchParams.get('tutorial') === '1';
   const sampleFromQuery = searchParams.get('sample') === '1';
@@ -130,6 +133,13 @@ export function UploadPage({
       return;
     }
     setShowCoachmarks(true);
+  }, [tutorialActive]);
+
+  // The tutorial walks through the CSV flow, so keep its copy accurate.
+  useEffect(() => {
+    if (tutorialActive) {
+      setIngestMode('csv');
+    }
   }, [tutorialActive]);
 
   useEffect(() => {
@@ -239,6 +249,52 @@ export function UploadPage({
       setNewCsvFile(fileToSend);
       setNewSiteFile(fileData);
     }
+  };
+
+  const handleDomainDiscovered = (side: 'old' | 'new', result: DiscoveryResponse | null) => {
+    setContentCapApiError(null);
+    setPendingWarnings(null);
+    setError(null);
+    setDuplicateSessionId(null);
+
+    if (!result) {
+      handleFileRemove(side);
+      return;
+    }
+
+    // Bridge discovered URLs into the existing file-based submit flow.
+    const host = new URL(result.root_url).hostname;
+    const file = new File([result.urls.join('\n')], `${host}-discovered.csv`, {
+      type: 'text/csv',
+    });
+    const fileData: FileData = {
+      name: `${host} — ${result.count.toLocaleString()} pages`,
+      rowCount: result.count,
+      file,
+    };
+    const validation: FileValidationResult = {
+      valid: true,
+      warnings: [],
+      errors: [],
+      rowCount: result.count,
+    };
+
+    if (side === 'old') {
+      setOldCsvFile(file);
+      setOldSiteFile(fileData);
+      setOldFileValidation(validation);
+    } else {
+      setNewCsvFile(file);
+      setNewSiteFile(fileData);
+      setNewFileValidation(validation);
+    }
+  };
+
+  const handleIngestModeChange = (mode: 'domains' | 'csv') => {
+    if (mode === ingestMode) return;
+    setIngestMode(mode);
+    handleFileRemove('old');
+    handleFileRemove('new');
   };
 
   const handleFileRemove = (type: 'old' | 'new') => {
@@ -476,7 +532,7 @@ export function UploadPage({
                 Free Redirect Map Generator
               </h1>
               <p className="mt-3 text-muted-foreground">
-                Upload two sitemaps. Get matched redirects in seconds.
+                Paste two domains. Get matched redirects in seconds.
               </p>
             </div>
           ) : (
@@ -753,6 +809,55 @@ export function UploadPage({
               }
             </div>
           )}
+          {/* Ingestion mode tabs */}
+          <div className="mb-4 flex items-center gap-1 border border-border bg-muted/40 p-1 rounded-lg w-fit">
+            <button
+              type="button"
+              onClick={() => handleIngestModeChange('domains')}
+              className={`px-4 py-1.5 text-sm rounded-md transition-colors ${
+                ingestMode === 'domains'
+                  ? 'bg-background text-foreground font-medium shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              Paste Domains
+            </button>
+            <button
+              type="button"
+              onClick={() => handleIngestModeChange('csv')}
+              className={`px-4 py-1.5 text-sm rounded-md transition-colors ${
+                ingestMode === 'csv'
+                  ? 'bg-background text-foreground font-medium shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              Upload Files
+            </button>
+          </div>
+
+          {ingestMode === 'domains' && (
+            <div className="mb-8">
+              <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+                <DomainDiscoveryPanel
+                  side="old"
+                  label="Old Site Domain"
+                  onDiscovered={handleDomainDiscovered}
+                />
+                <DomainDiscoveryPanel
+                  side="new"
+                  label="New Site Domain"
+                  onDiscovered={handleDomainDiscovered}
+                />
+              </div>
+              <p className="mt-3 text-xs text-muted-foreground">
+                We find pages via your sitemap, platform APIs (WordPress, Shopify), or a
+                site crawl. Have an export from Screaming Frog or your CMS? Switch to
+                Upload Files.
+              </p>
+            </div>
+          )}
+
+          {ingestMode === 'csv' && (
           <div className="grid grid-cols-2 gap-6 mb-8">
             <div className={tutorialActive && showCoachmarks ? 'rounded-md ring-2 ring-[#26D99D]/75 p-2 bg-[#26D99D]/8 dark:bg-[#26D99D]/14' : ''}>
               <FileUploadZone
@@ -783,6 +888,7 @@ export function UploadPage({
               )}
             </div>
           </div>
+          )}
 
           {/* File Status */}
           {bothFilesUploaded && (

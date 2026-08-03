@@ -19,6 +19,11 @@ vi.mock('react-router-dom', async (importOriginal) => {
   };
 });
 
+const mockDiscoverSite = vi.fn();
+vi.mock('../api/discovery', () => ({
+  discoverSite: (...args: unknown[]) => mockDiscoverSite(...args),
+}));
+
 const mockUploadCSVs = vi.fn();
 vi.mock('../api/pipeline', () => ({
   uploadCSVs: (...args: unknown[]) => mockUploadCSVs(...args),
@@ -82,6 +87,17 @@ import { UploadPage } from './UploadPage';
 // Helpers
 // ---------------------------------------------------------------------------
 
+
+/**
+ * Render UploadPage and switch to the "Upload Files" tab — these suites
+ * exercise the CSV flow, which is no longer the default ingestion mode.
+ */
+function renderUploadPage(props: Record<string, unknown> = {}) {
+  const result = render(<UploadPage {...props} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Upload Files' }));
+  return result;
+}
+
 function textFile(content: string, name: string): File {
   return new File([content], name, { type: 'text/plain' });
 }
@@ -144,30 +160,30 @@ beforeEach(() => {
 
 describe('UploadPage — rendering', () => {
   it('renders the upload page with two upload zones', () => {
-    render(<UploadPage />);
+    renderUploadPage();
     expect(screen.getByText('Old Site CSV')).toBeInTheDocument();
     expect(screen.getByText('New Site CSV')).toBeInTheDocument();
   });
 
   it('renders the subtitle text', () => {
-    render(<UploadPage />);
+    renderUploadPage();
     expect(screen.getByText(/Upload URL lists/)).toBeInTheDocument();
   });
 
   it('renders pipeline type selector for paid users', () => {
-    render(<UploadPage />);
+    renderUploadPage();
     expect(screen.getByText('Deep Match')).toBeInTheDocument();
     expect(screen.getByText('Quick Match')).toBeInTheDocument();
   });
 
   it('disables the begin button when no files uploaded', () => {
-    render(<UploadPage />);
+    renderUploadPage();
     const button = screen.getByRole('button', { name: /Begin/ });
     expect(button).toBeDisabled();
   });
 
   it('renders quick-only start mode without deep/quick selector cards', () => {
-    render(<UploadPage quickOnly />);
+    renderUploadPage({ quickOnly: true });
     expect(screen.getByText('Quick Match Workflow')).toBeInTheDocument();
     expect(screen.queryByText('Deep Match')).not.toBeInTheDocument();
   });
@@ -175,7 +191,7 @@ describe('UploadPage — rendering', () => {
 
 describe('UploadPage — CSV file upload flow', () => {
   it('validates and shows CSV file info after upload', async () => {
-    render(<UploadPage />);
+    renderUploadPage();
 
     const oldFile = textFile('https://old.com/page1\nhttps://old.com/page2\n', 'old.csv');
     const newFile = textFile('https://new.com/page1\nhttps://new.com/page2\n', 'new.csv');
@@ -194,7 +210,7 @@ describe('UploadPage — CSV file upload flow', () => {
   });
 
   it('shows validation error for invalid file extension', async () => {
-    render(<UploadPage />);
+    renderUploadPage();
 
     const badFile = new File(['data'], 'data.json', { type: 'application/json' });
     uploadToZone('Old Site CSV', badFile);
@@ -205,7 +221,7 @@ describe('UploadPage — CSV file upload flow', () => {
   });
 
   it('shows validation error for non-URL content', async () => {
-    render(<UploadPage />);
+    renderUploadPage();
 
     const lines = Array.from({ length: 20 }, (_, i) => `fruit-${i}`).join('\n');
     const badFile = textFile(lines, 'fruits.csv');
@@ -219,7 +235,7 @@ describe('UploadPage — CSV file upload flow', () => {
 
 describe('UploadPage — XML file upload flow', () => {
   it('validates, converts, and shows XML sitemap info', async () => {
-    render(<UploadPage />);
+    renderUploadPage();
 
     const oldXml = xmlFile(['https://old.com/page1', 'https://old.com/page2']);
     const newCsv = textFile('https://new.com/page1\nhttps://new.com/page2\n', 'new.csv');
@@ -238,7 +254,7 @@ describe('UploadPage — XML file upload flow', () => {
   });
 
   it('shows error for sitemap index XML', async () => {
-    render(<UploadPage />);
+    renderUploadPage();
 
     const indexXml = `<?xml version="1.0" encoding="UTF-8"?>
 <sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
@@ -253,7 +269,7 @@ describe('UploadPage — XML file upload flow', () => {
   });
 
   it('shows error for non-sitemap XML', async () => {
-    render(<UploadPage />);
+    renderUploadPage();
 
     const rss = `<?xml version="1.0"?><rss><channel></channel></rss>`;
     const file = new File([rss], 'feed.xml', { type: 'application/xml' });
@@ -267,7 +283,7 @@ describe('UploadPage — XML file upload flow', () => {
 
 describe('UploadPage — XLSX file upload flow', () => {
   it('validates, converts, and shows XLSX info', async () => {
-    render(<UploadPage />);
+    renderUploadPage();
 
     const xlsx = xlsxFile([
       ['https://old.com/page1'],
@@ -288,7 +304,7 @@ describe('UploadPage — XLSX file upload flow', () => {
   });
 
   it('shows error for XLSX with no URLs', async () => {
-    render(<UploadPage />);
+    renderUploadPage();
 
     const xlsx = xlsxFile([
       ['Apple'],
@@ -305,7 +321,7 @@ describe('UploadPage — XLSX file upload flow', () => {
 
 describe('UploadPage — mixed format uploads', () => {
   it('allows XML for old site and XLSX for new site', async () => {
-    render(<UploadPage />);
+    renderUploadPage();
 
     const oldXml = xmlFile(['https://old.com/page1', 'https://old.com/page2']);
     const newXlsx = xlsxFile([
@@ -326,7 +342,7 @@ describe('UploadPage — mixed format uploads', () => {
   });
 
   it('allows CSV for old site and XML for new site', async () => {
-    render(<UploadPage />);
+    renderUploadPage();
 
     const oldCsv = textFile('https://old.com/page1\nhttps://old.com/page2\n', 'old.csv');
     const newXml = xmlFile(['https://new.com/page1', 'https://new.com/page2']);
@@ -347,7 +363,7 @@ describe('UploadPage — mixed format uploads', () => {
 describe('UploadPage — API submission', () => {
   it('sends converted file to API for Quick Match', async () => {
     const user = userEvent.setup();
-    render(<UploadPage />);
+    renderUploadPage();
 
     // Use multiple URLs to avoid the "only 1 URL" warning
     const oldXml = xmlFile(['https://old.com/page1', 'https://old.com/page2']);
@@ -376,7 +392,7 @@ describe('UploadPage — API submission', () => {
 
   it('shows scraping warning for Deep Match before submitting', async () => {
     const user = userEvent.setup();
-    render(<UploadPage />);
+    renderUploadPage();
 
     const oldCsv = textFile('https://old.com/page1\nhttps://old.com/page2\n', 'old.csv');
     const newCsv = textFile('https://new.com/page1\nhttps://new.com/page2\n', 'new.csv');
@@ -406,7 +422,7 @@ describe('UploadPage — API submission', () => {
       .mockResolvedValueOnce({ session_id: 'existing-session', is_duplicate: true })
       .mockResolvedValueOnce({ session_id: 'new-run', is_duplicate: false });
 
-    render(<UploadPage />);
+    renderUploadPage();
 
     const oldCsv = textFile('https://old.com/page1\nhttps://old.com/page2\n', 'old.csv');
     const newCsv = textFile('https://new.com/page1\nhttps://new.com/page2\n', 'new.csv');
@@ -451,7 +467,7 @@ describe('UploadPage — API submission', () => {
   });
 
   it('keeps the begin button disabled when one file has a validation error', async () => {
-    render(<UploadPage />);
+    renderUploadPage();
 
     // Upload a valid file for old site
     const oldCsv = textFile('https://old.com/page1\nhttps://old.com/page2\n', 'old.csv');
@@ -468,7 +484,7 @@ describe('UploadPage — API submission', () => {
   });
 
   it('blocks Deep Match locally when file counts exceed the content URL cap', async () => {
-    render(<UploadPage />);
+    renderUploadPage();
 
     uploadToZone('Old Site CSV', largeCsvFile(5001, 'old.example.com', 'old-large.csv'));
     uploadToZone('New Site CSV', largeCsvFile(5001, 'new.example.com', 'new-large.csv'));
@@ -485,7 +501,7 @@ describe('UploadPage — API submission', () => {
 
   it('switches to Quick Match from cap panel and falls back to warning flow', async () => {
     const user = userEvent.setup();
-    render(<UploadPage />);
+    renderUploadPage();
 
     uploadToZone('Old Site CSV', largeCsvFile(5001, 'old.example.com', 'old-large.csv'));
     uploadToZone('New Site CSV', largeCsvFile(5001, 'new.example.com', 'new-large.csv'));
@@ -523,7 +539,7 @@ describe('UploadPage — API submission', () => {
       retryable: false,
     });
 
-    render(<UploadPage />);
+    renderUploadPage();
 
     const oldCsv = textFile('https://old.com/page1\nhttps://old.com/page2\n', 'old.csv');
     const newCsv = textFile('https://new.com/page1\nhttps://new.com/page2\n', 'new.csv');
@@ -555,7 +571,7 @@ describe('UploadPage — API submission', () => {
 
 describe('UploadPage — file replacement', () => {
   it('clears previous validation when uploading a new file', async () => {
-    render(<UploadPage />);
+    renderUploadPage();
 
     // First upload an invalid file
     const badLines = Array.from({ length: 20 }, (_, i) => `fruit-${i}`).join('\n');
@@ -579,7 +595,7 @@ describe('UploadPage — file replacement', () => {
 
 describe('UploadPage — file removal', () => {
   it('removes a selected file and disables begin matching', async () => {
-    render(<UploadPage />);
+    renderUploadPage();
 
     const oldCsv = textFile('https://old.com/page1\nhttps://old.com/page2\n', 'old.csv');
     const newCsv = textFile('https://new.com/page1\nhttps://new.com/page2\n', 'new.csv');
@@ -598,5 +614,99 @@ describe('UploadPage — file removal', () => {
       expect(screen.getAllByText('new.csv').length).toBeGreaterThanOrEqual(1);
       expect(screen.getByRole('button', { name: /Begin Deep Match/ })).toBeDisabled();
     });
+  });
+});
+
+describe('UploadPage — domain ingestion mode', () => {
+  function discoveryResponse(host: string, count: number) {
+    return {
+      success: true,
+      root_url: `https://${host}`,
+      urls: Array.from({ length: count }, (_, i) => `https://${host}/page-${i + 1}`),
+      count,
+      total_found: count,
+      truncated: false,
+      max_urls: 1000,
+      method: 'sitemap',
+      generator: 'wordpress',
+      duration_ms: 900,
+      plan: 'free',
+    };
+  }
+
+  it('defaults to the paste-domains mode', () => {
+    render(<UploadPage />);
+    expect(screen.getByText('Old Site Domain')).toBeInTheDocument();
+    expect(screen.getByText('New Site Domain')).toBeInTheDocument();
+    expect(screen.queryByText('Old Site CSV')).not.toBeInTheDocument();
+  });
+
+  it('discovers both domains and submits the generated URL files', async () => {
+    const user = userEvent.setup();
+    mockDiscoverSite
+      .mockResolvedValueOnce(discoveryResponse('old-site.com', 3))
+      .mockResolvedValueOnce(discoveryResponse('new-site.com', 4));
+
+    render(<UploadPage quickOnly />);
+
+    await user.type(screen.getByLabelText('Old Site Domain domain'), 'old-site.com');
+    await user.click(screen.getAllByRole('button', { name: 'Find Pages' })[0]);
+
+    await waitFor(() => {
+      expect(screen.getByText(/3 pages found via sitemap/)).toBeInTheDocument();
+    });
+
+    await user.type(screen.getByLabelText('New Site Domain domain'), 'new-site.com');
+    await user.click(screen.getByRole('button', { name: 'Find Pages' }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/4 pages found via sitemap/)).toBeInTheDocument();
+    });
+
+    const begin = screen.getByRole('button', { name: /Begin Quick Match/ });
+    expect(begin).not.toBeDisabled();
+    await user.click(begin);
+
+    await waitFor(() => {
+      expect(mockUploadCSVs).toHaveBeenCalledTimes(1);
+    });
+
+    const [oldFile, newFile, , pipelineType] = mockUploadCSVs.mock.calls[0];
+    expect((oldFile as File).name).toBe('old-site.com-discovered.csv');
+    expect((newFile as File).name).toBe('new-site.com-discovered.csv');
+    expect(pipelineType).toBe('url_only');
+    expect(await (oldFile as File).text()).toContain('https://old-site.com/page-1');
+  });
+
+  it('shows discovery errors and keeps begin disabled', async () => {
+    const user = userEvent.setup();
+    mockDiscoverSite.mockRejectedValueOnce(new Error('Could not find any pages on https://dead.com.'));
+
+    render(<UploadPage quickOnly />);
+
+    await user.type(screen.getByLabelText('Old Site Domain domain'), 'dead.com');
+    await user.click(screen.getAllByRole('button', { name: 'Find Pages' })[0]);
+
+    await waitFor(() => {
+      expect(screen.getByText(/Could not find any pages/)).toBeInTheDocument();
+    });
+    expect(screen.getByRole('button', { name: /Begin Quick Match/ })).toBeDisabled();
+  });
+
+  it('switching modes clears prior selections', async () => {
+    const user = userEvent.setup();
+    mockDiscoverSite.mockResolvedValueOnce(discoveryResponse('old-site.com', 3));
+
+    render(<UploadPage quickOnly />);
+    await user.type(screen.getByLabelText('Old Site Domain domain'), 'old-site.com');
+    await user.click(screen.getAllByRole('button', { name: 'Find Pages' })[0]);
+    await waitFor(() => {
+      expect(screen.getByText(/3 pages found/)).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole('button', { name: 'Upload Files' }));
+    expect(screen.queryByText(/3 pages found/)).not.toBeInTheDocument();
+    expect(screen.getByText('Old Site CSV')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Begin Quick Match/ })).toBeDisabled();
   });
 });

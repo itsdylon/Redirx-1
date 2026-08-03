@@ -50,6 +50,15 @@ class Config:
     EMAIL_FROM_ADDRESS: str = os.getenv('EMAIL_FROM_ADDRESS', 'Dylon @ RedirX <noreply@redirx.dev>')
     APP_BASE_URL: str = os.getenv('APP_BASE_URL', 'http://localhost:3000')
 
+    # Google Search Console Integration
+    GOOGLE_OAUTH_CLIENT_ID: Optional[str] = os.getenv('GOOGLE_OAUTH_CLIENT_ID')
+    GOOGLE_OAUTH_CLIENT_SECRET: Optional[str] = os.getenv('GOOGLE_OAUTH_CLIENT_SECRET')
+    GSC_OAUTH_REDIRECT_URI: str = os.getenv(
+        'GSC_OAUTH_REDIRECT_URI', 'http://localhost:5001/api/gsc/callback'
+    )
+    GSC_STATE_SECRET: Optional[str] = os.getenv('GSC_STATE_SECRET') or os.getenv('SUPABASE_KEY')
+    GSC_LOOKBACK_DAYS: int = int(os.getenv('GSC_LOOKBACK_DAYS', '90'))
+
     # Matching Thresholds
     # HIGH = 0.9+, MEDIUM = 0.85-0.9, LOW = 0.7-0.85, < 0.7 = rejected (orphaned)
     HIGH_CONFIDENCE_THRESHOLD: float = float(os.getenv('HIGH_CONFIDENCE_THRESHOLD', '0.85'))
@@ -84,6 +93,26 @@ class Config:
             raise ValueError(
                 f"Missing required configuration: {', '.join(missing)}. "
                 f"Please set these in your .env file. See .env.example for reference."
+            )
+
+    @classmethod
+    def validate_gsc(cls) -> None:
+        """
+        Validates that Google Search Console OAuth configuration is set.
+
+        Raises:
+            ValueError: If GSC configuration is missing.
+        """
+        missing = [
+            name for name, value in (
+                ('GOOGLE_OAUTH_CLIENT_ID', cls.GOOGLE_OAUTH_CLIENT_ID),
+                ('GOOGLE_OAUTH_CLIENT_SECRET', cls.GOOGLE_OAUTH_CLIENT_SECRET),
+            ) if not value
+        ]
+        if missing:
+            raise ValueError(
+                f"Missing required configuration: {', '.join(missing)}. "
+                f"Please set these in your .env file to use the Search Console integration."
             )
 
     @classmethod

@@ -21,6 +21,7 @@ from backend.routes.demo_routes import demo_blueprint
 from backend.routes.url_match_routes import url_match_blueprint
 from backend.routes.billing_routes import billing_blueprint, pricing_blueprint
 from backend.routes.email_routes import email_blueprint
+from backend.routes.gsc_routes import gsc_blueprint
 from backend.extensions import limiter, register_error_handlers
 
 def create_app():
@@ -47,6 +48,7 @@ def create_app():
     app.register_blueprint(pricing_blueprint, url_prefix="/api/pricing")
     app.register_blueprint(billing_blueprint, url_prefix="/api/billing")
     app.register_blueprint(email_blueprint, url_prefix="/api/email")
+    app.register_blueprint(gsc_blueprint, url_prefix="/api/gsc")
 
     @app.route("/")
     def home():

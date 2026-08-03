@@ -19,6 +19,7 @@ from src.redirx.database import (
     UserQuotaDB,
     WebPageEmbeddingDB,
     DeepMatchPreviewDB,
+    GSCUrlMetricsDB,
 )
 
 pipeline_blueprint = Blueprint("pipeline", __name__)
@@ -295,8 +296,16 @@ def get_results(session_id: str):
         mapping_db = URLMappingDB()
         db_mappings = mapping_db.get_mappings_by_session(session_uuid)
 
+        # Attach Search Console traffic metrics if this session was synced
+        gsc_metrics = None
+        if session_metadata.get('gsc_synced_at'):
+            try:
+                gsc_metrics = GSCUrlMetricsDB().get_metrics_by_session(session_uuid)
+            except Exception:
+                gsc_metrics = None
+
         # Transform data for frontend
-        response = format_results_response(db_mappings, session_metadata)
+        response = format_results_response(db_mappings, session_metadata, gsc_metrics)
 
         return jsonify(response), 200
 

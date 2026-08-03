@@ -31,6 +31,7 @@ interface ReviewToolbarProps {
   filteredCount: number;
   searchInputRef?: React.RefObject<HTMLInputElement>;
   tutorialExportHighlight?: boolean;
+  showTrafficSort?: boolean;
 }
 
 export function ReviewToolbar({
@@ -47,6 +48,7 @@ export function ReviewToolbar({
   filteredCount,
   searchInputRef,
   tutorialExportHighlight = false,
+  showTrafficSort = false,
 }: ReviewToolbarProps) {
   return (
     <div className="bg-card border border-border p-4 flex items-center gap-4 flex-wrap">
@@ -98,6 +100,11 @@ export function ReviewToolbar({
           <SelectValue placeholder="Sort by" />
         </SelectTrigger>
         <SelectContent>
+          {showTrafficSort && (
+            <SelectItem value="traffic-desc">
+              Traffic: High to Low
+            </SelectItem>
+          )}
           <SelectItem value="confidence-desc">
             Confidence: High to Low
           </SelectItem>

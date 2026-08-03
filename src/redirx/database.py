@@ -653,3 +653,124 @@ class URLMappingDB:
             self.client.table('url_mappings').update(updates).eq(
                 'id', str(mapping_id)
             ).execute()
+
+
+class GSCConnectionDB:
+    """
+    Database operations for Google Search Console OAuth connections.
+    One connection per user; tokens are only ever touched server-side.
+    """
+
+    def __init__(self, client: Optional[Client] = None):
+        self.client = client or SupabaseClient.get_client()
+
+    def get_connection(self, user_id: str) -> Optional[Dict[str, Any]]:
+        result = self.client.table('gsc_connections').select('*').eq(
+            'user_id', user_id
+        ).execute()
+        return result.data[0] if result.data else None
+
+    def upsert_connection(
+        self,
+        user_id: str,
+        access_token: str,
+        refresh_token: str,
+        token_expires_at: Optional[str] = None,
+        google_email: Optional[str] = None,
+        scopes: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        record: Dict[str, Any] = {
+            'user_id': user_id,
+            'access_token': access_token,
+            'refresh_token': refresh_token,
+            'token_expires_at': token_expires_at,
+        }
+        if google_email is not None:
+            record['google_email'] = google_email
+        if scopes is not None:
+            record['scopes'] = scopes
+
+        result = self.client.table('gsc_connections').upsert(
+            record, on_conflict='user_id'
+        ).execute()
+        return result.data[0]
+
+    def update_access_token(
+        self,
+        user_id: str,
+        access_token: str,
+        token_expires_at: Optional[str] = None,
+    ) -> None:
+        self.client.table('gsc_connections').update({
+            'access_token': access_token,
+            'token_expires_at': token_expires_at,
+        }).eq('user_id', user_id).execute()
+
+    def delete_connection(self, user_id: str) -> None:
+        self.client.table('gsc_connections').delete().eq(
+            'user_id', user_id
+        ).execute()
+
+
+class GSCUrlMetricsDB:
+    """
+    Database operations for per-session GSC URL traffic metrics.
+    """
+
+    def __init__(self, client: Optional[Client] = None):
+        self.client = client or SupabaseClient.get_client()
+
+    def replace_session_metrics(
+        self,
+        session_id: UUID,
+        metrics: List[Dict[str, Any]],
+    ) -> int:
+        """
+        Replace all metrics for a session with a fresh Search Analytics pull.
+
+        Args:
+            session_id: Migration session ID.
+            metrics: Dicts with url, clicks, impressions, ctr, position.
+
+        Returns:
+            Number of rows inserted.
+        """
+        self.client.table('gsc_url_metrics').delete().eq(
+            'session_id', str(session_id)
+        ).execute()
+
+        if not metrics:
+            return 0
+
+        rows = [{
+            'session_id': str(session_id),
+            'url': m['url'],
+            'clicks': int(m.get('clicks', 0)),
+            'impressions': int(m.get('impressions', 0)),
+            'ctr': float(m.get('ctr', 0.0)),
+            'position': float(m.get('position', 0.0)),
+        } for m in metrics]
+
+        # Chunk inserts to stay under PostgREST payload limits.
+        inserted = 0
+        for i in range(0, len(rows), 500):
+            chunk = rows[i:i + 500]
+            self.client.table('gsc_url_metrics').insert(chunk).execute()
+            inserted += len(chunk)
+        return inserted
+
+    def get_metrics_by_session(self, session_id: UUID) -> List[Dict[str, Any]]:
+        result = self.client.table('gsc_url_metrics').select('*').eq(
+            'session_id', str(session_id)
+        ).execute()
+        return result.data
+
+    def set_session_gsc_metadata(
+        self,
+        session_id: UUID,
+        gsc_property: str,
+    ) -> None:
+        self.client.table('migration_sessions').update({
+            'gsc_property': gsc_property,
+            'gsc_synced_at': datetime.now(timezone.utc).isoformat(),
+        }).eq('id', str(session_id)).execute()

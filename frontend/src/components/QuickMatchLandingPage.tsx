@@ -66,7 +66,7 @@ export function QuickMatchLandingPage() {
             Free Redirect Map Generator
           </h1>
           <p className="mt-3 text-muted-foreground">
-            Upload two sitemaps. Get matched redirects in seconds.
+            Paste two domains. Get matched redirects in seconds.
           </p>
         </div>
 
@@ -189,17 +189,19 @@ export function QuickMatchLandingPage() {
 
         <section className="mt-10 border-t border-border pt-6 text-sm text-muted-foreground">
           <p>
-            RedirX Quick Match maps old URLs to new URLs from sitemap or CSV uploads and produces
-            review-ready redirect suggestions.
+            RedirX Quick Match maps old URLs to new URLs and produces review-ready redirect
+            suggestions. Paste your old and new domains and we discover the pages for you —
+            via sitemap, WordPress or Shopify APIs, or a site crawl. Sitemap and CSV uploads
+            are also supported.
           </p>
           <ol className="mt-4 list-decimal space-y-1 pl-5">
             <li>Sign up or log in.</li>
-            <li>Upload old and new sitemap files.</li>
+            <li>Paste your old and new domains (or upload URL files).</li>
             <li>Run Quick Match, review confidence, and export redirects.</li>
           </ol>
           <p className="mt-4">
-            Supported formats: XML sitemap, sitemap index, CSV. Export formats include Vercel,
-            Nginx, Apache, Cloudflare, Netlify, Shopify, CSV, and JSON.
+            Supported inputs: domain scan, XML sitemap, sitemap index, CSV. Export formats
+            include Vercel, Nginx, Apache, Cloudflare, Netlify, Shopify, CSV, and JSON.
           </p>
         </section>
       </section>

@@ -59,6 +59,11 @@ class Config:
     GSC_STATE_SECRET: Optional[str] = os.getenv('GSC_STATE_SECRET') or os.getenv('SUPABASE_KEY')
     GSC_LOOKBACK_DAYS: int = int(os.getenv('GSC_LOOKBACK_DAYS', '90'))
 
+    # Domain URL Discovery (paste-two-domains ingestion)
+    DISCOVERY_MAX_URLS_FREE: int = int(os.getenv('DISCOVERY_MAX_URLS_FREE', '1000'))
+    DISCOVERY_MAX_URLS_PAID: int = int(os.getenv('DISCOVERY_MAX_URLS_PAID', '5000'))
+    DISCOVERY_TIME_BUDGET_SECONDS: float = float(os.getenv('DISCOVERY_TIME_BUDGET_SECONDS', '20'))
+
     # Matching Thresholds
     # HIGH = 0.9+, MEDIUM = 0.85-0.9, LOW = 0.7-0.85, < 0.7 = rejected (orphaned)
     HIGH_CONFIDENCE_THRESHOLD: float = float(os.getenv('HIGH_CONFIDENCE_THRESHOLD', '0.85'))

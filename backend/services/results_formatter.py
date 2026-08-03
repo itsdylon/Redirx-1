@@ -103,7 +103,8 @@ def calculate_title_similarity(old_title: str, new_title: str) -> int:
 
 def transform_mapping_for_frontend(
     db_record: Dict[str, Any],
-    title_map: Optional[Dict[str, str]] = None
+    title_map: Optional[Dict[str, str]] = None,
+    gsc_metrics_map: Optional[Dict[str, Dict[str, Any]]] = None
 ) -> Dict[str, Any]:
     """
     Convert a single database mapping record to frontend format.
@@ -111,6 +112,7 @@ def transform_mapping_for_frontend(
     Args:
         db_record: Database record from url_mappings table
         title_map: Optional URL-to-title lookup from webpage_embeddings
+        gsc_metrics_map: Optional old-URL-to-metrics lookup from gsc_url_metrics
 
     Returns:
         Dictionary matching frontend RedirectMapping interface
@@ -138,7 +140,7 @@ def transform_mapping_for_frontend(
         new_title = title_map.get(new_url, '')
         title_sim = calculate_title_similarity(old_title, new_title)
 
-    return {
+    result = {
         'id': str(db_record['id']),
         'oldUrl': old_url,
         'newUrl': new_url,
@@ -152,6 +154,68 @@ def transform_mapping_for_frontend(
         'titleSimilarity': title_sim,
         'contentSimilarity': content_sim
     }
+
+    if gsc_metrics_map is not None:
+        metrics = gsc_metrics_map.get(old_url)
+        result['gscClicks'] = int(metrics['clicks']) if metrics else 0
+        result['gscImpressions'] = int(metrics['impressions']) if metrics else 0
+
+    return result
+
+
+def compute_risk_summary(
+    mappings: List[Dict[str, Any]],
+    traffic_share_target: float = 0.8,
+) -> Dict[str, Any]:
+    """
+    Compute the traffic-risk headline numbers from mappings that already carry
+    gscClicks/gscImpressions.
+
+    Finds the smallest set of URLs carrying >= traffic_share_target of total
+    clicks (falling back to impressions when a site has zero clicks) and counts
+    how many of those lack a confident match (low band or needs-review).
+    """
+    total_clicks = sum(int(m.get('gscClicks') or 0) for m in mappings)
+    total_impressions = sum(int(m.get('gscImpressions') or 0) for m in mappings)
+    weight_key = 'gscClicks' if total_clicks > 0 else 'gscImpressions'
+    total_weight = total_clicks if total_clicks > 0 else total_impressions
+
+    summary = {
+        'totalClicks': total_clicks,
+        'totalImpressions': total_impressions,
+        'weightMetric': 'clicks' if total_clicks > 0 else 'impressions',
+        'trafficShareTarget': int(traffic_share_target * 100),
+        'topUrlCount': 0,
+        'topUrlsAtRisk': 0,
+        'urlsWithTraffic': 0,
+    }
+
+    if total_weight <= 0:
+        return summary
+
+    weighted = sorted(
+        (m for m in mappings if int(m.get(weight_key) or 0) > 0),
+        key=lambda m: int(m.get(weight_key) or 0),
+        reverse=True,
+    )
+    summary['urlsWithTraffic'] = len(weighted)
+
+    running = 0
+    top: List[Dict[str, Any]] = []
+    for m in weighted:
+        top.append(m)
+        running += int(m.get(weight_key) or 0)
+        if running / total_weight >= traffic_share_target:
+            break
+
+    at_risk = [
+        m for m in top
+        if m.get('confidenceBand') == 'low' or 'needs-review' in (m.get('warnings') or [])
+    ]
+
+    summary['topUrlCount'] = len(top)
+    summary['topUrlsAtRisk'] = len(at_risk)
+    return summary
 
 
 def calculate_stats(mappings: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -214,7 +278,8 @@ def _build_title_map(session_id: str) -> Dict[str, str]:
 
 def format_results_response(
     db_mappings: List[Dict[str, Any]],
-    session_metadata: Dict[str, Any] = None
+    session_metadata: Dict[str, Any] = None,
+    gsc_metrics: Optional[List[Dict[str, Any]]] = None
 ) -> Dict[str, Any]:
     """
     Format complete results response for frontend.
@@ -222,9 +287,11 @@ def format_results_response(
     Args:
         db_mappings: List of database mapping records
         session_metadata: Optional session information
+        gsc_metrics: Optional gsc_url_metrics records for the session
 
     Returns:
-        Complete response with mappings, stats, and metadata
+        Complete response with mappings, stats, metadata, and (when Search
+        Console data has been synced) per-URL traffic plus a risk summary
     """
     # Build title map from embeddings if we have a session
     # Skip for url_only pipelines (no embeddings exist)
@@ -238,9 +305,16 @@ def format_results_response(
             if session_id:
                 title_map = _build_title_map(str(session_id))
 
+    # Search Console traffic data is only attached once a sync has happened
+    gsc_synced = bool(session_metadata and session_metadata.get('gsc_synced_at'))
+    gsc_metrics_map = None
+    if gsc_synced:
+        gsc_metrics_map = {m['url']: m for m in (gsc_metrics or [])}
+
     # Transform all mappings
     frontend_mappings = [
-        transform_mapping_for_frontend(m, title_map) for m in db_mappings
+        transform_mapping_for_frontend(m, title_map, gsc_metrics_map)
+        for m in db_mappings
     ]
 
     # Calculate stats
@@ -251,6 +325,16 @@ def format_results_response(
         'mappings': frontend_mappings,
         'stats': stats
     }
+
+    if gsc_synced:
+        response['gsc'] = {
+            'synced': True,
+            'property': session_metadata.get('gsc_property'),
+            'synced_at': session_metadata.get('gsc_synced_at'),
+            'riskSummary': compute_risk_summary(frontend_mappings),
+        }
+    else:
+        response['gsc'] = {'synced': False}
 
     # Add session metadata if provided
     if session_metadata:

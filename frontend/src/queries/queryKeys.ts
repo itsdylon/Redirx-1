@@ -15,6 +15,9 @@ export const queryKeys = {
     unlockStatus: (sourceSessionId: string) => ['billing', 'unlock-status', sourceSessionId] as const,
     estimate: (pageCount: number) => ['billing', 'estimate', pageCount] as const,
   },
+  gsc: {
+    status: ['gsc', 'status'] as const,
+  },
   email: {
     preferences: ['email', 'preferences'] as const,
   },

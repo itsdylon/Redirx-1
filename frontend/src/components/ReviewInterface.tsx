@@ -27,6 +27,8 @@ import { isEnterprisePlan } from '../lib/plans';
 import { useOnboarding } from '../contexts/OnboardingContext';
 import { useAuth } from '../contexts/AuthContext';
 import { DeepMatchPreviewCard } from './DeepMatchPreviewCard';
+import { GscTrafficCard } from './GscTrafficCard';
+import type { GscResultsMeta } from '../api/gsc';
 import { queryKeys } from '../queries/queryKeys';
 import { handleUnauthorizedAndRedirect } from '../queries/auth';
 import {
@@ -66,6 +68,8 @@ export interface RedirectMapping {
   pathSimilarity: number;
   titleSimilarity: number;
   contentSimilarity: number;
+  gscClicks?: number;
+  gscImpressions?: number;
 }
 
 interface ReviewInterfaceProps {
@@ -97,6 +101,7 @@ export function ReviewInterface({ layoutVariant = 'dashboard' }: ReviewInterface
   const [sortOption, setSortOption] = useState<string>('confidence-desc');
   const [showExactMatches, setShowExactMatches] = useState(true);
   const [pipelineType, setPipelineType] = useState<string>('content');
+  const [gscMeta, setGscMeta] = useState<GscResultsMeta | null>(null);
   const [showTutorialSuccess, setShowTutorialSuccess] = useState(false);
   const [showCoachmarks, setShowCoachmarks] = useState(false);
   const [samplePreparationActive, setSamplePreparationActive] = useState(false);
@@ -180,6 +185,8 @@ export function ReviewInterface({ layoutVariant = 'dashboard' }: ReviewInterface
     quickMatchCompletedTrackedRef.current = false;
     setRedirects([]);
     setPipelineType('content');
+    setGscMeta(null);
+    setSortOption('confidence-desc');
     setError(null);
   }, [sessionId]);
 
@@ -214,6 +221,40 @@ export function ReviewInterface({ layoutVariant = 'dashboard' }: ReviewInterface
       });
     }
   }, [resultsQuery.data, sessionId, posthog]);
+
+  // GSC metadata updates on every refetch (unlike redirects, which hydrate
+  // once per session to preserve local edits). After a traffic sync, merge the
+  // new click counts into existing rows and surface the traffic sort.
+  const gscSortAppliedRef = useRef(false);
+  useEffect(() => {
+    const data = resultsQuery.data;
+    if (!data?.success) return;
+
+    const meta = (data.gsc as GscResultsMeta | undefined) ?? null;
+    setGscMeta(meta);
+
+    if (meta?.synced && Array.isArray(data.mappings) && hydratedSessionRef.current === sessionId) {
+      const byId = new Map<string, RedirectMapping>(
+        data.mappings.map((m: RedirectMapping) => [m.id, m])
+      );
+      setRedirects(prev =>
+        prev.map(r => {
+          const fresh = byId.get(r.id);
+          return fresh
+            ? { ...r, gscClicks: fresh.gscClicks, gscImpressions: fresh.gscImpressions }
+            : r;
+        })
+      );
+    }
+
+    if (meta?.synced && !gscSortAppliedRef.current) {
+      gscSortAppliedRef.current = true;
+      setSortOption('traffic-desc');
+    }
+    if (!meta?.synced) {
+      gscSortAppliedRef.current = false;
+    }
+  }, [resultsQuery.data, sessionId]);
 
   useEffect(() => {
     if (!resultsQuery.error) return;
@@ -444,6 +485,12 @@ export function ReviewInterface({ layoutVariant = 'dashboard' }: ReviewInterface
   // Sort according to toolbar selection
   const sortedRedirects = [...filteredRedirects].sort((a, b) => {
     switch (sortOption) {
+      case 'traffic-desc':
+        return (
+          (b.gscClicks ?? 0) - (a.gscClicks ?? 0) ||
+          (b.gscImpressions ?? 0) - (a.gscImpressions ?? 0) ||
+          a.matchScore - b.matchScore
+        );
       case 'confidence-asc':
         return a.matchScore - b.matchScore;
       case 'url-asc':
@@ -640,6 +687,9 @@ export function ReviewInterface({ layoutVariant = 'dashboard' }: ReviewInterface
             <div className="mb-4 text-xs text-muted-foreground">{deepPreviewError}</div>
           )}
 
+          {/* Search Console traffic triage */}
+          {sessionId && <GscTrafficCard sessionId={sessionId} gscMeta={gscMeta} />}
+
           {/* Stats Bar */}
           <StatsBar stats={stats} />
 
@@ -663,6 +713,7 @@ export function ReviewInterface({ layoutVariant = 'dashboard' }: ReviewInterface
             filteredCount={sortedRedirects.length}
             searchInputRef={searchInputRef}
             tutorialExportHighlight={tutorialActive && showCoachmarks && !isStepCompleted('export_redirects')}
+            showTrafficSort={!!gscMeta?.synced}
           />
 
           {/* Table */}
@@ -680,6 +731,7 @@ export function ReviewInterface({ layoutVariant = 'dashboard' }: ReviewInterface
             totalRedirectsCount={redirects.length}
             isLoading={isLoading}
             pipelineType={pipelineType}
+            showTraffic={!!gscMeta?.synced}
           />
 
           </div>

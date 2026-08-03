@@ -101,6 +101,7 @@ interface RedirectTableProps {
   totalRedirectsCount?: number;
   isLoading?: boolean;
   pipelineType?: string;
+  showTraffic?: boolean;
 }
 
 export function RedirectTable({
@@ -115,8 +116,10 @@ export function RedirectTable({
   onClearFilters,
   totalRedirectsCount = 0,
   isLoading = false,
-  pipelineType = 'content'
+  pipelineType = 'content',
+  showTraffic = false
 }: RedirectTableProps) {
+  const columnCount = showTraffic ? 10 : 9;
   const isExactMatch = (redirect: RedirectMapping) =>
     redirect.matchType === 'exact_url';
 
@@ -188,6 +191,12 @@ export function RedirectTable({
       <TableCell>
         <Skeleton className="h-4 w-full max-w-md" />
       </TableCell>
+      {/* Clicks */}
+      {showTraffic && (
+        <TableCell className="text-right">
+          <Skeleton className="h-4 w-12 ml-auto" />
+        </TableCell>
+      )}
       {/* Confidence Badge */}
       <TableCell>
         <Skeleton className="h-6 w-20 rounded-full" />
@@ -266,6 +275,9 @@ export function RedirectTable({
             </TableHead>
             <TableHead className="text-foreground w-[30%]">Old URL</TableHead>
             <TableHead className="text-foreground w-[30%]">Suggested New URL</TableHead>
+            {showTraffic && (
+              <TableHead className="text-foreground w-24 text-right">Clicks</TableHead>
+            )}
             <TableHead className="text-foreground w-32">Confidence</TableHead>
             <TableHead className="text-foreground w-24 text-center">Score</TableHead>
             <TableHead className="w-20 text-foreground text-center">Status</TableHead>
@@ -279,7 +291,7 @@ export function RedirectTable({
             Array.from({ length: 10 }).map((_, index) => renderSkeletonRow(index))
           ) : redirects.length === 0 ? (
             <TableRow>
-              <TableCell colSpan={9} className="h-96">
+              <TableCell colSpan={columnCount} className="h-96">
                 <div className="flex flex-col items-center justify-center text-center">
                   {(() => {
                     const emptyState = getEmptyStateContent();
@@ -346,6 +358,20 @@ export function RedirectTable({
                     {redirect.newUrl}
                   </div>
                 </TableCell>
+                {showTraffic && (
+                  <TableCell className="text-right">
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span className={`tabular-nums ${(redirect.gscClicks ?? 0) > 0 ? 'text-foreground' : 'text-muted-foreground'}`}>
+                          {(redirect.gscClicks ?? 0).toLocaleString()}
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        {(redirect.gscImpressions ?? 0).toLocaleString()} impressions (last 90 days)
+                      </TooltipContent>
+                    </Tooltip>
+                  </TableCell>
+                )}
                 <TableCell>
                   {getConfidenceBadge(redirect)}
                 </TableCell>
@@ -394,7 +420,7 @@ export function RedirectTable({
               {/* Expanded Row Details */}
               {expandedRow === redirect.id && (
                 <TableRow className="bg-muted">
-                  <TableCell colSpan={9} className="p-6">
+                  <TableCell colSpan={columnCount} className="p-6">
                     <AnimateIn>
                       {/* Full URLs */}
                       <div className="grid grid-cols-2 gap-4 mb-4">

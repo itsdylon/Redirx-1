@@ -12,6 +12,7 @@ import aiohttp
 from bs4 import BeautifulSoup
 
 from redirx.stages import UrlPruneStage, BlogPruneStage, WebPage
+from redirx.safe_fetch import create_safe_connector
 
 
 def _is_private_ip(hostname: str) -> bool:
@@ -106,7 +107,8 @@ class SiteAuditor:
 
         async with aiohttp.ClientSession(
             timeout=aiohttp.ClientTimeout(total=30),
-            headers={"User-Agent": "Redirx-SiteAudit/1.0"}
+            headers={"User-Agent": "Redirx-SiteAudit/1.0"},
+            connector=create_safe_connector(),
         ) as session:
 
             # --- URL Discovery ---

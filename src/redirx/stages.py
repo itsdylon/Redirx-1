@@ -11,6 +11,7 @@ from openai import AsyncOpenAI
 
 from .config import Config
 from .database import WebPageEmbeddingDB, MigrationSessionDB, URLMappingDB
+from .safe_fetch import create_safe_connector
 from .url_matcher import UrlMatcher, UrlMatchConfig
 
 class Stage:
@@ -526,7 +527,8 @@ class WebScraperStage(Stage):
             flush=True,
         )
 
-        async with aiohttp.ClientSession() as session:
+        # Safe connector: user-supplied URL lists must not reach internal hosts.
+        async with aiohttp.ClientSession(connector=create_safe_connector()) as session:
             total_semaphore = asyncio.Semaphore(self.max_total_concurrency)
             old_site_semaphore = asyncio.Semaphore(self.max_site_concurrency)
             new_site_semaphore = asyncio.Semaphore(self.max_site_concurrency)

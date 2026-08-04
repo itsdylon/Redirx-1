@@ -28,6 +28,14 @@ import aiohttp
 from bs4 import BeautifulSoup
 
 from redirx.stages import UrlPruneStage
+from redirx.safe_fetch import (
+    MAX_REDIRECTS,
+    SSRFBlockedError,
+    create_safe_connector,
+    is_forbidden_ip,
+    resolve_and_validate_host,
+    validate_public_url,
+)
 
 USER_AGENT = "RedirxBot/1.0 (+https://redirx.dev; site migration redirect mapping)"
 
@@ -96,19 +104,21 @@ def normalize_root(raw: str) -> str:
             "invalid_domain",
             f"'{raw}' does not look like a valid domain.",
         )
-    port = f":{parsed.port}" if parsed.port and parsed.port not in (80, 443) else ""
-    return f"{parsed.scheme}://{host}{port}"
+    if parsed.port and parsed.port not in (80, 443):
+        raise DiscoveryError("invalid_domain", "Cannot reach that host.")
+    return f"{parsed.scheme}://{host}"
 
 
 def is_private_host(hostname: str) -> bool:
-    """Reject private/loopback targets to prevent SSRF."""
-    if hostname in ("localhost", "127.0.0.1", "::1", "0.0.0.0"):
+    """Reject private/loopback targets to prevent SSRF (string-level check;
+    resolved-IP validation happens at connect time via the safe connector)."""
+    if hostname in ("localhost", "0.0.0.0") or hostname.endswith(".localhost"):
         return True
     try:
-        addr = ipaddress.ip_address(hostname)
-        return addr.is_private or addr.is_loopback or addr.is_reserved or addr.is_link_local
+        ipaddress.ip_address(hostname)
     except ValueError:
         return False
+    return is_forbidden_ip(hostname)
 
 
 def _bare_host(url_or_host: str) -> str:
@@ -225,26 +235,45 @@ async def _fetch(
 ) -> tuple[int, str, dict, str]:
     """
     GET a URL. Returns (status, text, headers, final_url); status 0 on
-    transport failure. Transparently decompresses .gz sitemap payloads.
+    transport failure or SSRF block. Transparently decompresses .gz sitemap
+    payloads.
+
+    Redirects are followed manually so every hop is re-validated (scheme,
+    port, raw-IP denylist); the safe connector independently validates each
+    hop's resolved IPs at connect time.
     """
+    current = url
     try:
-        async with session.get(url, allow_redirects=True) as resp:
-            raw = await resp.content.read(MAX_RESPONSE_BYTES)
-            headers = dict(resp.headers)
-            final_url = str(resp.url)
-            if url.endswith(".gz") and raw[:2] == b"\x1f\x8b":
+        for _ in range(MAX_REDIRECTS + 1):
+            validate_public_url(current)
+            async with session.get(current, allow_redirects=False) as resp:
+                location = resp.headers.get("Location")
+                if resp.status in (301, 302, 303, 307, 308) and location:
+                    current = urljoin(current, location)
+                    continue
+
+                raw = await resp.content.read(MAX_RESPONSE_BYTES)
+                headers = dict(resp.headers)
+                final_url = str(resp.url)
+                if current.endswith(".gz") and raw[:2] == b"\x1f\x8b":
+                    try:
+                        raw = gzip.decompress(raw)
+                    except OSError:
+                        return resp.status, "", headers, final_url
                 try:
-                    raw = gzip.decompress(raw)
-                except OSError:
-                    return resp.status, "", headers, final_url
-            try:
-                text = raw.decode(resp.charset or "utf-8", errors="replace")
-            except (LookupError, UnicodeDecodeError):
-                text = raw.decode("utf-8", errors="replace")
-            return resp.status, text, headers, final_url
+                    text = raw.decode(resp.charset or "utf-8", errors="replace")
+                except (LookupError, UnicodeDecodeError):
+                    text = raw.decode("utf-8", errors="replace")
+                return resp.status, text, headers, final_url
+
+        errors.append(f"too many redirects for {url}")
+        return 0, "", {}, current
+    except SSRFBlockedError:
+        errors.append(f"blocked target for {url}")
+        return 0, "", {}, current
     except Exception as exc:
         errors.append(f"fetch failed for {url}: {type(exc).__name__}")
-        return 0, "", {}, url
+        return 0, "", {}, current
 
 
 # ============================================================================
@@ -430,6 +459,7 @@ async def discover_via_crawl(
     semaphore = asyncio.Semaphore(CRAWL_CONCURRENCY)
     max_fetches = min(collect_cap, 400)
     fetched = 0
+    fetched_ok = 0
 
     async def fetch_page(url: str) -> str:
         async with semaphore:
@@ -460,12 +490,19 @@ async def discover_via_crawl(
         fetched += len(batch)
         pages = await asyncio.gather(*(fetch_page(url) for url, _ in batch))
         for (url, depth), html in zip(batch, pages):
-            if not html or depth >= CRAWL_MAX_DEPTH:
+            if not html:
+                continue
+            fetched_ok += 1
+            if depth >= CRAWL_MAX_DEPTH:
                 continue
             for link in extract_links(html, url, root_url):
                 if link.rstrip("/") not in visited:
                     frontier.append((link, depth + 1))
 
+    # URLs enter `found` when queued, so an unreachable host would otherwise
+    # report its own homepage as a discovered page.
+    if fetched_ok == 0:
+        return []
     return found
 
 
@@ -494,8 +531,15 @@ async def discover_site(
     """
     root_url = normalize_root(raw_root)
     host = urlparse(root_url).hostname or ""
+    # Generic messages on purpose — do not confirm which targets are interesting.
     if is_private_host(host):
-        raise DiscoveryError("ssrf_blocked", "Private or local addresses are not allowed.")
+        raise DiscoveryError("ssrf_blocked", "Cannot reach that host.")
+    # Resolve first, validate the resolved IPs, then connect. Catches public
+    # hostnames that resolve to internal addresses (e.g. 10.0.0.1.nip.io).
+    try:
+        await resolve_and_validate_host(host, 443 if root_url.startswith("https") else 80)
+    except SSRFBlockedError:
+        raise DiscoveryError("ssrf_blocked", "Cannot reach that host.")
 
     started = time.monotonic()
     deadline = started + time_budget
@@ -508,6 +552,7 @@ async def discover_site(
     async with aiohttp.ClientSession(
         timeout=timeout,
         headers={"User-Agent": USER_AGENT},
+        connector=create_safe_connector(),
     ) as session:
         # Homepage: platform detection + canonical root (follows redirects,
         # e.g. http→https, bare→www).

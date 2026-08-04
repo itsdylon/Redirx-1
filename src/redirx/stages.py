@@ -1190,10 +1190,9 @@ class WebPage:
 
                 async with session.get(url, timeout=aiohttp.ClientTimeout(total=30)) as response:
                     if limiter is not None:
-                        if limiter.note_response(response.status):
-                            await limiter.record_failure(
-                                url, parse_retry_after(response.headers.get("Retry-After"))
-                            )
+                        ra = parse_retry_after(response.headers.get("Retry-After"))
+                        if limiter.note_response(response.status, ra):
+                            await limiter.record_failure(url, ra)
                         elif response.status < 400:
                             await limiter.record_success(url)
 

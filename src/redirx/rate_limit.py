@@ -54,6 +54,16 @@ MIN_RATE = float(os.getenv("CRAWL_MIN_RATE", "0.1"))
 # Ceiling on how long a single acquire will wait before giving up on a host.
 MAX_ACQUIRE_WAIT = float(os.getenv("CRAWL_MAX_ACQUIRE_WAIT", "30"))
 
+# Discovery reads robots.txt and a handful of sitemap documents — static,
+# usually CDN-cached, and not something WAFs meaningfully rate-limit. Pacing
+# those like sustained page scraping just burns the request's time budget, so
+# they get their own bucket with a looser rate.
+# Measured: a 10-deep burst at 8/s drew a 429 from allbirds.com's WAF even on
+# sitemap paths, so this is tuned down from the theoretical "sitemaps are free".
+DISCOVERY_CAPACITY = float(os.getenv("DISCOVERY_BURST_CAPACITY", "5"))
+DISCOVERY_RATE = float(os.getenv("DISCOVERY_DEFAULT_RATE", "4"))
+DISCOVERY_NAMESPACE = "discovery"
+
 # Statuses that mean "you are going too fast" or "you are not welcome".
 BACKOFF_STATUSES = (403, 429, 503)
 
@@ -178,15 +188,37 @@ async def close_pool() -> None:
 class HostRateLimiter:
     """Async facade over the Postgres token-bucket functions."""
 
-    def __init__(self, dsn: Optional[str] = None, enabled: bool | None = None):
+    def __init__(
+        self,
+        dsn: Optional[str] = None,
+        enabled: bool | None = None,
+        namespace: str = "",
+        capacity: float | None = None,
+        rate: float | None = None,
+    ):
+        """
+        Args:
+            namespace: Bucket key prefix. Discovery (a handful of static,
+                usually CDN-cached sitemap/robots requests) and content
+                scraping (sustained page fetches) impose very different loads
+                on an origin, so they get separate buckets rather than
+                fighting over one adaptive rate for the same host.
+            capacity: Bucket depth. Defaults to CRAWL_BURST_CAPACITY.
+            rate: Starting refill rate. Only applied when the bucket row is
+                first created; after that the stored adaptive rate governs.
+        """
         self._dsn = dsn
         if enabled is None:
             enabled = os.getenv("CRAWL_POLITENESS_ENABLED", "true").strip().lower() not in (
                 "0", "false", "no", "off",
             )
         self.enabled = enabled
-        # Hosts whose breaker tripped during this job — skip them outright.
-        self._tripped: set[str] = set()
+        self.namespace = namespace
+        self.capacity = DEFAULT_CAPACITY if capacity is None else capacity
+        self.rate = DEFAULT_RATE if rate is None else rate
+        # Paused hosts -> seconds remaining, so a paused host reports its real
+        # wait rather than the generic breaker cooldown.
+        self._tripped: dict[str, float] = {}
         # Hosts we've already warned about, so a limiter outage logs once per
         # host instead of once per fetch.
         self._warned: set[str] = set()
@@ -203,11 +235,14 @@ class HostRateLimiter:
                 columns = [d.name for d in cur.description]
                 return [dict(zip(columns, row)) for row in await cur.fetchall()]
 
+    def _key(self, host: str) -> str:
+        return f"{self.namespace}:{host}" if self.namespace else host
+
     async def try_acquire(self, host: str) -> AcquireResult:
         rows = await self._call(
             "SELECT allowed, retry_after, reason FROM try_consume_host_token("
             "%s::text, %s::double precision, %s::double precision)",
-            (host, DEFAULT_CAPACITY, DEFAULT_RATE),
+            (self._key(host), self.capacity, self.rate),
         )
         row = rows[0] if rows else {}
         return AcquireResult(
@@ -229,7 +264,7 @@ class HostRateLimiter:
         if not host:
             return
         if host in self._tripped:
-            raise CircuitOpen(host, BREAKER_COOLDOWN)
+            raise CircuitOpen(host, self._tripped[host])
 
         waited = 0.0
         while True:
@@ -250,11 +285,21 @@ class HostRateLimiter:
             if result.allowed:
                 return
             if result.reason == "circuit_open":
-                self._tripped.add(host)
+                # A single 429 carrying a short Retry-After sets blocked_until
+                # without tripping the breaker. Waiting that out is the polite
+                # and correct response; aborting would turn one transient
+                # throttle into "0 pages found" for a site that works fine.
+                remaining = MAX_ACQUIRE_WAIT - waited
+                if result.retry_after <= remaining:
+                    await asyncio.sleep(max(result.retry_after, 0.05))
+                    waited += result.retry_after
+                    continue
+                self._tripped[host] = result.retry_after
                 raise CircuitOpen(host, result.retry_after)
 
             delay = min(max(result.retry_after, 0.05), 5.0)
             if waited + delay > MAX_ACQUIRE_WAIT:
+                self._tripped[host] = result.retry_after
                 raise CircuitOpen(host, result.retry_after)
             await asyncio.sleep(delay)
             waited += delay
@@ -268,7 +313,7 @@ class HostRateLimiter:
         try:
             await self._call(
                 "SELECT record_host_success(%s::text, %s::double precision, %s::double precision)",
-                (host, RATE_INCREMENT, MAX_RATE),
+                (self._key(host), RATE_INCREMENT, MAX_RATE),
             )
         except Exception as exc:
             logger.debug("record_host_success failed for %s: %s", host, exc)
@@ -289,7 +334,7 @@ class HostRateLimiter:
                 "SELECT circuit_open, new_rate FROM record_host_failure("
                 "%s::text, %s::double precision, %s::integer, "
                 "%s::double precision, %s::double precision)",
-                (host, retry_after, BREAKER_THRESHOLD, BREAKER_COOLDOWN, MIN_RATE),
+                (self._key(host), retry_after, BREAKER_THRESHOLD, BREAKER_COOLDOWN, MIN_RATE),
             )
         except Exception as exc:
             logger.debug("record_host_failure failed for %s: %s", host, exc)
@@ -298,7 +343,7 @@ class HostRateLimiter:
         row = rows[0] if rows else {}
         tripped = bool(row.get("circuit_open"))
         if tripped:
-            self._tripped.add(host)
+            self._tripped[host] = BREAKER_COOLDOWN
             logger.warning("circuit breaker tripped for %s", host)
         return tripped
 
@@ -313,14 +358,27 @@ class HostRateLimiter:
         if not host:
             return None
         try:
-            await self._call("SELECT set_host_crawl_delay(%s::text, %s::double precision)", (host, delay))
+            await self._call("SELECT set_host_crawl_delay(%s::text, %s::double precision)", (self._key(host), delay))
         except Exception as exc:
             logger.debug("set_host_crawl_delay failed for %s: %s", host, exc)
         return delay
 
-    def note_response(self, status: int) -> bool:
-        """Whether a status code should count as a politeness failure."""
-        return status in BACKOFF_STATUSES
+    def note_response(self, status: int, retry_after: float | None = None) -> bool:
+        """
+        Whether a response should count as a politeness failure.
+
+        429 and 503 unambiguously mean "slow down". 403 does not: discovery
+        speculatively probes several candidate sitemap paths, and a WAF
+        answering 403 for one that doesn't exist is saying "not here", not
+        "back off". Treating that as throttling let a single probe block an
+        entire working domain. A 403 only counts when it carries Retry-After,
+        which is an explicit throttle signal.
+        """
+        if status in (429, 503):
+            return True
+        if status == 403:
+            return retry_after is not None
+        return False
 
 
 # The limiter is a job-scoped dependency threaded through deep call stacks

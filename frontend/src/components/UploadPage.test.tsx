@@ -184,8 +184,11 @@ describe('UploadPage — rendering', () => {
 
   it('renders quick-only start mode without deep/quick selector cards', () => {
     renderUploadPage({ quickOnly: true });
-    expect(screen.getByText('Quick Match Workflow')).toBeInTheDocument();
     expect(screen.queryByText('Deep Match')).not.toBeInTheDocument();
+    // The explanatory "1. Upload / 2. Review / 3. Export" panel was removed —
+    // the flow should be self-evident from the UI rather than narrated.
+    expect(screen.queryByText('Quick Match Workflow')).not.toBeInTheDocument();
+    expect(screen.getByText('Old Site CSV')).toBeInTheDocument();
   });
 });
 

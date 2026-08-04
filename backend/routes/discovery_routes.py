@@ -13,7 +13,8 @@ from backend.extensions import limiter
 from backend.services.auth_service import require_auth
 from src.redirx.config import Config
 from src.redirx.database import UserQuotaDB
-from src.redirx.discovery import DiscoveryError, discover_site
+from backend.services.ingestion_service import IngestionService
+from src.redirx.discovery import DiscoveryError
 
 discovery_blueprint = Blueprint("discovery", __name__)
 
@@ -46,6 +47,10 @@ def discover():
             "code": "missing_url",
         }), 400
 
+    # The old side leads with Search Console; the new side's URLs are not
+    # indexed yet, so GSC would return nothing there.
+    side = "old" if str(body.get("side") or "old").lower() == "old" else "new"
+
     user_id = str(request.user.id)
     plan = UserQuotaDB().get_plan(user_id)
     max_urls = (
@@ -55,8 +60,10 @@ def discover():
     )
 
     try:
-        result = asyncio.run(discover_site(
-            raw_url,
+        ingestion = asyncio.run(IngestionService().ingest_side(
+            user_id=user_id,
+            domain=raw_url,
+            side=side,
             max_urls=max_urls,
             time_budget=Config.DISCOVERY_TIME_BUDGET_SECONDS,
         ))
@@ -74,46 +81,58 @@ def discover():
             "code": "discovery_failed",
         }), 500
 
-    if not result.urls:
-        if result.rate_limited:
-            minutes = max(1, round(result.retry_after_seconds / 60))
+    entries = ingestion["entries"]
+    summary = ingestion["summary"]
+    root_url = ingestion["root_url"]
+
+    if not entries:
+        if ingestion["rate_limited"]:
+            minutes = max(1, round(ingestion["retry_after_seconds"] / 60))
             return jsonify({
                 "success": False,
                 "code": "rate_limited",
                 "error": (
-                    f"{urlparse(result.root_url).hostname} is currently rate-limiting "
+                    f"{urlparse(root_url).hostname} is currently rate-limiting "
                     f"automated requests. Try again in about {minutes} "
                     f"minute{'s' if minutes != 1 else ''}, or upload a sitemap or "
                     "CSV export instead."
                 ),
-                "root_url": result.root_url,
-                "retry_after_seconds": result.retry_after_seconds,
-                "generator": result.generator,
+                "root_url": root_url,
+                "retry_after_seconds": ingestion["retry_after_seconds"],
+                "generator": ingestion["generator"],
             }), 429
 
         return jsonify({
             "success": False,
             "code": "no_urls_found",
             "error": (
-                f"Could not find any pages on {result.root_url}. "
+                f"Could not find any pages on {root_url}. "
                 "The site may block automated requests — you can upload a "
                 "sitemap or CSV instead."
             ),
-            "root_url": result.root_url,
-            "generator": result.generator,
-            "errors": result.errors[:5],
+            "root_url": root_url,
+            "generator": ingestion["generator"],
         }), 422
 
     return jsonify({
         "success": True,
-        "root_url": result.root_url,
-        "urls": result.urls,
-        "count": len(result.urls),
-        "total_found": result.total_found,
-        "truncated": result.truncated,
+        "root_url": root_url,
+        # Flat list kept for the existing upload flow, which turns these into
+        # a generated URL file.
+        "urls": [e["url"] for e in entries],
+        # Tagged form: which source found each URL, and its traffic weight.
+        "entries": entries,
+        "count": len(entries),
+        "total_found": summary["total"],
+        "truncated": ingestion["truncated"],
         "max_urls": max_urls,
-        "method": result.method,
-        "generator": result.generator,
-        "duration_ms": result.duration_ms,
+        "method": "gsc" if ingestion["gsc_url_count"] else ingestion["discovery_method"],
+        "discovery_method": ingestion["discovery_method"],
+        "generator": ingestion["generator"],
+        "side": ingestion["side"],
+        "summary": summary,
+        "gsc_property": ingestion["gsc_property"],
+        "gsc_url_count": ingestion["gsc_url_count"],
+        "baseline_captured": bool(ingestion["baseline_id"]),
         "plan": plan,
     }), 200

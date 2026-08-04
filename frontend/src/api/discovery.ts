@@ -1,26 +1,56 @@
 import { API_BASE_URL, getAuthHeaders } from './config';
 import { handleApiError } from '../utils/errorHandler';
 
+/** Which source(s) surfaced a URL. GSC-sourced URLs carry traffic weight. */
+export type UrlSource = 'gsc' | 'sitemap' | 'crawl' | 'csv';
+
+export interface DiscoveredEntry {
+  url: string;
+  sources: UrlSource[];
+  clicks: number;
+  impressions: number;
+}
+
+export interface DiscoverySummary {
+  total: number;
+  with_traffic: number;
+  gsc_only: number;
+  no_recorded_traffic: number;
+  total_clicks: number;
+  total_impressions: number;
+}
+
 export interface DiscoveryResponse {
   success: boolean;
   root_url: string;
   urls: string[];
+  entries?: DiscoveredEntry[];
   count: number;
   total_found: number;
   truncated: boolean;
   max_urls: number;
-  method: 'sitemap' | 'wordpress_api' | 'shopify_api' | 'crawl' | 'none';
+  method: 'gsc' | 'sitemap' | 'wordpress_api' | 'shopify_api' | 'crawl' | 'none';
+  discovery_method?: string;
   generator: string | null;
-  duration_ms: number;
+  side?: 'old' | 'new';
+  summary?: DiscoverySummary;
+  gsc_property?: string | null;
+  gsc_url_count?: number;
+  baseline_captured?: boolean;
+  duration_ms?: number;
   plan: string;
 }
 
-export async function discoverSite(url: string): Promise<DiscoveryResponse> {
+export async function discoverSite(
+  url: string,
+  side: 'old' | 'new' = 'old'
+): Promise<DiscoveryResponse> {
   try {
     const response = await fetch(`${API_BASE_URL}/api/discovery/discover`, {
       method: 'POST',
       headers: getAuthHeaders(),
-      body: JSON.stringify({ url }),
+      // The old side leads with Search Console; the new site isn't indexed yet.
+      body: JSON.stringify({ url, side }),
     });
 
     if (!response.ok) {

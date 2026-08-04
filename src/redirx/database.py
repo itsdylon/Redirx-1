@@ -774,3 +774,124 @@ class GSCUrlMetricsDB:
             'gsc_property': gsc_property,
             'gsc_synced_at': datetime.now(timezone.utc).isoformat(),
         }).eq('id', str(session_id)).execute()
+
+
+class TrafficBaselineDB:
+    """
+    Durable pre-migration traffic snapshots.
+
+    Deliberately not keyed to a session: a baseline cannot be reconstructed
+    after a migration happens, so it must outlive the project that created it.
+    Captured for every tier.
+    """
+
+    def __init__(self, client: Optional[Client] = None):
+        self.client = client or SupabaseClient.get_client()
+
+    def create_baseline(
+        self,
+        user_id: str,
+        gsc_property: str,
+        domain: str,
+        range_start: str,
+        range_end: str,
+        rows: List[Dict[str, Any]],
+        source_session_id: Optional[UUID] = None,
+    ) -> UUID:
+        """
+        Store a full traffic distribution. Returns the new baseline ID.
+        """
+        total_clicks = sum(int(r.get('clicks', 0)) for r in rows)
+        total_impressions = sum(int(r.get('impressions', 0)) for r in rows)
+
+        result = self.client.table('gsc_traffic_baselines').insert({
+            'user_id': user_id,
+            'gsc_property': gsc_property,
+            'domain': domain,
+            'range_start': range_start,
+            'range_end': range_end,
+            'total_clicks': total_clicks,
+            'total_impressions': total_impressions,
+            'url_count': len(rows),
+            'source_session_id': str(source_session_id) if source_session_id else None,
+        }).execute()
+        baseline_id = UUID(result.data[0]['id'])
+
+        payload = [{
+            'baseline_id': str(baseline_id),
+            'url': r['url'],
+            'clicks': int(r.get('clicks', 0)),
+            'impressions': int(r.get('impressions', 0)),
+            'ctr': float(r.get('ctr', 0.0)),
+            'position': float(r.get('position', 0.0)),
+        } for r in rows]
+
+        for i in range(0, len(payload), 500):
+            self.client.table('gsc_baseline_urls').insert(payload[i:i + 500]).execute()
+
+        return baseline_id
+
+    def get_latest_for_domain(self, user_id: str, domain: str) -> Optional[Dict[str, Any]]:
+        result = self.client.table('gsc_traffic_baselines').select('*').eq(
+            'user_id', user_id
+        ).eq('domain', domain).order('captured_at', desc=True).limit(1).execute()
+        return result.data[0] if result.data else None
+
+    def get_baseline_urls(self, baseline_id: UUID) -> List[Dict[str, Any]]:
+        result = self.client.table('gsc_baseline_urls').select('*').eq(
+            'baseline_id', str(baseline_id)
+        ).order('clicks', desc=True).execute()
+        return result.data
+
+
+class DiscoveredUrlDB:
+    """
+    Per-URL discovery provenance for a session.
+
+    Which source found a URL is a reviewer-facing signal: a URL with recorded
+    search traffic carries different risk from one that only appears in a
+    sitemap and has never ranked.
+    """
+
+    def __init__(self, client: Optional[Client] = None):
+        self.client = client or SupabaseClient.get_client()
+
+    def replace_for_session(
+        self,
+        session_id: UUID,
+        side: str,
+        entries: List[Dict[str, Any]],
+    ) -> int:
+        """
+        Replace the recorded discovery set for one side of a session.
+
+        Args:
+            entries: dicts with url, sources (list[str]), clicks, impressions.
+        """
+        self.client.table('session_discovered_urls').delete().eq(
+            'session_id', str(session_id)
+        ).eq('side', side).execute()
+
+        if not entries:
+            return 0
+
+        rows = [{
+            'session_id': str(session_id),
+            'side': side,
+            'url': e['url'],
+            'sources': list(e.get('sources') or []),
+            'clicks': int(e.get('clicks', 0)),
+            'impressions': int(e.get('impressions', 0)),
+        } for e in entries]
+
+        for i in range(0, len(rows), 500):
+            self.client.table('session_discovered_urls').insert(rows[i:i + 500]).execute()
+        return len(rows)
+
+    def get_for_session(self, session_id: UUID, side: Optional[str] = None) -> List[Dict[str, Any]]:
+        query = self.client.table('session_discovered_urls').select('*').eq(
+            'session_id', str(session_id)
+        )
+        if side:
+            query = query.eq('side', side)
+        return query.order('clicks', desc=True).execute().data

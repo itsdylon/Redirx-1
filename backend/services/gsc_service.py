@@ -50,15 +50,22 @@ class GSCError(Exception):
 
 def normalize_url(url: str) -> str:
     """
-    Normalize a URL for matching session URLs against GSC page URLs:
-    lowercase scheme/host, drop query/fragment, strip trailing slash.
+    Identity key for "is this the same page", used to match session URLs
+    against GSC page URLs and to union discovery sources.
+
+    Scheme and a leading www. are deliberately excluded. A sitemap may list
+    http:// or the bare host while Search Console reports https://www., and
+    those are the same page — keying on them produced duplicate URLs and
+    split one page's traffic across two entries.
     """
     try:
         parsed = urlparse(url.strip())
-        scheme = (parsed.scheme or 'https').lower()
-        host = (parsed.netloc or '').lower()
+        host = (parsed.hostname or '').lower()
+        if host.startswith('www.'):
+            host = host[4:]
+        port = f":{parsed.port}" if parsed.port and parsed.port not in (80, 443) else ''
         path = parsed.path.rstrip('/') or ''
-        return f"{scheme}://{host}{path}"
+        return f"{host}{port}{path}"
     except Exception:
         return url.strip().rstrip('/').lower()
 

@@ -546,32 +546,7 @@ export function UploadPage({
           )}
 
           {/* Pipeline Type Selector / Tier Banner */}
-          {isQuickOnlyMode ? (
-            <div className="mb-6 border border-blue-500/30 bg-blue-500/5 p-4 space-y-4">
-              <div>
-                <div>
-                  <div className="font-medium text-blue-600 dark:text-blue-400">Quick Match Workflow</div>
-                  <p className="text-sm text-muted-foreground mt-1">
-                    Run URL-only matching now, then unlock Deep Match from results only if you need stronger fixes.
-                  </p>
-                </div>
-              </div>
-              <div className="grid grid-cols-1 gap-2 text-sm md:grid-cols-3">
-                <div className="border border-border bg-card p-3">
-                  <div className="font-medium text-foreground">1. Upload</div>
-                  <p className="text-xs text-muted-foreground mt-1">Drop old and new URL files.</p>
-                </div>
-                <div className="border border-border bg-card p-3">
-                  <div className="font-medium text-foreground">2. Review</div>
-                  <p className="text-xs text-muted-foreground mt-1">Validate confidence and approve mappings.</p>
-                </div>
-                <div className="border border-border bg-card p-3">
-                  <div className="font-medium text-foreground">3. Export</div>
-                  <p className="text-xs text-muted-foreground mt-1">Download redirect rules in your format.</p>
-                </div>
-              </div>
-            </div>
-          ) : isFreeUser ? (
+          {isQuickOnlyMode ? null : isFreeUser ? (
             <div className="mb-6 border border-blue-500/30 bg-blue-500/5 p-4 flex items-start gap-3">
               <Info className="h-5 w-5 text-blue-500 flex-shrink-0 mt-0.5" />
               <div>

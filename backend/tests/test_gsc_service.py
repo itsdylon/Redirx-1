@@ -30,16 +30,34 @@ from backend.services.results_formatter import (
 
 
 class TestNormalizeUrl(unittest.TestCase):
+    """
+    normalize_url is an identity key for "same page", not a display form:
+    scheme and a leading www. are excluded so a sitemap listing http:// or the
+    bare host matches what Search Console reports.
+    """
+
     def test_strips_trailing_slash_and_lowercases_host(self):
-        self.assertEqual(
-            normalize_url("HTTPS://Example.com/Path/"),
-            "https://example.com/Path",
-        )
+        # Path case is preserved — paths are case-sensitive on many servers.
+        self.assertEqual(normalize_url("HTTPS://Example.com/Path/"), "example.com/Path")
 
     def test_drops_query_and_fragment(self):
-        self.assertEqual(
-            normalize_url("https://example.com/page?utm=1#top"),
-            "https://example.com/page",
+        self.assertEqual(normalize_url("https://example.com/page?utm=1#top"), "example.com/page")
+
+    def test_scheme_and_www_insensitive(self):
+        # Regression: keying on these split one page's traffic across two
+        # entries when unioning GSC with sitemap results.
+        variants = [
+            "https://example.com/about",
+            "http://example.com/about",
+            "https://www.example.com/about/",
+            "http://WWW.Example.com/about",
+        ]
+        self.assertEqual(len({normalize_url(v) for v in variants}), 1)
+
+    def test_distinct_pages_stay_distinct(self):
+        self.assertNotEqual(normalize_url("https://e.com/a"), normalize_url("https://e.com/b"))
+        self.assertNotEqual(
+            normalize_url("https://e.com/a"), normalize_url("https://blog.e.com/a")
         )
 
     def test_variants_collapse_to_same_key(self):

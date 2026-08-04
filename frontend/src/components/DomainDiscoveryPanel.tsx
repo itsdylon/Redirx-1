@@ -6,6 +6,7 @@ import { Input } from './ui/input';
 import { discoverSite, type DiscoveryResponse } from '../api/discovery';
 
 const METHOD_LABELS: Record<string, string> = {
+  gsc: 'Search Console',
   sitemap: 'sitemap',
   wordpress_api: 'WordPress API',
   shopify_api: 'Shopify API',
@@ -47,7 +48,7 @@ export function DomainDiscoveryPanel({ side, label, onDiscovered }: DomainDiscov
     posthog?.capture('domain_discovery_started', { side, domain: trimmed });
 
     try {
-      const response = await discoverSite(trimmed);
+      const response = await discoverSite(trimmed, side);
       setResult(response);
       onDiscovered(side, response);
       posthog?.capture('domain_discovery_completed', {
@@ -96,6 +97,14 @@ export function DomainDiscoveryPanel({ side, label, onDiscovered }: DomainDiscov
               <p className="text-sm text-muted-foreground mt-1">
                 {result.count.toLocaleString()} pages found via {methodLabel}
               </p>
+              {result.summary && result.summary.with_traffic > 0 && (
+                <p className="text-xs text-muted-foreground mt-1">
+                  {result.summary.with_traffic.toLocaleString()} carry organic traffic
+                  {result.summary.no_recorded_traffic > 0 && (
+                    <> · {result.summary.no_recorded_traffic.toLocaleString()} with no recorded traffic</>
+                  )}
+                </p>
+              )}
               {result.truncated && (
                 <p className="text-xs text-muted-foreground mt-1">
                   Site has {result.total_found.toLocaleString()}+ pages — capped at{' '}

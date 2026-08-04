@@ -37,6 +37,9 @@ from redirx.safe_fetch import (
     validate_public_url,
 )
 from redirx.rate_limit import (
+    DISCOVERY_CAPACITY,
+    DISCOVERY_NAMESPACE,
+    DISCOVERY_RATE,
     CircuitOpen,
     HostRateLimiter,
     get_limiter,
@@ -78,6 +81,9 @@ class DiscoveryResult:
     truncated: bool = False
     duration_ms: int = 0
     errors: list[str] = field(default_factory=list)
+    # Set when the origin throttled us rather than simply having no sitemap.
+    rate_limited: bool = False
+    retry_after_seconds: int = 0
 
 
 class DiscoveryError(Exception):
@@ -239,6 +245,7 @@ async def _fetch(
     session: aiohttp.ClientSession,
     url: str,
     errors: list[str],
+    record_politeness: bool = True,
 ) -> tuple[int, str, dict, str]:
     """
     GET a URL. Returns (status, text, headers, final_url); status 0 on
@@ -259,11 +266,10 @@ async def _fetch(
                 # that host's bucket rather than inheriting the first one's.
                 await limiter.acquire(current)
             async with session.get(current, allow_redirects=False) as resp:
-                if limiter is not None:
-                    if limiter.note_response(resp.status):
-                        await limiter.record_failure(
-                            current, parse_retry_after(resp.headers.get("Retry-After"))
-                        )
+                if limiter is not None and record_politeness:
+                    ra = parse_retry_after(resp.headers.get("Retry-After"))
+                    if limiter.note_response(resp.status, ra):
+                        await limiter.record_failure(current, ra)
                     elif resp.status < 400:
                         await limiter.record_success(current)
 
@@ -289,7 +295,9 @@ async def _fetch(
         errors.append(f"too many redirects for {url}")
         return 0, "", {}, current
     except CircuitOpen as exc:
-        errors.append(f"host paused after repeated blocks: {exc.host}")
+        # Marker prefix so discover_site can distinguish "the site is throttling
+        # us" from "this site has no sitemap" and tell the user which it is.
+        errors.append(f"rate_limited::{exc.host}::{int(exc.retry_after)}")
         return 0, "", {}, current
     except SSRFBlockedError:
         errors.append(f"blocked target for {url}")
@@ -303,25 +311,42 @@ async def _fetch(
 # Strategy 1: sitemaps
 # ============================================================================
 
-async def _sitemap_candidates(
+async def _robots_sitemaps(
     session: aiohttp.ClientSession,
     root_url: str,
     errors: list[str],
 ) -> list[str]:
-    """Sitemap URLs from robots.txt plus the common conventional paths."""
-    candidates: list[str] = []
+    """Sitemap URLs declared in robots.txt. These are authoritative."""
     status, text, _, _ = await _fetch(session, f"{root_url}/robots.txt", errors)
-    if status == 200:
-        # Honor Crawl-delay before issuing the rest of the requests.
-        limiter = get_limiter()
-        if limiter is not None:
-            await limiter.apply_crawl_delay(root_url, text)
-        for line in text.splitlines():
-            stripped = line.strip()
-            if stripped.lower().startswith("sitemap:"):
-                candidates.append(stripped.split(":", 1)[1].strip())
-    candidates.extend(f"{root_url}{path}" for path in COMMON_SITEMAP_PATHS)
-    return dedupe_urls([c for c in candidates if c])
+    if status != 200:
+        return []
+    # Honor Crawl-delay before issuing the rest of the requests.
+    limiter = get_limiter()
+    if limiter is not None:
+        await limiter.apply_crawl_delay(root_url, text)
+    found = [
+        line.strip().split(":", 1)[1].strip()
+        for line in text.splitlines()
+        if line.strip().lower().startswith("sitemap:")
+    ]
+    return dedupe_urls([f for f in found if f])
+
+
+def _speculative_paths(generator: str | None) -> list[str]:
+    """
+    Conventional sitemap paths to try when robots.txt declares none.
+
+    Platform-specific paths are only probed when that platform was detected.
+    Probing /wp-sitemap.xml on a Shopify store is not merely wasteful: measured
+    against allbirds.com, Cloudflare answers such a probe with 429 +
+    Retry-After: 60 rather than 404, which then blocks the whole host even
+    though its real /sitemap.xml serves fine.
+    """
+    platform_only = {"/wp-sitemap.xml": "wordpress"}
+    return [
+        path for path in COMMON_SITEMAP_PATHS
+        if path not in platform_only or platform_only[path] == generator
+    ]
 
 
 async def discover_via_sitemaps(
@@ -330,12 +355,42 @@ async def discover_via_sitemaps(
     collect_cap: int,
     deadline: float,
     errors: list[str],
+    generator: str | None = None,
 ) -> list[str]:
     """
     BFS over sitemap documents (indexes recurse) until the URL cap, fetch cap,
     or the deadline is hit.
+
+    robots.txt declarations are used when present. Otherwise conventional paths
+    are tried one at a time, stopping at the first that yields URLs — firing
+    all of them concurrently wastes requests on every site we touch and invites
+    WAF throttling for paths that were never going to exist.
     """
-    queue = [(url, 0) for url in await _sitemap_candidates(session, root_url, errors)]
+    declared = await _robots_sitemaps(session, root_url, errors)
+    if declared:
+        seeds = [declared]
+    else:
+        seeds = [[f"{root_url}{path}"] for path in _speculative_paths(generator)]
+
+    for seed in seeds:
+        if time.monotonic() > deadline:
+            errors.append("sitemap discovery hit the time budget")
+            break
+        found = await _walk_sitemaps(session, seed, collect_cap, deadline, errors)
+        if found:
+            return found
+    return []
+
+
+async def _walk_sitemaps(
+    session: aiohttp.ClientSession,
+    seed_urls: list[str],
+    collect_cap: int,
+    deadline: float,
+    errors: list[str],
+) -> list[str]:
+    """BFS from seed sitemap documents, recursing through sitemap indexes."""
+    queue = [(url, 0) for url in seed_urls]
     visited: set[str] = set()
     page_urls: list[str] = []
     fetches = 0
@@ -570,7 +625,13 @@ async def discover_site(
         raise DiscoveryError("ssrf_blocked", "Cannot reach that host.")
 
     # Global per-host politeness for every fetch below, shared across workers.
-    set_limiter(limiter if limiter is not None else HostRateLimiter())
+    # Discovery gets its own bucket namespace: still capped and still circuit-
+    # broken, but not paced like sustained content scraping.
+    set_limiter(limiter if limiter is not None else HostRateLimiter(
+        namespace=DISCOVERY_NAMESPACE,
+        capacity=DISCOVERY_CAPACITY,
+        rate=DISCOVERY_RATE,
+    ))
 
     started = time.monotonic()
     deadline = started + time_budget
@@ -587,7 +648,30 @@ async def discover_site(
     ) as session:
         # Homepage: platform detection + canonical root (follows redirects,
         # e.g. http→https, bare→www).
-        status, html, headers, final_url = await _fetch(session, f"{root_url}/", errors)
+        #
+        # Deliberately best-effort for politeness accounting. This is an
+        # optional metadata probe, and apex/www often behave differently:
+        # measured against allbirds.com, the apex returns 429 while www serves
+        # 200. Recording that 429 blocked the shared host bucket and killed
+        # discovery for a site that is perfectly reachable.
+        status, html, headers, final_url = await _fetch(
+            session, f"{root_url}/", errors, record_politeness=False
+        )
+
+        # Apex throttled or unreachable? Try the www variant before giving up.
+        host = urlparse(root_url).hostname or ""
+        if status != 200 and not host.startswith("www."):
+            www_root = f"{urlparse(root_url).scheme}://www.{host}"
+            www_status, www_html, www_headers, www_final = await _fetch(
+                session, f"{www_root}/", errors, record_politeness=False
+            )
+            if www_status == 200:
+                status, html, headers, final_url = (
+                    www_status, www_html, www_headers, www_final,
+                )
+                root_url = www_root
+                result.root_url = root_url
+
         if status == 200 and final_url:
             final_root = normalize_root(final_url) if "://" in final_url else root_url
             if same_site(root_url, final_root):
@@ -596,7 +680,9 @@ async def discover_site(
         result.generator = detect_generator(html, headers) if status == 200 else None
 
         urls = _filter_urls(
-            await discover_via_sitemaps(session, root_url, collect_cap, deadline, errors),
+            await discover_via_sitemaps(
+                session, root_url, collect_cap, deadline, errors, result.generator
+            ),
             root_url,
         )
         method = "sitemap" if urls else "none"
@@ -631,4 +717,14 @@ async def discover_site(
     result.method = method if urls else "none"
     result.errors = errors
     result.duration_ms = int((time.monotonic() - started) * 1000)
+
+    # Finding nothing because the origin is throttling us is a different
+    # problem from finding nothing because there is no sitemap, and it needs a
+    # different message: one is "wait and retry", the other is "upload a file".
+    if not urls:
+        throttled = [e for e in errors if e.startswith("rate_limited::")]
+        if throttled:
+            retry_after = max(int(e.split("::")[2]) for e in throttled)
+            result.rate_limited = True
+            result.retry_after_seconds = retry_after
     return result

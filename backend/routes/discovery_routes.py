@@ -5,6 +5,7 @@ Powers the "paste two domains" ingestion path: given a root domain, returns
 the site's page URLs via sitemap → CMS API → crawl, capped by plan.
 """
 import asyncio
+from urllib.parse import urlparse
 
 from flask import Blueprint, jsonify, request
 
@@ -74,6 +75,22 @@ def discover():
         }), 500
 
     if not result.urls:
+        if result.rate_limited:
+            minutes = max(1, round(result.retry_after_seconds / 60))
+            return jsonify({
+                "success": False,
+                "code": "rate_limited",
+                "error": (
+                    f"{urlparse(result.root_url).hostname} is currently rate-limiting "
+                    f"automated requests. Try again in about {minutes} "
+                    f"minute{'s' if minutes != 1 else ''}, or upload a sitemap or "
+                    "CSV export instead."
+                ),
+                "root_url": result.root_url,
+                "retry_after_seconds": result.retry_after_seconds,
+                "generator": result.generator,
+            }), 429
+
         return jsonify({
             "success": False,
             "code": "no_urls_found",

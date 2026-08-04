@@ -281,3 +281,38 @@ class TestCrawlDiscovery(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestSitemapProbing(unittest.TestCase):
+    """
+    Probing regressions. We used to fire every conventional sitemap path
+    concurrently at every site, which wastes requests on all of them and, on
+    allbirds.com, drew a 429 + Retry-After: 60 for /wp-sitemap.xml (a
+    WordPress path on a Shopify store) that then blocked the whole host.
+    """
+
+    def test_wp_path_only_probed_for_wordpress(self):
+        from redirx.discovery import _speculative_paths
+        self.assertNotIn("/wp-sitemap.xml", _speculative_paths(None))
+        self.assertNotIn("/wp-sitemap.xml", _speculative_paths("shopify"))
+        self.assertIn("/wp-sitemap.xml", _speculative_paths("wordpress"))
+
+    def test_stops_after_first_successful_path(self):
+        session = FakeSession({"https://e.com/sitemap.xml": (200, URLSET)})
+        errors: list[str] = []
+        urls = run(discover_via_sitemaps(session, "https://e.com", 100, far_deadline(), errors))
+        self.assertEqual(len(urls), 3)
+        self.assertEqual(
+            session.requested,
+            ["https://e.com/robots.txt", "https://e.com/sitemap.xml"],
+        )
+
+    def test_robots_declaration_short_circuits_speculation(self):
+        session = FakeSession({
+            "https://e.com/robots.txt": (200, "Sitemap: https://e.com/custom.xml"),
+            "https://e.com/custom.xml": (200, URLSET),
+        })
+        errors: list[str] = []
+        urls = run(discover_via_sitemaps(session, "https://e.com", 100, far_deadline(), errors))
+        self.assertEqual(len(urls), 3)
+        self.assertNotIn("https://e.com/sitemap.xml", session.requested)

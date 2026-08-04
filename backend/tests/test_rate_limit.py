@@ -137,10 +137,22 @@ class TestFailureRecording(unittest.TestCase):
         limiter = FakeLimiter([[{"circuit_open": False, "new_rate": 0.5}]])
         self.assertFalse(run(limiter.record_failure("https://example.com/a")))
 
-    def test_backoff_statuses(self):
+    def test_429_and_503_always_count(self):
         limiter = FakeLimiter()
-        for status in (403, 429, 503):
+        for status in (429, 503):
             self.assertTrue(limiter.note_response(status))
+
+    def test_bare_403_does_not_count(self):
+        # Measured against allbirds.com: probing /wp-sitemap.xml on a Shopify
+        # store draws a WAF refusal rather than a 404. Treating that as
+        # throttling blocked an entire working domain, so a 403 only counts
+        # when it carries an explicit Retry-After.
+        limiter = FakeLimiter()
+        self.assertFalse(limiter.note_response(403))
+        self.assertTrue(limiter.note_response(403, retry_after=60))
+
+    def test_success_and_not_found_never_count(self):
+        limiter = FakeLimiter()
         for status in (200, 301, 404, 500):
             self.assertFalse(limiter.note_response(status))
 

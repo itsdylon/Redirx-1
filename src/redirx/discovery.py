@@ -36,6 +36,13 @@ from redirx.safe_fetch import (
     resolve_and_validate_host,
     validate_public_url,
 )
+from redirx.rate_limit import (
+    CircuitOpen,
+    HostRateLimiter,
+    get_limiter,
+    parse_retry_after,
+    set_limiter,
+)
 
 USER_AGENT = "RedirxBot/1.0 (+https://redirx.dev; site migration redirect mapping)"
 
@@ -243,10 +250,23 @@ async def _fetch(
     hop's resolved IPs at connect time.
     """
     current = url
+    limiter = get_limiter()
     try:
         for _ in range(MAX_REDIRECTS + 1):
             validate_public_url(current)
+            if limiter is not None:
+                # Politeness is per-host, so a redirect to a new host waits on
+                # that host's bucket rather than inheriting the first one's.
+                await limiter.acquire(current)
             async with session.get(current, allow_redirects=False) as resp:
+                if limiter is not None:
+                    if limiter.note_response(resp.status):
+                        await limiter.record_failure(
+                            current, parse_retry_after(resp.headers.get("Retry-After"))
+                        )
+                    elif resp.status < 400:
+                        await limiter.record_success(current)
+
                 location = resp.headers.get("Location")
                 if resp.status in (301, 302, 303, 307, 308) and location:
                     current = urljoin(current, location)
@@ -267,6 +287,9 @@ async def _fetch(
                 return resp.status, text, headers, final_url
 
         errors.append(f"too many redirects for {url}")
+        return 0, "", {}, current
+    except CircuitOpen as exc:
+        errors.append(f"host paused after repeated blocks: {exc.host}")
         return 0, "", {}, current
     except SSRFBlockedError:
         errors.append(f"blocked target for {url}")
@@ -289,6 +312,10 @@ async def _sitemap_candidates(
     candidates: list[str] = []
     status, text, _, _ = await _fetch(session, f"{root_url}/robots.txt", errors)
     if status == 200:
+        # Honor Crawl-delay before issuing the rest of the requests.
+        limiter = get_limiter()
+        if limiter is not None:
+            await limiter.apply_crawl_delay(root_url, text)
         for line in text.splitlines():
             stripped = line.strip()
             if stripped.lower().startswith("sitemap:"):
@@ -523,6 +550,7 @@ async def discover_site(
     raw_root: str,
     max_urls: int = 1000,
     time_budget: float = 20.0,
+    limiter: "HostRateLimiter | None" = None,
 ) -> DiscoveryResult:
     """
     Discover a site's page URLs. Never raises for per-strategy failures —
@@ -540,6 +568,9 @@ async def discover_site(
         await resolve_and_validate_host(host, 443 if root_url.startswith("https") else 80)
     except SSRFBlockedError:
         raise DiscoveryError("ssrf_blocked", "Cannot reach that host.")
+
+    # Global per-host politeness for every fetch below, shared across workers.
+    set_limiter(limiter if limiter is not None else HostRateLimiter())
 
     started = time.monotonic()
     deadline = started + time_budget

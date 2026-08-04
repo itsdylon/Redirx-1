@@ -12,6 +12,13 @@ from openai import AsyncOpenAI
 from .config import Config
 from .database import WebPageEmbeddingDB, MigrationSessionDB, URLMappingDB
 from .safe_fetch import create_safe_connector
+from .rate_limit import (
+    CircuitOpen,
+    HostRateLimiter,
+    get_limiter,
+    parse_retry_after,
+    set_limiter,
+)
 from .url_matcher import UrlMatcher, UrlMatchConfig
 
 class Stage:
@@ -526,6 +533,10 @@ class WebScraperStage(Stage):
             f"per-site concurrency={self.max_site_concurrency})...",
             flush=True,
         )
+
+        # Global per-host pacing for this job's fetches. Without it, N workers
+        # each honoring a local semaphore still hammer one origin in aggregate.
+        set_limiter(HostRateLimiter())
 
         # Safe connector: user-supplied URL lists must not reach internal hosts.
         async with aiohttp.ClientSession(connector=create_safe_connector()) as session:
@@ -1164,6 +1175,7 @@ class WebPage:
         """
         html = ""
         last_error = None
+        limiter = get_limiter()
 
         for attempt in range(max_retries):
             try:
@@ -1172,7 +1184,19 @@ class WebPage:
                     delay = 0.5 * (2 ** (attempt - 1))  # 0.5s, 1s, 2s
                     await asyncio.sleep(delay)
 
+                if limiter is not None:
+                    # Global per-host pacing, shared across every worker.
+                    await limiter.acquire(url)
+
                 async with session.get(url, timeout=aiohttp.ClientTimeout(total=30)) as response:
+                    if limiter is not None:
+                        if limiter.note_response(response.status):
+                            await limiter.record_failure(
+                                url, parse_retry_after(response.headers.get("Retry-After"))
+                            )
+                        elif response.status < 400:
+                            await limiter.record_success(url)
+
                     if response.status == 200:
                         html = await response.text()
                         return WebPage(url, html)
@@ -1180,6 +1204,11 @@ class WebPage:
                         last_error = f"Status {response.status}"
                         if attempt == max_retries - 1:
                             print(f"Warning: Failed to scrape {url} - {last_error} (after {max_retries} attempts)")
+
+            except CircuitOpen:
+                # Host is blocking us; further attempts would only deepen a ban.
+                print(f"Warning: skipping {url} - host paused by circuit breaker")
+                return WebPage(url, "")
 
             except aiohttp.ClientError as e:
                 last_error = f"Connection error: {e}"

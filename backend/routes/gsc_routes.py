@@ -34,9 +34,13 @@ def _safe_return_to(raw: str) -> str:
 
 
 def _frontend_redirect(return_to: str, gsc_result: str):
+    # return_to always starts with "/", so a trailing slash on APP_BASE_URL
+    # produced "https://host//review/..." — which 404s. Don't depend on the
+    # env var being punctuated correctly.
+    base = (Config.APP_BASE_URL or '').rstrip('/')
     separator = '&' if '?' in return_to else '?'
     query = urlencode({'gsc': gsc_result})
-    return redirect(f"{Config.APP_BASE_URL}{return_to}{separator}{query}")
+    return redirect(f"{base}{return_to}{separator}{query}")
 
 
 @gsc_blueprint.route("/connect", methods=["GET"])

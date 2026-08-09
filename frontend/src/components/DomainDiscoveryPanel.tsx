@@ -24,6 +24,10 @@ const GENERATOR_LABELS: Record<string, string> = {
 interface DomainDiscoveryPanelProps {
   side: 'old' | 'new';
   label: string;
+  /** What this side actually does — the two are not interchangeable. */
+  hint?: string;
+  /** The old side carries the traffic worth protecting, so it leads. */
+  emphasis?: boolean;
   onDiscovered: (side: 'old' | 'new', result: DiscoveryResponse | null) => void;
 }
 
@@ -32,7 +36,7 @@ interface DomainDiscoveryPanelProps {
  * discovers the site's pages (sitemap -> CMS API -> crawl) and reports the
  * result upward as if a URL file had been uploaded.
  */
-export function DomainDiscoveryPanel({ side, label, onDiscovered }: DomainDiscoveryPanelProps) {
+export function DomainDiscoveryPanel({ side, label, hint, emphasis = false, onDiscovered }: DomainDiscoveryPanelProps) {
   const posthog = usePostHog();
   const [domain, setDomain] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -105,6 +109,12 @@ export function DomainDiscoveryPanel({ side, label, onDiscovered }: DomainDiscov
                   )}
                 </p>
               )}
+              {result.gsc_url_count === 0 && side === 'old' && (
+                <p className="text-xs text-muted-foreground mt-1">
+                  We can&rsquo;t tell which of these matter — connect Search Console to see
+                  which pages carry your traffic.
+                </p>
+              )}
               {result.truncated && (
                 <p className="text-xs text-muted-foreground mt-1">
                   Site has {result.total_found.toLocaleString()}+ pages — capped at{' '}
@@ -123,10 +133,11 @@ export function DomainDiscoveryPanel({ side, label, onDiscovered }: DomainDiscov
 
   return (
     <div className="border border-dashed border-border bg-background p-5 rounded-lg">
-      <div className="flex items-center gap-2 mb-3">
-        <Globe className="h-4 w-4 text-muted-foreground" />
+      <div className="flex items-center gap-2 mb-1">
+        <Globe className={`h-4 w-4 ${emphasis ? 'text-primary' : 'text-muted-foreground'}`} />
         <p className="text-sm font-medium text-foreground">{label}</p>
       </div>
+      {hint && <p className="text-xs text-muted-foreground mb-3">{hint}</p>}
       <div className="flex gap-2">
         <Input
           type="text"
@@ -155,7 +166,8 @@ export function DomainDiscoveryPanel({ side, label, onDiscovered }: DomainDiscov
       </div>
       {isLoading && (
         <p className="text-xs text-muted-foreground mt-2">
-          Checking sitemap, platform APIs, and site links — usually a few seconds.
+          Reading your sitemap — usually a few seconds. We don&rsquo;t crawl your site
+          page by page.
         </p>
       )}
       {error && <p className="text-sm text-destructive mt-2">{error}</p>}

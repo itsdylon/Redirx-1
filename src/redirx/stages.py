@@ -5,6 +5,7 @@ import asyncio
 import os
 from bs4 import BeautifulSoup
 from typing import Optional
+from urllib.parse import urlparse
 from uuid import UUID, uuid4
 import numpy as np
 from openai import AsyncOpenAI
@@ -523,6 +524,61 @@ class WebScraperStage(Stage):
 
         self.max_total_concurrency = total
         self.max_site_concurrency = min(per_site, total)
+        # Escape hatch: set false to restore straight per-page scraping.
+        self.use_content_ladder = os.getenv(
+            "CONTENT_LADDER_ENABLED", "true"
+        ).strip().lower() not in ("0", "false", "no", "off")
+
+    @staticmethod
+    def _root_of(urls: list[str]) -> Optional[str]:
+        for url in urls:
+            parsed = urlparse(url)
+            if parsed.scheme and parsed.netloc:
+                return f"{parsed.scheme}://{parsed.netloc}"
+        return None
+
+    async def _fetch_side(
+        self,
+        session: aiohttp.ClientSession,
+        urls: list[str],
+        label: str,
+    ) -> list[WebPage]:
+        """Resolve one side's URLs through the content ladder."""
+        if not urls:
+            return []
+
+        from .content_fetch import ContentFetcher, _key
+
+        root = self._root_of(urls)
+        generator = None
+        origin_reachable = True
+        if root:
+            try:
+                from .discovery import detect_generator
+
+                async with session.get(
+                    f"{root}/", timeout=aiohttp.ClientTimeout(total=20)
+                ) as resp:
+                    origin_reachable = resp.status < 400
+                    html = await resp.text(errors="replace") if origin_reachable else ""
+                    generator = detect_generator(html, dict(resp.headers))
+            except Exception:
+                # Unreachable origin promotes archived content ahead of
+                # per-page fetching, which would only produce failures.
+                origin_reachable = False
+
+        fetcher = ContentFetcher(session)
+        resolved = await fetcher.fetch(
+            urls, root or "", generator=generator, origin_reachable=origin_reachable
+        )
+        print(
+            f"WebScraperStage: {label} site content — {fetcher.describe()}"
+            f" (platform={generator or 'unknown'}, origin_reachable={origin_reachable})",
+            flush=True,
+        )
+        # Preserve input order and always return one WebPage per URL, so
+        # downstream stages keep their positional assumptions.
+        return [resolved.get(_key(u)) or WebPage(u, "") for u in urls]
 
     async def execute(self, input: tuple[list[str], list[str]]) -> tuple[list[WebPage], list[WebPage]]:
         old_urls, new_urls = input
@@ -559,12 +615,21 @@ class WebScraperStage(Stage):
                     *[scrape_with_limits(url, new_site_semaphore) for url in new_urls]
                 )
 
-            async with asyncio.TaskGroup() as group:
-                old_task = group.create_task(gather_old())
-                new_task = group.create_task(gather_new())
+            if self.use_content_ladder:
+                # Prefer bulk CMS reads over per-page fetching: measured on a
+                # real WordPress site, 3 API calls replaced 147 requests and
+                # returned cleaner text (no nav/footer boilerplate).
+                old_webpages, new_webpages = await asyncio.gather(
+                    self._fetch_side(session, old_urls, "Old"),
+                    self._fetch_side(session, new_urls, "New"),
+                )
+            else:
+                async with asyncio.TaskGroup() as group:
+                    old_task = group.create_task(gather_old())
+                    new_task = group.create_task(gather_new())
 
-            old_webpages = old_task.result()
-            new_webpages = new_task.result()
+                old_webpages = old_task.result()
+                new_webpages = new_task.result()
 
         # Log scraping results
         old_success = sum(1 for p in old_webpages if len(p.html) > 0)

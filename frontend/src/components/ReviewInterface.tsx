@@ -29,6 +29,9 @@ import { useAuth } from '../contexts/AuthContext';
 import { DeepMatchPreviewCard } from './DeepMatchPreviewCard';
 import { GscTrafficCard } from './GscTrafficCard';
 import type { GscResultsMeta } from '../api/gsc';
+import { TrafficRiskPanel } from './TrafficRiskPanel';
+import { RISK_PLACEMENT } from '../api/config';
+import type { TrafficRisk } from '../lib/riskSummary';
 import { queryKeys } from '../queries/queryKeys';
 import { handleUnauthorizedAndRedirect } from '../queries/auth';
 import {
@@ -172,6 +175,30 @@ export function ReviewInterface({ layoutVariant = 'dashboard' }: ReviewInterface
     },
   });
   const isDeepMatchUnlocked = !!unlockStatusQuery.data?.is_unlocked;
+  // Inline fallback for the risk beat. Same component as the standalone
+  // screen; the numbers come from the results payload instead of client-side
+  // discovery, so no extra request is needed.
+  const inlineRisk: TrafficRisk | null =
+    RISK_PLACEMENT === 'inline' && gscMeta?.synced && gscMeta.riskSummary
+      ? {
+          domain: gscMeta.property || 'this site',
+          total: redirects.length,
+          withTraffic: gscMeta.riskSummary.urlsWithTraffic,
+          noRecordedTraffic: Math.max(0, redirects.length - gscMeta.riskSummary.urlsWithTraffic),
+          lowPriority: 0,
+          topUrlCount: gscMeta.riskSummary.topUrlCount,
+          totalClicks: gscMeta.riskSummary.totalClicks,
+          totalImpressions: gscMeta.riskSummary.totalImpressions,
+          shareTarget: gscMeta.riskSummary.trafficShareTarget,
+          weightMetric: gscMeta.riskSummary.weightMetric,
+          hasGsc: true,
+          topUrls: [...redirects]
+            .sort((a, b) => (b.gscClicks ?? 0) - (a.gscClicks ?? 0))
+            .slice(0, 5)
+            .map((r) => ({ url: r.oldUrl, clicks: r.gscClicks ?? 0, impressions: r.gscImpressions ?? 0 })),
+        }
+      : null;
+
   const showDeepMatchPreview = pipelineType === 'url_only' && isFreeUser && !!deepPreview && !isDeepMatchUnlocked;
   const showDeepMatchPreviewError = pipelineType === 'url_only' && isFreeUser && !!deepPreviewError && !isDeepMatchUnlocked;
 
@@ -688,6 +715,12 @@ export function ReviewInterface({ layoutVariant = 'dashboard' }: ReviewInterface
           )}
 
           {/* Search Console traffic triage */}
+          {inlineRisk && (
+            <div className="mb-4">
+              <TrafficRiskPanel risk={inlineRisk} variant="inline" />
+            </div>
+          )}
+
           {sessionId && <GscTrafficCard sessionId={sessionId} gscMeta={gscMeta} />}
 
           {/* Stats Bar */}

@@ -94,7 +94,8 @@ import { UploadPage } from './UploadPage';
  */
 function renderUploadPage(props: Record<string, unknown> = {}) {
   const result = render(<UploadPage {...props} />);
-  fireEvent.click(screen.getByRole('button', { name: 'Upload Files' }));
+  // CSV is demoted to a text link rather than a peer tab.
+  fireEvent.click(screen.getByRole('button', { name: 'Import a CSV or sitemap file' }));
   return result;
 }
 
@@ -412,7 +413,7 @@ describe('UploadPage — API submission', () => {
 
     // Scraping warning should appear
     await waitFor(() => {
-      expect(screen.getByText(/Disable Rate Limiting/)).toBeInTheDocument();
+      expect(screen.getByText(/We.ll read content from your pages/)).toBeInTheDocument();
     });
 
     // API should NOT have been called yet
@@ -440,11 +441,11 @@ describe('UploadPage — API submission', () => {
     await user.click(screen.getByRole('button', { name: /Begin Deep Match/ }));
 
     await waitFor(() => {
-      expect(screen.getByText(/Disable Rate Limiting/)).toBeInTheDocument();
+      expect(screen.getByText(/We.ll read content from your pages/)).toBeInTheDocument();
     });
 
     await user.click(
-      screen.getByRole('checkbox', { name: /I've disabled rate limiting and bot protection on my sites/i })
+      screen.getByRole('checkbox', { name: /Got it .* read content from my pages/i })
     );
     await user.click(screen.getByRole('button', { name: /Proceed with Deep Match/ }));
 
@@ -466,7 +467,7 @@ describe('UploadPage — API submission', () => {
     await waitFor(() => {
       expect(screen.getByTestId('loading-screen')).toHaveTextContent('new-run');
     });
-    expect(screen.queryByText(/Disable Rate Limiting/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/We.ll read content from your pages/)).not.toBeInTheDocument();
   });
 
   it('keeps the begin button disabled when one file has a validation error', async () => {
@@ -555,10 +556,10 @@ describe('UploadPage — API submission', () => {
 
     await user.click(screen.getByRole('button', { name: /Begin Deep Match/ }));
     await waitFor(() => {
-      expect(screen.getByText(/Disable Rate Limiting Before Scanning/)).toBeInTheDocument();
+      expect(screen.getByText(/We.ll read content from your pages/)).toBeInTheDocument();
     });
     await user.click(
-      screen.getByRole('checkbox', { name: /I've disabled rate limiting and bot protection on my sites/i })
+      screen.getByRole('checkbox', { name: /Got it .* read content from my pages/i })
     );
     await user.click(screen.getByRole('button', { name: /Proceed with Deep Match/ }));
 
@@ -639,8 +640,8 @@ describe('UploadPage — domain ingestion mode', () => {
 
   it('defaults to the paste-domains mode', () => {
     render(<UploadPage />);
-    expect(screen.getByText('Old Site Domain')).toBeInTheDocument();
-    expect(screen.getByText('New Site Domain')).toBeInTheDocument();
+    expect(screen.getByText(/Old site/)).toBeInTheDocument();
+    expect(screen.getByText(/New site/)).toBeInTheDocument();
     expect(screen.queryByText('Old Site CSV')).not.toBeInTheDocument();
   });
 
@@ -652,14 +653,14 @@ describe('UploadPage — domain ingestion mode', () => {
 
     render(<UploadPage quickOnly />);
 
-    await user.type(screen.getByLabelText('Old Site Domain domain'), 'old-site.com');
+    await user.type(screen.getByLabelText(/Old site .* domain/), 'old-site.com');
     await user.click(screen.getAllByRole('button', { name: 'Find Pages' })[0]);
 
     await waitFor(() => {
       expect(screen.getByText(/3 pages found via sitemap/)).toBeInTheDocument();
     });
 
-    await user.type(screen.getByLabelText('New Site Domain domain'), 'new-site.com');
+    await user.type(screen.getByLabelText(/New site .* domain/), 'new-site.com');
     await user.click(screen.getByRole('button', { name: 'Find Pages' }));
 
     await waitFor(() => {
@@ -687,7 +688,7 @@ describe('UploadPage — domain ingestion mode', () => {
 
     render(<UploadPage quickOnly />);
 
-    await user.type(screen.getByLabelText('Old Site Domain domain'), 'dead.com');
+    await user.type(screen.getByLabelText(/Old site .* domain/), 'dead.com');
     await user.click(screen.getAllByRole('button', { name: 'Find Pages' })[0]);
 
     await waitFor(() => {
@@ -701,15 +702,113 @@ describe('UploadPage — domain ingestion mode', () => {
     mockDiscoverSite.mockResolvedValueOnce(discoveryResponse('old-site.com', 3));
 
     render(<UploadPage quickOnly />);
-    await user.type(screen.getByLabelText('Old Site Domain domain'), 'old-site.com');
+    await user.type(screen.getByLabelText(/Old site .* domain/), 'old-site.com');
     await user.click(screen.getAllByRole('button', { name: 'Find Pages' })[0]);
     await waitFor(() => {
       expect(screen.getByText(/3 pages found/)).toBeInTheDocument();
     });
 
-    await user.click(screen.getByRole('button', { name: 'Upload Files' }));
+    await user.click(screen.getByRole('button', { name: 'Import a CSV or sitemap file' }));
     expect(screen.queryByText(/3 pages found/)).not.toBeInTheDocument();
     expect(screen.getByText('Old Site CSV')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Begin Quick Match/ })).toBeDisabled();
+  });
+});
+
+describe('UploadPage — traffic risk beat', () => {
+  function withTraffic(host: string, count: number, clicks: number[]) {
+    const urls = Array.from({ length: count }, (_, i) => `https://${host}/page-${i + 1}`);
+    return {
+      success: true,
+      root_url: `https://${host}`,
+      urls,
+      entries: urls.map((url, i) => ({
+        url,
+        sources: ['gsc', 'sitemap'],
+        clicks: clicks[i] ?? 0,
+        impressions: (clicks[i] ?? 0) * 10,
+      })),
+      count,
+      total_found: count,
+      truncated: false,
+      max_urls: 1000,
+      method: 'gsc',
+      generator: 'wordpress',
+      summary: {
+        total: count,
+        with_traffic: clicks.filter((c) => c > 0).length,
+        gsc_only: 0,
+        no_recorded_traffic: clicks.filter((c) => !c).length,
+        total_clicks: clicks.reduce((a, b) => a + b, 0),
+        total_impressions: clicks.reduce((a, b) => a + b, 0) * 10,
+      },
+      plan: 'free',
+    };
+  }
+
+  async function discoverBothSides(user: ReturnType<typeof userEvent.setup>) {
+    await user.type(screen.getByLabelText(/Old site .* domain/), 'old.com');
+    await user.click(screen.getAllByRole('button', { name: 'Find Pages' })[0]);
+    await waitFor(() => expect(screen.getByText(/pages found/)).toBeInTheDocument());
+    await user.type(screen.getByLabelText(/New site .* domain/), 'new.com');
+    await user.click(screen.getByRole('button', { name: 'Find Pages' }));
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /Begin Quick Match/ })).not.toBeDisabled()
+    );
+  }
+
+  it('shows the risk number before matching, and defers submission until confirmed', async () => {
+    const user = userEvent.setup();
+    // One page carries 900 of 1000 clicks: a single URL should account for 80%.
+    mockDiscoverSite
+      .mockResolvedValueOnce(withTraffic('old.com', 4, [900, 50, 30, 20]))
+      .mockResolvedValueOnce(withTraffic('new.com', 4, [0, 0, 0, 0]));
+
+    render(<UploadPage quickOnly />);
+    await discoverBothSides(user);
+    await user.click(screen.getByRole('button', { name: /Begin Quick Match/ }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/carry 80% of your organic clicks/)).toBeInTheDocument();
+    });
+    // The job must not have been submitted yet — the beat comes first.
+    expect(mockUploadCSVs).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole('button', { name: /Map these to|Match these to/ }));
+    await waitFor(() => expect(mockUploadCSVs).toHaveBeenCalledTimes(1));
+  });
+
+  it('can be backed out of without losing the discovered domains', async () => {
+    const user = userEvent.setup();
+    mockDiscoverSite
+      .mockResolvedValueOnce(withTraffic('old.com', 3, [500, 10, 5]))
+      .mockResolvedValueOnce(withTraffic('new.com', 3, [0, 0, 0]));
+
+    render(<UploadPage quickOnly />);
+    await discoverBothSides(user);
+    await user.click(screen.getByRole('button', { name: /Begin Quick Match/ }));
+    await waitFor(() => expect(screen.getByText(/carry 80%/)).toBeInTheDocument());
+
+    await user.click(screen.getByRole('button', { name: 'Back to domains' }));
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Begin Quick Match/ })).not.toBeDisabled();
+    });
+    expect(mockUploadCSVs).not.toHaveBeenCalled();
+  });
+
+  it('skips the beat when there is no Search Console data to show', async () => {
+    // Sitemap-only discovery has nothing to say about what matters, so the
+    // number would be meaningless — go straight to matching.
+    const user = userEvent.setup();
+    mockDiscoverSite
+      .mockResolvedValueOnce(withTraffic('old.com', 3, [0, 0, 0]))
+      .mockResolvedValueOnce(withTraffic('new.com', 3, [0, 0, 0]));
+
+    render(<UploadPage quickOnly />);
+    await discoverBothSides(user);
+    await user.click(screen.getByRole('button', { name: /Begin Quick Match/ }));
+
+    await waitFor(() => expect(mockUploadCSVs).toHaveBeenCalledTimes(1));
+    expect(screen.queryByText(/carry 80%/)).not.toBeInTheDocument();
   });
 });

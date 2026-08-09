@@ -47,12 +47,17 @@ class Pipeline:
 
         Pipeline stages (in order):
         1. UrlPruneStage - Filter out assets (.css, .js, images, etc.)
-        2. BlogPruneStage - Filter individual blog posts (keep landing pages)
-        3. ExactUrlMatchStage - Match identical URL paths (before scraping)
-        4. WebScraperStage - Scrape remaining HTML content
-        5. HtmlPruneStage - Match pages with identical HTML
-        6. EmbedStage - Generate vector embeddings
-        7. PairingStage - Semantic matching via vector similarity
+        2. ExactUrlMatchStage - Match identical URL paths (before scraping)
+        3. WebScraperStage - Read page content (platform API / live / archive)
+        4. HtmlPruneStage - Match pages with identical HTML
+        5. EmbedStage - Generate vector embeddings
+        6. PairingStage - Semantic matching via vector similarity
+
+        BlogPruneStage is deliberately absent. It dropped individual blog
+        posts on the theory that they should not be redirected, but measured
+        against a real customer site those posts were 77% of organic clicks
+        and 98% of impressions. Traffic decides what matters now; see
+        classify_url_kind for the classification that replaced it.
 
         Args:
             session_id: Migration session ID for database operations.
@@ -62,7 +67,6 @@ class Pipeline:
         """
         return [
             stages.UrlPruneStage(),
-            stages.BlogPruneStage(),
             stages.ExactUrlMatchStage(session_id=session_id),
             stages.WebScraperStage(),
             stages.HtmlPruneStage(),
@@ -81,9 +85,8 @@ class Pipeline:
 
         Pipeline stages (in order):
         1. UrlPruneStage - Filter out assets
-        2. BlogPruneStage - Filter blog posts
-        3. ExactUrlMatchStage - Match identical URL paths
-        4. UrlSimilarityMatchStage - Slug, TF-IDF, and fuzzy matching
+        2. ExactUrlMatchStage - Match identical URL paths
+        3. UrlSimilarityMatchStage - Slug, TF-IDF, and fuzzy matching
 
         Args:
             session_id: Migration session ID for database operations.
@@ -94,7 +97,6 @@ class Pipeline:
         """
         return [
             stages.UrlPruneStage(),
-            stages.BlogPruneStage(),
             stages.ExactUrlMatchStage(session_id=session_id),
             stages.UrlSimilarityMatchStage(session_id=session_id, config=match_config),
         ]

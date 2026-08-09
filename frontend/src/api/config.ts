@@ -20,6 +20,17 @@ export const CONTENT_MAX_URLS_PER_SITE =
     : 5000;
 
 /**
+ * Where the traffic-risk number appears.
+ *
+ * 'screen' gives it its own beat between discovery and matching — the number
+ * is the product, so it gets a moment. 'inline' folds the same component into
+ * the review page instead. Both render TrafficRiskPanel, so switching is a
+ * config change rather than a rewrite.
+ */
+export const RISK_PLACEMENT: 'screen' | 'inline' =
+  import.meta.env.VITE_RISK_PLACEMENT === 'inline' ? 'inline' : 'screen';
+
+/**
  * Get authorization headers for authenticated requests.
  */
 export function getAuthHeaders(): HeadersInit {

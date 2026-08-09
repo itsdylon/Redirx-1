@@ -713,3 +713,101 @@ describe('UploadPage — domain ingestion mode', () => {
     expect(screen.getByRole('button', { name: /Begin Quick Match/ })).toBeDisabled();
   });
 });
+
+describe('UploadPage — traffic risk beat', () => {
+  function withTraffic(host: string, count: number, clicks: number[]) {
+    const urls = Array.from({ length: count }, (_, i) => `https://${host}/page-${i + 1}`);
+    return {
+      success: true,
+      root_url: `https://${host}`,
+      urls,
+      entries: urls.map((url, i) => ({
+        url,
+        sources: ['gsc', 'sitemap'],
+        clicks: clicks[i] ?? 0,
+        impressions: (clicks[i] ?? 0) * 10,
+      })),
+      count,
+      total_found: count,
+      truncated: false,
+      max_urls: 1000,
+      method: 'gsc',
+      generator: 'wordpress',
+      summary: {
+        total: count,
+        with_traffic: clicks.filter((c) => c > 0).length,
+        gsc_only: 0,
+        no_recorded_traffic: clicks.filter((c) => !c).length,
+        total_clicks: clicks.reduce((a, b) => a + b, 0),
+        total_impressions: clicks.reduce((a, b) => a + b, 0) * 10,
+      },
+      plan: 'free',
+    };
+  }
+
+  async function discoverBothSides(user: ReturnType<typeof userEvent.setup>) {
+    await user.type(screen.getByLabelText('Old Site Domain domain'), 'old.com');
+    await user.click(screen.getAllByRole('button', { name: 'Find Pages' })[0]);
+    await waitFor(() => expect(screen.getByText(/pages found/)).toBeInTheDocument());
+    await user.type(screen.getByLabelText('New Site Domain domain'), 'new.com');
+    await user.click(screen.getByRole('button', { name: 'Find Pages' }));
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /Begin Quick Match/ })).not.toBeDisabled()
+    );
+  }
+
+  it('shows the risk number before matching, and defers submission until confirmed', async () => {
+    const user = userEvent.setup();
+    // One page carries 900 of 1000 clicks: a single URL should account for 80%.
+    mockDiscoverSite
+      .mockResolvedValueOnce(withTraffic('old.com', 4, [900, 50, 30, 20]))
+      .mockResolvedValueOnce(withTraffic('new.com', 4, [0, 0, 0, 0]));
+
+    render(<UploadPage quickOnly />);
+    await discoverBothSides(user);
+    await user.click(screen.getByRole('button', { name: /Begin Quick Match/ }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/carry 80% of your organic clicks/)).toBeInTheDocument();
+    });
+    // The job must not have been submitted yet — the beat comes first.
+    expect(mockUploadCSVs).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole('button', { name: /Map these to|Match these to/ }));
+    await waitFor(() => expect(mockUploadCSVs).toHaveBeenCalledTimes(1));
+  });
+
+  it('can be backed out of without losing the discovered domains', async () => {
+    const user = userEvent.setup();
+    mockDiscoverSite
+      .mockResolvedValueOnce(withTraffic('old.com', 3, [500, 10, 5]))
+      .mockResolvedValueOnce(withTraffic('new.com', 3, [0, 0, 0]));
+
+    render(<UploadPage quickOnly />);
+    await discoverBothSides(user);
+    await user.click(screen.getByRole('button', { name: /Begin Quick Match/ }));
+    await waitFor(() => expect(screen.getByText(/carry 80%/)).toBeInTheDocument());
+
+    await user.click(screen.getByRole('button', { name: 'Back to domains' }));
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Begin Quick Match/ })).not.toBeDisabled();
+    });
+    expect(mockUploadCSVs).not.toHaveBeenCalled();
+  });
+
+  it('skips the beat when there is no Search Console data to show', async () => {
+    // Sitemap-only discovery has nothing to say about what matters, so the
+    // number would be meaningless — go straight to matching.
+    const user = userEvent.setup();
+    mockDiscoverSite
+      .mockResolvedValueOnce(withTraffic('old.com', 3, [0, 0, 0]))
+      .mockResolvedValueOnce(withTraffic('new.com', 3, [0, 0, 0]));
+
+    render(<UploadPage quickOnly />);
+    await discoverBothSides(user);
+    await user.click(screen.getByRole('button', { name: /Begin Quick Match/ }));
+
+    await waitFor(() => expect(mockUploadCSVs).toHaveBeenCalledTimes(1));
+    expect(screen.queryByText(/carry 80%/)).not.toBeInTheDocument();
+  });
+});

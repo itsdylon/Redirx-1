@@ -9,6 +9,9 @@ import { ToolLayout } from './ToolLayout';
 import { FileUploadZone } from './FileUploadZone';
 import { DomainDiscoveryPanel } from './DomainDiscoveryPanel';
 import type { DiscoveryResponse } from '../api/discovery';
+import { TrafficRiskPanel } from './TrafficRiskPanel';
+import { computeRisk } from '../lib/riskSummary';
+import { RISK_PLACEMENT } from '../api/config';
 import { LoadingScreen } from './LoadingScreen';
 import { Button } from './ui/button';
 import { AlertTriangle, Loader2, Zap, Search, Info, ShieldAlert } from 'lucide-react';
@@ -103,6 +106,9 @@ export function UploadPage({
   const [pendingWarnings, setPendingWarnings] = useState<{ old: string[], new: string[] } | null>(null);
   const [showCoachmarks, setShowCoachmarks] = useState(false);
   const [ingestMode, setIngestMode] = useState<'domains' | 'csv'>('domains');
+  // Discovery results kept so the risk number can be shown before matching.
+  const [discovery, setDiscovery] = useState<{ old: DiscoveryResponse | null; new: DiscoveryResponse | null }>({ old: null, new: null });
+  const [showRisk, setShowRisk] = useState(false);
 
   const tutorialFromQuery = searchParams.get('tutorial') === '1';
   const sampleFromQuery = searchParams.get('sample') === '1';
@@ -257,6 +263,8 @@ export function UploadPage({
     setError(null);
     setDuplicateSessionId(null);
 
+    setDiscovery((prev) => ({ ...prev, [side]: result }));
+
     if (!result) {
       handleFileRemove(side);
       return;
@@ -293,6 +301,8 @@ export function UploadPage({
   const handleIngestModeChange = (mode: 'domains' | 'csv') => {
     if (mode === ingestMode) return;
     setIngestMode(mode);
+    setDiscovery({ old: null, new: null });
+    setShowRisk(false);
     handleFileRemove('old');
     handleFileRemove('new');
   };
@@ -479,6 +489,23 @@ export function UploadPage({
     setError(null);
   };
 
+  // The risk number comes from the old side — the new site isn't indexed, so
+  // it has no traffic to lose.
+  const oldDiscovery = discovery.old;
+  const risk = oldDiscovery
+    ? computeRisk(
+        new URL(oldDiscovery.root_url).hostname,
+        oldDiscovery.entries ?? [],
+        oldDiscovery.summary
+      )
+    : null;
+  // Only worth its own beat when we actually have traffic data to show.
+  const riskBeatAvailable =
+    RISK_PLACEMENT === 'screen' &&
+    ingestMode === 'domains' &&
+    !!risk?.hasGsc &&
+    !tutorialActive;
+
   const bothFilesUploaded = oldSiteFile && newSiteFile;
   const hasValidationErrors =
     (oldFileValidation && !oldFileValidation.valid) ||
@@ -518,6 +545,39 @@ export function UploadPage({
           tutorialMode={sampleTutorialActive}
           minDisplayMs={sampleTutorialActive ? 4500 : 0}
         />
+      </Layout>
+    );
+  }
+
+  // The risk number gets its own beat: what's at stake, before we spend time
+  // producing a map of it. Rendered from the same component used inline on
+  // review, so this can be folded back with a config change.
+  if (showRisk && risk) {
+    return (
+      <Layout title="Traffic at risk">
+        <div className="max-w-3xl">
+          <p className="text-sm text-muted-foreground mb-6">
+            Before we map anything — here&rsquo;s what this migration is putting at risk.
+          </p>
+          <TrafficRiskPanel
+            risk={risk}
+            variant="screen"
+            isBusy={isUploading}
+            onContinue={() => handleBeginMatching()}
+            continueLabel={
+              effectivePipelineType === 'content'
+                ? 'Map these to the new site'
+                : 'Match these to the new site'
+            }
+          />
+          <button
+            type="button"
+            onClick={() => setShowRisk(false)}
+            className="mt-6 text-sm text-muted-foreground underline-offset-4 hover:underline"
+          >
+            Back to domains
+          </button>
+        </div>
       </Layout>
     );
   }
@@ -893,7 +953,19 @@ export function UploadPage({
               </p>
             )}
             <Button
-              onClick={() => handleBeginMatching()}
+              onClick={() => {
+                if (riskBeatAvailable && !showRisk) {
+                  setShowRisk(true);
+                  posthog?.capture('traffic_risk_viewed', {
+                    domain: risk?.domain,
+                    top_url_count: risk?.topUrlCount,
+                    total: risk?.total,
+                    total_clicks: risk?.totalClicks,
+                  });
+                  return;
+                }
+                handleBeginMatching();
+              }}
               disabled={!bothFilesUploaded || hasValidationErrors || isUploading}
               size="lg"
               className={`w-full ${tutorialActive && showCoachmarks ? 'ring-2 ring-[#26D99D]/85 ring-offset-2 ring-offset-background' : ''}`}

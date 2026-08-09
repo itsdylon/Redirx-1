@@ -789,18 +789,30 @@ export function UploadPage({
             <div className="mb-6 border border-orange-500 bg-orange-500/10 p-4 flex items-start gap-3">
               <ShieldAlert className="h-5 w-5 text-orange-500 flex-shrink-0 mt-0.5" />
               <div className="flex-1">
-                <div className="font-medium text-orange-600 dark:text-orange-400">Disable Rate Limiting Before Scanning</div>
+                <div className="font-medium text-orange-600 dark:text-orange-400">
+                  We&rsquo;ll read content from your pages
+                </div>
                 <p className="text-sm text-muted-foreground mt-1">
-                  Deep Match will send many requests to scrape pages on your old and new sites. If your sites have anti-spam, rate limiting, or bot protection enabled, the requests may be blocked — which can cause incomplete or failed results.
+                  Deep Match needs the text on each page. Where we can, we read it in bulk
+                  through your CMS — on WordPress that&rsquo;s a few API calls instead of one
+                  request per page. Otherwise we fetch pages directly, about one per second,
+                  backing off if your server pushes back.
                 </p>
                 <div className="mt-3 text-sm text-muted-foreground">
-                  <p className="font-medium text-foreground mb-2">Before proceeding, make sure you have:</p>
+                  <p className="font-medium text-foreground mb-2">
+                    If your site blocks bots, allowlist us rather than turning protection off:
+                  </p>
                   <ul className="list-disc list-inside space-y-1">
-                    <li>Disabled rate limiting or WAF rules on both sites</li>
-                    <li>Whitelisted automated traffic (e.g., Cloudflare Bot Fight Mode, Sucuri, Wordfence)</li>
+                    <li>
+                      Wordfence → All Options → Whitelisted Services, or allow the{' '}
+                      <code className="text-xs">RedirxBot</code> user agent
+                    </li>
+                    <li>Cloudflare → WAF → add a skip rule for <code className="text-xs">RedirxBot</code></li>
                   </ul>
                   <p className="mt-2 text-xs text-muted-foreground">
-                    Pages behind CAPTCHAs or challenge screens will not be scraped unless these protections are temporarily disabled. You can re-enable all protections after the scan completes.
+                    If we do get blocked we&rsquo;ll stop rather than hammer your server, fall
+                    back to archived copies where they exist, and tell you exactly which pages
+                    we couldn&rsquo;t read.
                   </p>
                 </div>
                 <label className="flex items-center gap-2 mt-4 cursor-pointer select-none">
@@ -811,7 +823,7 @@ export function UploadPage({
                     className="h-4 w-4 rounded border-border accent-primary"
                   />
                   <span className="text-sm text-foreground">
-                    I've disabled rate limiting and bot protection on my sites
+                    Got it — read content from my pages
                   </span>
                 </label>
                 <div className="flex gap-3 mt-3">
@@ -844,52 +856,53 @@ export function UploadPage({
               }
             </div>
           )}
-          {/* Ingestion mode tabs */}
-          <div className="mb-4 flex items-center gap-1 border border-border bg-muted/40 p-1 rounded-lg w-fit">
-            <button
-              type="button"
-              onClick={() => handleIngestModeChange('domains')}
-              className={`px-4 py-1.5 text-sm rounded-md transition-colors ${
-                ingestMode === 'domains'
-                  ? 'bg-background text-foreground font-medium shadow-sm'
-                  : 'text-muted-foreground hover:text-foreground'
-              }`}
-            >
-              Paste Domains
-            </button>
-            <button
-              type="button"
-              onClick={() => handleIngestModeChange('csv')}
-              className={`px-4 py-1.5 text-sm rounded-md transition-colors ${
-                ingestMode === 'csv'
-                  ? 'bg-background text-foreground font-medium shadow-sm'
-                  : 'text-muted-foreground hover:text-foreground'
-              }`}
-            >
-              Upload Files
-            </button>
-          </div>
-
           {ingestMode === 'domains' && (
             <div className="mb-8">
+              {/* The two sides do different jobs and shouldn't look identical:
+                  the old site is where the traffic to protect lives, and the
+                  new one isn't indexed yet so Search Console has nothing to
+                  say about it. */}
               <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
                 <DomainDiscoveryPanel
                   side="old"
-                  label="Old Site Domain"
+                  label="Old site — what you're replacing"
+                  hint="Import pages that get traffic. Read-only Search Console access, finds only your ranking pages."
+                  emphasis
                   onDiscovered={handleDomainDiscovered}
                 />
                 <DomainDiscoveryPanel
                   side="new"
-                  label="New Site Domain"
+                  label="New site — where it's moving"
+                  hint="Read from your sitemap. Search Console can't help here yet — the new pages aren't indexed."
                   onDiscovered={handleDomainDiscovered}
                 />
               </div>
-              <p className="mt-3 text-xs text-muted-foreground">
-                We find pages via your sitemap, platform APIs (WordPress, Shopify), or a
-                site crawl. Have an export from Screaming Frog or your CMS? Switch to
-                Upload Files.
+              <p className="mt-4 text-xs text-muted-foreground">
+                Already have a URL list?{' '}
+                <button
+                  type="button"
+                  onClick={() => handleIngestModeChange('csv')}
+                  className="underline underline-offset-4 hover:text-foreground"
+                >
+                  Import a CSV or sitemap file
+                </button>
+                .
               </p>
             </div>
+          )}
+
+          {ingestMode === 'csv' && (
+            <p className="mb-4 text-xs text-muted-foreground">
+              Importing a file.{' '}
+              <button
+                type="button"
+                onClick={() => handleIngestModeChange('domains')}
+                className="underline underline-offset-4 hover:text-foreground"
+              >
+                Paste domains instead
+              </button>
+              .
+            </p>
           )}
 
           {ingestMode === 'csv' && (

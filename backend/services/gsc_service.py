@@ -82,16 +82,28 @@ def _registrable_hosts(urls: List[str]) -> List[str]:
     return hosts
 
 
+def _strip_www(host: str) -> str:
+    host = (host or '').lower().split(':')[0]
+    return host[4:] if host.startswith('www.') else host
+
+
 def property_matches_host(site_url: str, host: str) -> bool:
     """
     Whether a GSC property covers a hostname.
-    Domain properties look like "sc-domain:example.com" and cover all
-    subdomains; URL-prefix properties look like "https://www.example.com/".
+
+    Domain properties ("sc-domain:example.com") cover all subdomains.
+    URL-prefix properties ("https://www.example.com/") are compared
+    www-insensitively: Google treats www and apex as separate properties, but
+    a user pasting "example.com" whose only verified property is the www form
+    plainly means that property. Requiring an exact match meant GSC discovery
+    silently never activated for such sites — the common case — and quietly
+    degraded to sitemap-only forever.
     """
+    host = _strip_www(host)
     if site_url.startswith('sc-domain:'):
         domain = site_url[len('sc-domain:'):].lower()
         return host == domain or host.endswith('.' + domain)
-    prop_host = urlparse(site_url).netloc.lower().split(':')[0]
+    prop_host = _strip_www(urlparse(site_url).netloc)
     return bool(prop_host) and prop_host == host
 
 

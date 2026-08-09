@@ -99,6 +99,21 @@ class TestMergeSources(unittest.TestCase):
         entries = merge_sources([], ["https://e.com/a"], SOURCE_CRAWL)
         self.assertEqual(entries[0]["sources"], [SOURCE_CRAWL])
 
+    def test_gsc_image_results_are_not_mapped(self):
+        # Search Console reports image URLs because they rank in Google
+        # Images. On a real WordPress site six of the top "GSC-only" results
+        # were /wp-content/uploads/*.jpeg — not pages, and never redirects.
+        entries = merge_sources(
+            [
+                gsc("https://e.com/wp-content/uploads/2024/04/image-3.png", 0, 26),
+                gsc("https://e.com/wp-content/uploads/2023/11/photo.jpeg", 0, 18),
+                gsc("https://e.com/real-page", 40, 900),
+            ],
+            [],
+            SOURCE_SITEMAP,
+        )
+        self.assertEqual([e["url"] for e in entries], ["https://e.com/real-page"])
+
 
 class TestSummarize(unittest.TestCase):
     def test_counts(self):

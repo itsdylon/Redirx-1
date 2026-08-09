@@ -75,9 +75,21 @@ class TestPropertyMatching(unittest.TestCase):
         self.assertTrue(property_matches_host("sc-domain:example.com", "www.example.com"))
         self.assertFalse(property_matches_host("sc-domain:example.com", "notexample.com"))
 
-    def test_url_prefix_property_matches_exact_host(self):
-        self.assertTrue(property_matches_host("https://www.example.com/", "www.example.com"))
-        self.assertFalse(property_matches_host("https://www.example.com/", "example.com"))
+    def test_url_prefix_property_is_www_insensitive(self):
+        # Verified against a real property: dreamhomestudio.com's only GSC
+        # property is the www URL-prefix form. Requiring an exact host match
+        # meant find_property returned None and GSC discovery silently never
+        # activated — the feature looked fine while always falling back to
+        # sitemap-only.
+        for host in ("www.example.com", "example.com"):
+            self.assertTrue(property_matches_host("https://www.example.com/", host), host)
+        for host in ("www.example.com", "example.com"):
+            self.assertTrue(property_matches_host("https://example.com/", host), host)
+
+    def test_url_prefix_property_rejects_other_hosts(self):
+        self.assertFalse(property_matches_host("https://www.example.com/", "other.com"))
+        # A subdomain is a genuinely different property, not a www variant.
+        self.assertFalse(property_matches_host("https://www.example.com/", "blog.example.com"))
 
     def test_picks_property_covering_most_urls(self):
         urls = [

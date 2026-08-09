@@ -40,6 +40,14 @@ class FakeContent:
     async def read(self, n: int = -1) -> bytes:
         return self._body
 
+    async def iter_chunked(self, size: int):
+        """
+        Mirror aiohttp's streaming read, deliberately in several chunks so the
+        harness would catch a partial-read regression rather than hide it.
+        """
+        for i in range(0, len(self._body), size):
+            yield self._body[i:i + size]
+
 
 class FakeResponse:
     def __init__(self, url: str, status: int = 200, body: bytes = b"", headers=None):
@@ -153,8 +161,33 @@ class TestParseSitemapXml(unittest.TestCase):
         self.assertEqual(pages, [])
         self.assertEqual(children, ["https://example.com/sitemap-pages.xml"])
 
-    def test_invalid_xml(self):
-        self.assertEqual(parse_sitemap_xml("<not-xml"), ([], []))
+    def test_invalid_xml_raises_rather_than_looking_empty(self):
+        # Regression: returning ([], []) here made a truncated sitemap
+        # indistinguishable from an empty one. Against a real Yoast install
+        # that silently cost 112 of 149 URLs while the run reported success.
+        from redirx.discovery import SitemapParseError
+        with self.assertRaises(SitemapParseError):
+            parse_sitemap_xml("<not-xml")
+
+    def test_truncated_document_raises(self):
+        truncated = (
+            '<?xml version="1.0"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+            '<url><loc>https://e.com/a</loc></url><url><loc>https://e.com/b'
+        )
+        from redirx.discovery import SitemapParseError
+        with self.assertRaises(SitemapParseError):
+            parse_sitemap_xml(truncated)
+
+    def test_unparseable_child_is_recorded_not_swallowed(self):
+        session = FakeSession({
+            "https://e.com/robots.txt": (200, "Sitemap: https://e.com/index.xml"),
+            "https://e.com/index.xml": (200, SITEMAP_INDEX.replace(
+                "https://example.com/sitemap-pages.xml", "https://e.com/broken.xml")),
+            "https://e.com/broken.xml": (200, "<urlset><url><loc>https://e.com/a</loc>"),
+        })
+        errors: list[str] = []
+        run(discover_via_sitemaps(session, "https://e.com", 100, far_deadline(), errors))
+        self.assertTrue(any("unparseable sitemap" in e for e in errors), errors)
 
 
 class TestDetectGenerator(unittest.TestCase):

@@ -86,6 +86,10 @@ class DiscoveryResult:
     retry_after_seconds: int = 0
 
 
+class SitemapParseError(Exception):
+    """A sitemap document was fetched but could not be parsed."""
+
+
 class DiscoveryError(Exception):
     """User-facing discovery failure."""
 
@@ -187,8 +191,10 @@ def parse_sitemap_xml(xml_text: str) -> tuple[list[str], list[str]]:
     page_urls: list[str] = []
     try:
         root = ET.fromstring(xml_text)
-    except ET.ParseError:
-        return child_sitemaps, page_urls
+    except ET.ParseError as exc:
+        # Never silently equate "unparseable" with "empty": that is how a
+        # truncated sitemap cost 112 URLs while discovery reported success.
+        raise SitemapParseError(str(exc)) from exc
 
     local = root.tag.rsplit("}", 1)[-1]
     for element in root:
@@ -241,6 +247,26 @@ def detect_generator(html: str, headers: dict) -> str | None:
 # Fetching
 # ============================================================================
 
+async def _read_capped(resp) -> bytes:
+    """
+    Read the whole body, bounded by MAX_RESPONSE_BYTES.
+
+    StreamReader.read(n) returns *up to* n bytes from the current buffer, not
+    the full payload — a single call silently truncated anything past the
+    first chunk. Measured against a real Yoast sitemap: a 16 KB document came
+    back cut off mid-element, parsed as zero URLs, and cost 112 pages while
+    discovery still reported a complete result.
+    """
+    chunks: list[bytes] = []
+    total = 0
+    async for chunk in resp.content.iter_chunked(64 * 1024):
+        chunks.append(chunk)
+        total += len(chunk)
+        if total >= MAX_RESPONSE_BYTES:
+            break
+    return b"".join(chunks)[:MAX_RESPONSE_BYTES]
+
+
 async def _fetch(
     session: aiohttp.ClientSession,
     url: str,
@@ -278,7 +304,7 @@ async def _fetch(
                     current = urljoin(current, location)
                     continue
 
-                raw = await resp.content.read(MAX_RESPONSE_BYTES)
+                raw = await _read_capped(resp)
                 headers = dict(resp.headers)
                 final_url = str(resp.url)
                 if current.endswith(".gz") and raw[:2] == b"\x1f\x8b":
@@ -401,7 +427,13 @@ async def _walk_sitemaps(
             status, text, _, _ = await _fetch(session, sitemap_url, errors)
         if status != 200 or not text:
             return [], []
-        return parse_sitemap_xml(text)
+        try:
+            return parse_sitemap_xml(text)
+        except SitemapParseError as exc:
+            # Record it: one unreadable child of a sitemap index can otherwise
+            # drop most of a site while everything still looks successful.
+            errors.append(f"unparseable sitemap {sitemap_url}: {exc}")
+            return [], []
 
     while queue and fetches < MAX_SITEMAP_FETCHES and len(page_urls) < collect_cap:
         if time.monotonic() > deadline:

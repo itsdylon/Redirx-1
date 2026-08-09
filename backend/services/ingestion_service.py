@@ -37,7 +37,12 @@ from backend.services.gsc_service import (
 )
 from src.redirx.config import Config
 from src.redirx.database import GSCConnectionDB, TrafficBaselineDB
-from src.redirx.discovery import DiscoveryError, discover_site, normalize_root
+from src.redirx.discovery import (
+    DiscoveryError,
+    clean_page_url,
+    discover_site,
+    normalize_root,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +86,13 @@ def merge_sources(
     by_key: Dict[str, Dict[str, Any]] = {}
 
     for row in gsc_rows:
+        # Search Console reports image and file URLs too, because they rank in
+        # Google Images. Measured on a real WordPress site, six of the top
+        # "GSC-only" results were /wp-content/uploads/*.jpeg. They are not
+        # pages and must never become redirect rules, so GSC rows get the same
+        # asset filtering the crawled URLs already had.
+        if clean_page_url(row["url"]) is None:
+            continue
         key = normalize_url(row["url"])
         existing = by_key.get(key)
         if existing:

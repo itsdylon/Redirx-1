@@ -43,6 +43,7 @@ from src.redirx.discovery import (
     discover_site,
     normalize_root,
 )
+from src.redirx.url_kind import classify_url_kind, is_low_priority
 
 logger = logging.getLogger(__name__)
 
@@ -121,6 +122,13 @@ def merge_sources(
             "impressions": 0,
         }
 
+    for entry in by_key.values():
+        entry["kind"] = classify_url_kind(entry["url"])
+        # Advisory only: recorded traffic always outranks path shape.
+        entry["low_priority"] = is_low_priority(
+            entry["url"], entry["clicks"], entry["impressions"]
+        )
+
     return sorted(
         by_key.values(),
         key=lambda e: (e["clicks"], e["impressions"]),
@@ -133,11 +141,18 @@ def summarize(entries: List[Dict[str, Any]]) -> Dict[str, Any]:
     with_traffic = [e for e in entries if e["clicks"] > 0 or e["impressions"] > 0]
     gsc_only = [e for e in entries if e["sources"] == [SOURCE_GSC]]
     no_traffic = [e for e in entries if SOURCE_GSC not in e["sources"]]
+    kinds: Dict[str, int] = {}
+    for e in entries:
+        k = e.get("kind") or "page"
+        kinds[k] = kinds.get(k, 0) + 1
+
     return {
         "total": len(entries),
         "with_traffic": len(with_traffic),
         "gsc_only": len(gsc_only),
         "no_recorded_traffic": len(no_traffic),
+        "low_priority": len([e for e in entries if e.get("low_priority")]),
+        "kinds": kinds,
         "total_clicks": sum(e["clicks"] for e in entries),
         "total_impressions": sum(e["impressions"] for e in entries),
     }

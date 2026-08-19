@@ -39,6 +39,8 @@ except ImportError:
 # A dropped connection is ordinary for a socket that idles for hours; these
 # mean "reconnect", not "exit".
 TRANSIENT_DB_ERRORS = (psycopg.OperationalError, psycopg.InterfaceError)
+# Releasing to 'pending' is a retry, not an ending.
+TERMINAL_JOB_STATUSES = frozenset({"completed", "permanently_failed", "failed"})
 RECONNECT_BASE_DELAY = 1.0
 RECONNECT_MAX_DELAY = 60.0
 RECONNECT_MAX_ATTEMPTS = 8
@@ -378,6 +380,9 @@ class RedirxWorker:
         ).eq(
             'status', 'pending'
         ).order(
+            # Mirror claim_next_job: priority first, oldest within a priority.
+            'priority', desc=True
+        ).order(
             'created_at', desc=False
         ).limit(1).execute()
 
@@ -394,6 +399,8 @@ class RedirxWorker:
             'locked_by': self.worker_id,
             'lease_expires_at': lease_expires_at,
             'attempt_count': new_attempt,
+            'started_at': datetime.now(timezone.utc).isoformat(),
+            'completed_at': None,
             'current_stage': None,
             'stage_name': None,
             'total_stages': None,
@@ -467,6 +474,12 @@ class RedirxWorker:
                 'locked_by': None,
                 'lease_expires_at': None
             }
+
+            # Stamp completion only for terminal states. Releasing back to
+            # 'pending' is a retry, and marking that complete would report a
+            # duration for a run that never finished.
+            if status in TERMINAL_JOB_STATUSES:
+                updates['completed_at'] = datetime.now(timezone.utc).isoformat()
 
             if error_message:
                 updates['last_error'] = error_message[:5000]

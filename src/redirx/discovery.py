@@ -27,6 +27,7 @@ from urllib.parse import urljoin, urlparse
 import aiohttp
 from bs4 import BeautifulSoup
 
+from redirx.robots import RobotsPolicy
 from redirx.stages import UrlPruneStage
 from redirx.safe_fetch import (
     MAX_REDIRECTS,
@@ -84,6 +85,12 @@ class DiscoveryResult:
     # Set when the origin throttled us rather than simply having no sitemap.
     rate_limited: bool = False
     retry_after_seconds: int = 0
+    # Set when robots.txt forbids crawling and ownership was not proven. A
+    # different problem from "no sitemap", and it has a different fix.
+    robots_blocked: bool = False
+
+
+ROBOTS_BLOCKED_ERROR = "robots_blocked"
 
 
 class SitemapParseError(Exception):
@@ -558,14 +565,52 @@ def extract_links(html: str, page_url: str, root_url: str) -> list[str]:
     return links
 
 
+async def _robots_policy(
+    session: aiohttp.ClientSession,
+    root_url: str,
+    errors: list[str],
+) -> RobotsPolicy:
+    """
+    The site's crawl rules.
+
+    A missing or unreadable robots.txt allows everything: no restrictions were
+    published, and refusing to crawl because a file does not exist would be
+    wrong.
+    """
+    status, text, _, _ = await _fetch(session, f"{root_url}/robots.txt", errors)
+    if status != 200 or not text:
+        return RobotsPolicy.allow_all()
+    return RobotsPolicy.from_txt(text)
+
+
 async def discover_via_crawl(
     session: aiohttp.ClientSession,
     root_url: str,
     collect_cap: int,
     deadline: float,
     errors: list[str],
+    owner_verified: bool = False,
 ) -> list[str]:
-    """Concurrent same-host BFS from the homepage."""
+    """
+    Concurrent same-host BFS from the homepage.
+
+    This is the only discovery strategy that behaves like a bot, so it is the
+    only one that honours robots.txt Disallow. Sitemaps and platform APIs are
+    publishing endpoints — shipping a sitemap is an invitation to read it.
+
+    `owner_verified` (a Search Console property the user has verified for this
+    domain) lifts the restriction: robots.txt asks *crawlers* to stay out, and
+    a verified owner reading their own site to plan its migration is not that.
+    """
+    policy = (
+        RobotsPolicy.allow_all()
+        if owner_verified
+        else await _robots_policy(session, root_url, errors)
+    )
+    if policy.blocks_everything:
+        errors.append(ROBOTS_BLOCKED_ERROR)
+        return []
+
     start = clean_page_url(f"{root_url}/") or f"{root_url}/"
     visited: set[str] = set()
     found: list[str] = []
@@ -596,6 +641,8 @@ async def discover_via_crawl(
             if key in visited or depth > CRAWL_MAX_DEPTH:
                 continue
             visited.add(key)
+            if not policy.allows(url):
+                continue
             found.append(url)
             batch.append((url, depth))
         if not batch:
@@ -638,6 +685,7 @@ async def discover_site(
     max_urls: int = 1000,
     time_budget: float = 20.0,
     limiter: "HostRateLimiter | None" = None,
+    owner_verified: bool = False,
 ) -> DiscoveryResult:
     """
     Discover a site's page URLs. Never raises for per-strategy failures —
@@ -737,7 +785,9 @@ async def discover_site(
 
         if len(urls) < THIN_RESULT_THRESHOLD and time.monotonic() < deadline:
             crawl_urls = _filter_urls(
-                await discover_via_crawl(session, root_url, max_urls, deadline, errors),
+                await discover_via_crawl(
+                    session, root_url, max_urls, deadline, errors, owner_verified
+                ),
                 root_url,
             )
             if len(crawl_urls) > len(urls):
@@ -754,6 +804,7 @@ async def discover_site(
     # problem from finding nothing because there is no sitemap, and it needs a
     # different message: one is "wait and retry", the other is "upload a file".
     if not urls:
+        result.robots_blocked = ROBOTS_BLOCKED_ERROR in errors
         throttled = [e for e in errors if e.startswith("rate_limited::")]
         if throttled:
             retry_after = max(int(e.split("::")[2]) for e in throttled)

@@ -103,6 +103,9 @@ export function ReviewInterface({ layoutVariant = 'dashboard' }: ReviewInterface
   const [error, setError] = useState<string | null>(null);
   const [sortOption, setSortOption] = useState<string>('confidence-desc');
   const [showExactMatches, setShowExactMatches] = useState(true);
+  // Pages with no recorded traffic start collapsed once Search Console data
+  // is in — they carry no measurable risk.
+  const [showZeroTraffic, setShowZeroTraffic] = useState(false);
   const [pipelineType, setPipelineType] = useState<string>('content');
   const [gscMeta, setGscMeta] = useState<GscResultsMeta | null>(null);
   const [showTutorialSuccess, setShowTutorialSuccess] = useState(false);
@@ -509,8 +512,33 @@ export function ReviewInterface({ layoutVariant = 'dashboard' }: ReviewInterface
     setCurrentPage(1);
   };
 
+  /**
+   * Pages with no recorded traffic collapse out of the way.
+   *
+   * Once Search Console has spoken, a page with no clicks and no impressions
+   * carries no measurable risk — reviewing it costs attention that belongs on
+   * the pages that do. They are hidden rather than dropped: "no recorded
+   * traffic" is not "no traffic", since Google withholds low-volume queries.
+   *
+   * Only collapses when the split is real. If nothing has traffic — an
+   * unindexed site, or a property that matched no URLs — hiding everything
+   * would leave an empty table with a confusing explanation.
+   */
+  const trafficKnown = !!gscMeta?.synced;
+  const hasTraffic = (r: RedirectMapping) =>
+    (r.gscClicks ?? 0) > 0 || (r.gscImpressions ?? 0) > 0;
+  const zeroTrafficCount = trafficKnown
+    ? filteredRedirects.filter((r) => !hasTraffic(r)).length
+    : 0;
+  const canCollapseZeroTraffic =
+    trafficKnown && zeroTrafficCount > 0 && zeroTrafficCount < filteredRedirects.length;
+  const visibleRedirects =
+    canCollapseZeroTraffic && !showZeroTraffic
+      ? filteredRedirects.filter(hasTraffic)
+      : filteredRedirects;
+
   // Sort according to toolbar selection
-  const sortedRedirects = [...filteredRedirects].sort((a, b) => {
+  const sortedRedirects = [...visibleRedirects].sort((a, b) => {
     switch (sortOption) {
       case 'traffic-desc':
         return (
@@ -766,6 +794,36 @@ export function ReviewInterface({ layoutVariant = 'dashboard' }: ReviewInterface
             pipelineType={pipelineType}
             showTraffic={!!gscMeta?.synced}
           />
+
+          {canCollapseZeroTraffic && (
+            <button
+              type="button"
+              onClick={() => {
+                setShowZeroTraffic((v) => !v);
+                setCurrentPage(1);
+                posthog?.capture('review_zero_traffic_toggled', {
+                  session_id: sessionId,
+                  shown: !showZeroTraffic,
+                  count: zeroTrafficCount,
+                });
+              }}
+              className="mt-3 w-full flex items-center justify-between gap-3 rounded-lg border border-dashed border-border bg-muted/30 px-4 py-3 text-left hover:bg-muted/50 transition-colors"
+              aria-expanded={showZeroTraffic}
+            >
+              <span className="text-sm text-muted-foreground">
+                <span className="text-foreground font-medium">
+                  {zeroTrafficCount.toLocaleString()}
+                </span>{' '}
+                page{zeroTrafficCount !== 1 ? 's' : ''} with no recorded traffic
+                <span className="hidden sm:inline">
+                  {' '}— still redirected, just not worth your review time
+                </span>
+              </span>
+              <span className="text-sm text-muted-foreground underline underline-offset-2 flex-shrink-0">
+                {showZeroTraffic ? 'Hide' : 'Show'}
+              </span>
+            </button>
+          )}
 
           </div>
 

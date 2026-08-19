@@ -36,6 +36,13 @@ except ImportError:
     print("[Worker] ERROR: psycopg not installed. Run: pip install 'psycopg[binary]>=3.1.0'")
     sys.exit(1)
 
+# A dropped connection is ordinary for a socket that idles for hours; these
+# mean "reconnect", not "exit".
+TRANSIENT_DB_ERRORS = (psycopg.OperationalError, psycopg.InterfaceError)
+RECONNECT_BASE_DELAY = 1.0
+RECONNECT_MAX_DELAY = 60.0
+RECONNECT_MAX_ATTEMPTS = 8
+
 
 # Worker configuration from environment
 def _bounded_env_int(name: str, default: int, minimum: int, maximum: int) -> int:
@@ -159,9 +166,14 @@ class RedirxWorker:
             return None
         return database_url
 
-    def connect_postgres(self) -> Optional[psycopg.Connection]:
+    def connect_postgres(self, quiet: bool = False) -> Optional[psycopg.Connection]:
         """
         Establish PostgreSQL connection for LISTEN/NOTIFY.
+
+        TCP keepalives are set so a dropped connection is detected by the
+        socket layer within ~a minute instead of at the next read. The LISTEN
+        connection is idle by design — it can sit for hours between jobs —
+        which is exactly the shape NAT timeouts and pooler recycling kill.
 
         Returns:
             PostgreSQL connection, or None if connection fails.
@@ -171,14 +183,92 @@ class RedirxWorker:
             return None
 
         try:
-            print(f"[Worker] Connecting to PostgreSQL...")
-            conn = psycopg.connect(database_url, autocommit=True)
-            print("[Worker] PostgreSQL connection established")
+            if not quiet:
+                print("[Worker] Connecting to PostgreSQL...", flush=True)
+            conn = psycopg.connect(
+                database_url,
+                autocommit=True,
+                keepalives=1,
+                keepalives_idle=30,
+                keepalives_interval=10,
+                keepalives_count=3,
+            )
+            if not quiet:
+                print("[Worker] PostgreSQL connection established", flush=True)
             return conn
         except Exception as e:
-            print(f"[Worker] Failed to connect to PostgreSQL: {e}")
-            print("[Worker] Falling back to polling mode")
+            print(f"[Worker] Failed to connect to PostgreSQL: {e}", flush=True)
             return None
+
+    def _close_quietly(self, conn: Optional[psycopg.Connection]) -> None:
+        if conn is None:
+            return
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+    async def _recover_connections(self) -> bool:
+        """
+        Rebuild both PostgreSQL connections after a transient failure.
+
+        A long-lived connection dropping is ordinary, not exceptional: idle
+        LISTEN sockets get closed by NAT, poolers recycle, and databases
+        restart. Treating it as fatal meant the process died and only recovered
+        because the platform restarted it — during which push delivery silently
+        stopped and jobs waited for the 60s fallback poll.
+
+        Returns False when the database stays unreachable, so the caller can
+        degrade to polling instead of exiting.
+        """
+        self._close_quietly(self.pg_conn)
+        self._close_quietly(self.pg_claim_conn)
+        self.pg_conn = None
+        self.pg_claim_conn = None
+
+        delay = RECONNECT_BASE_DELAY
+        for attempt in range(1, RECONNECT_MAX_ATTEMPTS + 1):
+            await asyncio.sleep(delay)
+            conn = self.connect_postgres(quiet=attempt > 1)
+            if conn:
+                try:
+                    with conn.cursor() as cursor:
+                        cursor.execute("LISTEN job_queue_events")
+                    self.pg_conn = conn
+                    self.pg_claim_conn = self.connect_postgres(quiet=True)
+                    print(
+                        f"[Worker] Reconnected and re-subscribed after {attempt} "
+                        f"attempt{'s' if attempt != 1 else ''}",
+                        flush=True,
+                    )
+                    return True
+                except Exception as e:
+                    print(f"[Worker] Re-subscribe failed: {e}", flush=True)
+                    self._close_quietly(conn)
+
+            print(
+                f"[Worker] Reconnect attempt {attempt}/{RECONNECT_MAX_ATTEMPTS} "
+                f"failed; retrying in {min(delay * 2, RECONNECT_MAX_DELAY):.0f}s",
+                flush=True,
+            )
+            delay = min(delay * 2, RECONNECT_MAX_DELAY)
+
+        print("[Worker] Could not restore PostgreSQL connection", flush=True)
+        return False
+
+    @staticmethod
+    def _wait_for_notification(conn: psycopg.Connection, timeout: float) -> Optional[str]:
+        """
+        Block for one notification. Runs in a thread — psycopg's connection is
+        synchronous, so calling this inline would stall the event loop for the
+        whole timeout and freeze lease extension for any in-flight job.
+        """
+        try:
+            for notify in conn.notifies(timeout=timeout):
+                return notify.channel
+        except TimeoutError:
+            return None
+        return None
 
     async def claim_job(self) -> Optional[Dict[str, Any]]:
         """
@@ -228,7 +318,12 @@ class RedirxWorker:
         Keeps backward compatibility with older claim_next_job return signatures.
         """
         if not self.pg_claim_conn:
-            return None
+            # Rebuild lazily. Without this, one dropped claim connection sent
+            # every future claim down the slower REST fallback for the life of
+            # the process, with nothing in the logs to say why.
+            self.pg_claim_conn = self.connect_postgres(quiet=True)
+            if not self.pg_claim_conn:
+                return None
 
         try:
             with self.pg_claim_conn.cursor() as cursor:
@@ -262,6 +357,13 @@ class RedirxWorker:
                     'source_session_id': claimed_source,
                 }
                 return job
+        except TRANSIENT_DB_ERRORS as e:
+            # Drop the dead handle so the next claim rebuilds it rather than
+            # failing the same way forever.
+            print(f"[Worker] Claim connection lost, will rebuild: {e}", flush=True)
+            self._close_quietly(self.pg_claim_conn)
+            self.pg_claim_conn = None
+            return None
         except Exception as e:
             print(f"[Worker] PostgreSQL claim failed: {e}", flush=True)
             return None
@@ -773,39 +875,56 @@ class RedirxWorker:
             self.pg_conn.autocommit = True
 
             while self.running:
-                await self._reap_finished_jobs(wait_for_one=False)
-
-                # Opportunistically fill all available capacity.
-                claimed = await self._dispatch_until_capacity("LISTEN dispatch")
-
-                # Fallback polling (in case we missed notifications or timeout occurred)
-                now = time.time()
-                if now - last_fallback_poll >= WORKER_FALLBACK_INTERVAL:
-                    print("[Worker] Fallback poll check...", flush=True)
-                    last_fallback_poll = now
-
-                    # Reclaim expired leases
-                    await self.reclaim_expired_leases()
-
-                    # Try to claim jobs (in case notifications were missed).
-                    claimed += await self._dispatch_until_capacity("fallback poll")
-
-                if claimed > 0:
-                    continue
-
-                if self.in_flight_tasks:
-                    # Keep the dispatch loop responsive while work is in progress.
-                    await self._reap_finished_jobs(wait_for_one=True, timeout=1.0)
-                    continue
-
-                # No in-flight work and nothing was claimable; block on LISTEN.
-                gen = self.pg_conn.notifies(timeout=WORKER_FALLBACK_INTERVAL)
                 try:
-                    for notify in gen:
-                        print(f"[Worker] Received LISTEN notification: {notify.channel}", flush=True)
-                        break
-                except TimeoutError:
-                    print("[Worker] No pending jobs", end='\r', flush=True)
+                    await self._reap_finished_jobs(wait_for_one=False)
+
+                    # Opportunistically fill all available capacity.
+                    claimed = await self._dispatch_until_capacity("LISTEN dispatch")
+
+                    # Fallback polling (in case we missed notifications or timeout occurred)
+                    now = time.time()
+                    if now - last_fallback_poll >= WORKER_FALLBACK_INTERVAL:
+                        print("[Worker] Fallback poll check...", flush=True)
+                        last_fallback_poll = now
+
+                        # Reclaim expired leases
+                        await self.reclaim_expired_leases()
+
+                        # Try to claim jobs (in case notifications were missed).
+                        claimed += await self._dispatch_until_capacity("fallback poll")
+
+                    if claimed > 0:
+                        continue
+
+                    if self.in_flight_tasks:
+                        # Keep the dispatch loop responsive while work is in progress.
+                        await self._reap_finished_jobs(wait_for_one=True, timeout=1.0)
+                        continue
+
+                    # No in-flight work and nothing was claimable; block on
+                    # LISTEN in a thread so the event loop stays free.
+                    channel = await asyncio.to_thread(
+                        self._wait_for_notification, self.pg_conn, WORKER_FALLBACK_INTERVAL
+                    )
+                    if channel:
+                        print(f"[Worker] Received LISTEN notification: {channel}", flush=True)
+                    else:
+                        print("[Worker] No pending jobs", end='\r', flush=True)
+
+                except TRANSIENT_DB_ERRORS as e:
+                    # The connection went away. Rebuild it and carry on; the
+                    # in-flight jobs this worker already owns are unaffected,
+                    # and their leases keep being extended throughout.
+                    print(f"[Worker] PostgreSQL connection lost: {e}", flush=True)
+                    if not await self._recover_connections():
+                        print(
+                            "[Worker] Degrading to polling mode until the "
+                            "database is reachable again",
+                            flush=True,
+                        )
+                        await self.polling_loop()
+                        return
+                    last_fallback_poll = time.time()
 
         except KeyboardInterrupt:
             self.running = False
@@ -849,6 +968,11 @@ class RedirxWorker:
             # Start LISTEN loop (will fallback to polling if needed)
             await self.listen_loop()
 
+        except TRANSIENT_DB_ERRORS as e:
+            # Reaching here means recovery inside the loop was exhausted. Say
+            # what it actually was rather than calling a dropped socket fatal.
+            print(f"[Worker] Database unreachable, exiting for restart: {e}", flush=True)
+            traceback.print_exc()
         except Exception as e:
             print(f"[Worker] Fatal error: {e}")
             traceback.print_exc()

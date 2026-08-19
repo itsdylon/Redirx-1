@@ -131,13 +131,14 @@ class TestSummarize(unittest.TestCase):
 
 
 class FakeDiscovery:
-    def __init__(self, urls, method="sitemap"):
+    def __init__(self, urls, method="sitemap", robots_blocked=False):
         self.urls = urls
         self.method = method
         self.root_url = "https://e.com"
         self.generator = None
         self.rate_limited = False
         self.retry_after_seconds = 0
+        self.robots_blocked = robots_blocked
 
 
 class TestIngestSideAsymmetry(unittest.TestCase):
@@ -295,6 +296,68 @@ class TestGscPropertyOverride(unittest.TestCase):
                 gsc_property_override="sc-domain:picked.com",
             ))
         self.assertEqual(seen["gsc_property"], "sc-domain:picked.com")
+
+
+class TestOwnershipLiftsRobots(unittest.TestCase):
+    """
+    A verified Search Console property proves the user owns the domain, which
+    lifts robots.txt Disallow on the link-following crawl. robots.txt asks
+    crawlers to stay out; an owner reading their own site to plan its
+    migration is not the visitor it is addressing.
+    """
+
+    def _run(self, gsc_property):
+        seen = {}
+
+        async def _capture(domain, **kwargs):
+            seen["owner_verified"] = kwargs.get("owner_verified")
+            return FakeDiscovery(["https://e.com/a"])
+
+        svc = IngestionService(
+            gsc_service=object(), connection_db=object(), baseline_db=object()
+        )
+        svc.gsc_urls_for_domain = lambda user_id, domain, **kw: (
+            ([gsc("https://e.com/x", 5)], gsc_property) if gsc_property else ([], None)
+        )
+        svc.capture_baseline = lambda *a, **k: "baseline-1"
+        with patch("backend.services.ingestion_service.discover_site", _capture):
+            run(svc.ingest_side("u1", "e.com", "old", 100, 5))
+        return seen["owner_verified"]
+
+    def test_verified_property_marks_the_user_as_owner(self):
+        self.assertTrue(self._run("sc-domain:e.com"))
+
+    def test_no_property_means_robots_still_applies(self):
+        self.assertFalse(self._run(None))
+
+    def test_new_side_is_never_treated_as_owner(self):
+        # The new side skips GSC entirely, so there is no ownership proof.
+        seen = {}
+
+        async def _capture(domain, **kwargs):
+            seen["owner_verified"] = kwargs.get("owner_verified")
+            return FakeDiscovery(["https://e.com/a"])
+
+        svc = IngestionService(
+            gsc_service=object(), connection_db=object(), baseline_db=object()
+        )
+        with patch("backend.services.ingestion_service.discover_site", _capture):
+            run(svc.ingest_side("u1", "e.com", "new", 100, 5))
+        self.assertFalse(seen["owner_verified"])
+
+    def test_robots_block_is_reported_upward(self):
+        async def _blocked(domain, **kwargs):
+            return FakeDiscovery([], method="none", robots_blocked=True)
+
+        svc = IngestionService(
+            gsc_service=object(), connection_db=object(), baseline_db=object()
+        )
+        svc.gsc_urls_for_domain = lambda user_id, domain, **kw: ([], None)
+        with patch("backend.services.ingestion_service.discover_site", _blocked):
+            out = run(svc.ingest_side("u1", "e.com", "old", 100, 5))
+        self.assertTrue(out["robots_blocked"])
+        self.assertEqual(out["entries"], [])
+
 
 
 def _async(value):

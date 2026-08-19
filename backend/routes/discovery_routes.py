@@ -91,6 +91,24 @@ def discover():
     root_url = ingestion["root_url"]
 
     if not entries:
+        if ingestion.get("robots_blocked"):
+            # Not a failure to find pages — a refusal to take them this way.
+            # Verifying the domain in Search Console both proves ownership and
+            # is the thing that makes the rest of the product work.
+            message = (
+                f"{urlparse(root_url).hostname} asks automated tools not to read "
+                "it, and it publishes no sitemap. Connect Search Console to "
+                "confirm you own it, or upload a sitemap or CSV export instead."
+            )
+            return jsonify({
+                "success": False,
+                "code": "robots_blocked",
+                "error": message,
+                "user_message": message,
+                "root_url": root_url,
+                "generator": ingestion["generator"],
+            }), 422
+
         if ingestion["rate_limited"]:
             minutes = max(1, round(ingestion["retry_after_seconds"] / 60))
             return jsonify({

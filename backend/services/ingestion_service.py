@@ -355,7 +355,17 @@ class IngestionService:
 
         # Sitemap/crawl still runs: GSC misses privacy-thresholded and
         # never-ranked URLs, and the new side has no GSC data at all.
-        crawl_result = await discover_site(domain, max_urls=max_urls, time_budget=time_budget)
+        #
+        # A verified Search Console property is proof this user owns the
+        # domain, which lifts robots.txt Disallow on the link-following crawl.
+        # robots.txt asks crawlers to stay out; an owner reading their own site
+        # to plan its migration is not the visitor it is addressing.
+        crawl_result = await discover_site(
+            domain,
+            max_urls=max_urls,
+            time_budget=time_budget,
+            owner_verified=bool(gsc_property),
+        )
         crawl_source = _METHOD_TO_SOURCE.get(crawl_result.method, SOURCE_SITEMAP)
 
         entries = merge_sources(gsc_rows, crawl_result.urls, crawl_source)
@@ -376,4 +386,5 @@ class IngestionService:
             "baseline_id": baseline_id,
             "rate_limited": crawl_result.rate_limited,
             "retry_after_seconds": crawl_result.retry_after_seconds,
+            "robots_blocked": crawl_result.robots_blocked,
         }

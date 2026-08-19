@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import * as XLSX from 'xlsx';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 // ---------------------------------------------------------------------------
 // Mocks — must come before importing the component
@@ -23,6 +24,20 @@ const mockDiscoverSite = vi.fn();
 vi.mock('../api/discovery', () => ({
   discoverSite: (...args: unknown[]) => mockDiscoverSite(...args),
 }));
+
+// The old-side panel offers Search Console inline now. Keep the pure helpers
+// real — only the network calls are faked.
+const mockGetGscStatus = vi.fn();
+const mockGetGscProperties = vi.fn();
+vi.mock('../api/gsc', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../api/gsc')>();
+  return {
+    ...actual,
+    getGscStatus: () => mockGetGscStatus(),
+    getGscProperties: () => mockGetGscProperties(),
+    getGscConnectUrl: vi.fn().mockResolvedValue('https://accounts.google.com/o/oauth2/auth'),
+  };
+});
 
 const mockUploadCSVs = vi.fn();
 vi.mock('../api/pipeline', () => ({
@@ -88,12 +103,20 @@ import { UploadPage } from './UploadPage';
 // ---------------------------------------------------------------------------
 
 
+/** The old-side panel reads Search Console state through react-query. */
+function Providers({ children }: { children: React.ReactNode }) {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false, gcTime: 0 } },
+  });
+  return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+}
+
 /**
  * Render UploadPage and switch to the "Upload Files" tab — these suites
  * exercise the CSV flow, which is no longer the default ingestion mode.
  */
 function renderUploadPage(props: Record<string, unknown> = {}) {
-  const result = render(<UploadPage {...props} />);
+  const result = render(<UploadPage {...props} />, { wrapper: Providers });
   // CSV is demoted to a text link rather than a peer tab.
   fireEvent.click(screen.getByRole('button', { name: 'Import a CSV or sitemap file' }));
   return result;
@@ -157,6 +180,9 @@ function removeFromZone(label: string) {
 beforeEach(() => {
   vi.clearAllMocks();
   mockUploadCSVs.mockResolvedValue({ session_id: 'session-123', is_duplicate: false });
+  // Default: Search Console available but not connected.
+  mockGetGscStatus.mockResolvedValue({ success: true, connected: false, configured: true });
+  mockGetGscProperties.mockResolvedValue([]);
 });
 
 describe('UploadPage — rendering', () => {
@@ -639,7 +665,7 @@ describe('UploadPage — domain ingestion mode', () => {
   }
 
   it('defaults to the paste-domains mode', () => {
-    render(<UploadPage />);
+    render(<UploadPage />, { wrapper: Providers });
     expect(screen.getByText(/Old site/)).toBeInTheDocument();
     expect(screen.getByText(/New site/)).toBeInTheDocument();
     expect(screen.queryByText('Old Site CSV')).not.toBeInTheDocument();
@@ -651,7 +677,7 @@ describe('UploadPage — domain ingestion mode', () => {
       .mockResolvedValueOnce(discoveryResponse('old-site.com', 3))
       .mockResolvedValueOnce(discoveryResponse('new-site.com', 4));
 
-    render(<UploadPage quickOnly />);
+    render(<UploadPage quickOnly />, { wrapper: Providers });
 
     await user.type(screen.getByLabelText(/Old site .* domain/), 'old-site.com');
     await user.click(screen.getAllByRole('button', { name: 'Find Pages' })[0]);
@@ -686,7 +712,7 @@ describe('UploadPage — domain ingestion mode', () => {
     const user = userEvent.setup();
     mockDiscoverSite.mockRejectedValueOnce(new Error('Could not find any pages on https://dead.com.'));
 
-    render(<UploadPage quickOnly />);
+    render(<UploadPage quickOnly />, { wrapper: Providers });
 
     await user.type(screen.getByLabelText(/Old site .* domain/), 'dead.com');
     await user.click(screen.getAllByRole('button', { name: 'Find Pages' })[0]);
@@ -701,7 +727,7 @@ describe('UploadPage — domain ingestion mode', () => {
     const user = userEvent.setup();
     mockDiscoverSite.mockResolvedValueOnce(discoveryResponse('old-site.com', 3));
 
-    render(<UploadPage quickOnly />);
+    render(<UploadPage quickOnly />, { wrapper: Providers });
     await user.type(screen.getByLabelText(/Old site .* domain/), 'old-site.com');
     await user.click(screen.getAllByRole('button', { name: 'Find Pages' })[0]);
     await waitFor(() => {
@@ -764,7 +790,7 @@ describe('UploadPage — traffic risk beat', () => {
       .mockResolvedValueOnce(withTraffic('old.com', 4, [900, 50, 30, 20]))
       .mockResolvedValueOnce(withTraffic('new.com', 4, [0, 0, 0, 0]));
 
-    render(<UploadPage quickOnly />);
+    render(<UploadPage quickOnly />, { wrapper: Providers });
     await discoverBothSides(user);
     await user.click(screen.getByRole('button', { name: /Begin Quick Match/ }));
 
@@ -784,7 +810,7 @@ describe('UploadPage — traffic risk beat', () => {
       .mockResolvedValueOnce(withTraffic('old.com', 3, [500, 10, 5]))
       .mockResolvedValueOnce(withTraffic('new.com', 3, [0, 0, 0]));
 
-    render(<UploadPage quickOnly />);
+    render(<UploadPage quickOnly />, { wrapper: Providers });
     await discoverBothSides(user);
     await user.click(screen.getByRole('button', { name: /Begin Quick Match/ }));
     await waitFor(() => expect(screen.getByText(/carry 80%/)).toBeInTheDocument());
@@ -804,7 +830,7 @@ describe('UploadPage — traffic risk beat', () => {
       .mockResolvedValueOnce(withTraffic('old.com', 3, [0, 0, 0]))
       .mockResolvedValueOnce(withTraffic('new.com', 3, [0, 0, 0]));
 
-    render(<UploadPage quickOnly />);
+    render(<UploadPage quickOnly />, { wrapper: Providers });
     await discoverBothSides(user);
     await user.click(screen.getByRole('button', { name: /Begin Quick Match/ }));
 

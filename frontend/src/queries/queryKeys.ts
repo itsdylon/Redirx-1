@@ -17,6 +17,7 @@ export const queryKeys = {
   },
   gsc: {
     status: ['gsc', 'status'] as const,
+    properties: ['gsc', 'properties'] as const,
   },
   email: {
     preferences: ['email', 'preferences'] as const,

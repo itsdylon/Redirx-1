@@ -145,7 +145,7 @@ class TestIngestSideAsymmetry(unittest.TestCase):
         svc = IngestionService(
             gsc_service=object(), connection_db=object(), baseline_db=object()
         )
-        svc.gsc_urls_for_domain = lambda user_id, domain, lookback_days=None: (
+        svc.gsc_urls_for_domain = lambda user_id, domain, **kwargs: (
             gsc_rows, "sc-domain:e.com"
         )
         svc.capture_baseline = lambda *a, **k: "baseline-1"
@@ -195,6 +195,106 @@ class TestIngestSideAsymmetry(unittest.TestCase):
             out = run(svc.ingest_side("u1", "e.com", "old", 4, 5))
         self.assertEqual(len(out["entries"]), 4)
         self.assertTrue(out["truncated"])
+
+
+class FakeGscService:
+    def __init__(self, properties, fail=False):
+        self.properties = properties
+        self.fail = fail
+
+    def list_properties(self, user_id):
+        if self.fail:
+            raise RuntimeError("GSC unreachable")
+        return [{"site_url": p, "permission_level": "siteOwner"} for p in self.properties]
+
+    def query_search_analytics(self, user_id, site_url, lookback_days=None):
+        return []
+
+
+class FakeConnectionDB:
+    def __init__(self, connected=True):
+        self.connected = connected
+
+    def get_connection(self, user_id):
+        return {"id": "conn-1"} if self.connected else None
+
+
+class TestGscPropertyOverride(unittest.TestCase):
+    """
+    The property can be chosen in the UI when auto-detection cannot decide —
+    an agency with several verified properties, or a host covered by both a
+    domain and a URL-prefix property. It arrives from the client, so it is
+    honoured only when the user actually has it verified.
+    """
+
+    def _service(self, properties, connected=True, fail=False):
+        return IngestionService(
+            gsc_service=FakeGscService(properties, fail=fail),
+            connection_db=FakeConnectionDB(connected),
+            baseline_db=object(),
+        )
+
+    def test_verified_property_is_honoured(self):
+        svc = self._service(["sc-domain:mine.com", "https://other.com/"])
+        self.assertEqual(
+            svc.verified_property("u1", "sc-domain:mine.com"), "sc-domain:mine.com"
+        )
+
+    def test_unverified_property_is_refused(self):
+        # Never query a property this user has no permission on.
+        svc = self._service(["sc-domain:mine.com"])
+        self.assertIsNone(svc.verified_property("u1", "sc-domain:someone-elses.com"))
+
+    def test_no_property_requested(self):
+        svc = self._service(["sc-domain:mine.com"])
+        self.assertIsNone(svc.verified_property("u1", None))
+        self.assertIsNone(svc.verified_property("u1", ""))
+
+    def test_disconnected_user_has_no_verified_properties(self):
+        svc = self._service(["sc-domain:mine.com"], connected=False)
+        self.assertIsNone(svc.verified_property("u1", "sc-domain:mine.com"))
+
+    def test_lookup_failure_degrades_to_none(self):
+        # GSC is an enhancement; a lookup failure must not raise into ingestion.
+        svc = self._service(["sc-domain:mine.com"], fail=True)
+        self.assertIsNone(svc.verified_property("u1", "sc-domain:mine.com"))
+
+    def test_override_beats_auto_detection(self):
+        svc = self._service(["sc-domain:chosen.com"])
+        svc.find_property = lambda user_id, domain: "sc-domain:auto.com"
+        rows, used = svc.gsc_urls_for_domain(
+            "u1", "chosen.com", gsc_property="sc-domain:chosen.com"
+        )
+        self.assertEqual(used, "sc-domain:chosen.com")
+
+    def test_unverified_override_falls_back_to_auto_detection(self):
+        svc = self._service(["sc-domain:mine.com"])
+        svc.find_property = lambda user_id, domain: "sc-domain:auto.com"
+        _, used = svc.gsc_urls_for_domain(
+            "u1", "e.com", gsc_property="sc-domain:someone-elses.com"
+        )
+        self.assertEqual(used, "sc-domain:auto.com")
+
+    def test_override_reaches_the_gsc_lookup(self):
+        seen = {}
+        svc = IngestionService(
+            gsc_service=object(), connection_db=object(), baseline_db=object()
+        )
+
+        def _capture(user_id, domain, **kwargs):
+            seen["gsc_property"] = kwargs.get("gsc_property")
+            return [], None
+
+        svc.gsc_urls_for_domain = _capture
+        with patch(
+            "backend.services.ingestion_service.discover_site",
+            side_effect=_async(FakeDiscovery(["https://e.com/a"])),
+        ):
+            run(svc.ingest_side(
+                "u1", "e.com", "old", 100, 5,
+                gsc_property_override="sc-domain:picked.com",
+            ))
+        self.assertEqual(seen["gsc_property"], "sc-domain:picked.com")
 
 
 def _async(value):

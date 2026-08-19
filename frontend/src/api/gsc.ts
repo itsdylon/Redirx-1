@@ -60,8 +60,56 @@ async function request<T>(path: string, init: RequestInit): Promise<T> {
   }
 }
 
+export interface GscProperty {
+  site_url: string;
+  permission_level: string;
+}
+
 export function getGscStatus(): Promise<GscStatusResponse> {
   return request('/api/gsc/status', { method: 'GET', headers: getAuthHeaders() });
+}
+
+export async function getGscProperties(): Promise<GscProperty[]> {
+  const data = await request<{ success: boolean; properties: GscProperty[] }>(
+    '/api/gsc/properties',
+    { method: 'GET', headers: getAuthHeaders() }
+  );
+  return data.properties ?? [];
+}
+
+/**
+ * How a Search Console property reads to a human.
+ *
+ * `sc-domain:example.com` is Google's wire format for a domain property, which
+ * covers every subdomain and both schemes. Showing it raw makes people think
+ * something is broken.
+ */
+export function formatProperty(siteUrl: string): string {
+  if (siteUrl.startsWith('sc-domain:')) {
+    return `${siteUrl.slice('sc-domain:'.length)} (all subdomains)`;
+  }
+  return siteUrl.replace(/^https?:\/\//, '').replace(/\/$/, '');
+}
+
+/** Whether a property plausibly covers the host the user typed. */
+export function propertyCovers(siteUrl: string, domain: string): boolean {
+  const host = domain
+    .trim()
+    .replace(/^https?:\/\//, '')
+    .split('/')[0]
+    .toLowerCase()
+    .replace(/^www\./, '');
+  if (!host) return false;
+  if (siteUrl.startsWith('sc-domain:')) {
+    const bare = siteUrl.slice('sc-domain:'.length).toLowerCase();
+    return host === bare || host.endsWith(`.${bare}`);
+  }
+  try {
+    const propHost = new URL(siteUrl).hostname.toLowerCase().replace(/^www\./, '');
+    return propHost === host;
+  } catch {
+    return false;
+  }
 }
 
 export async function getGscConnectUrl(returnTo: string): Promise<string> {

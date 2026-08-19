@@ -1,9 +1,18 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { usePostHog } from '@posthog/react';
-import { CheckCircle2, Globe, Loader2 } from 'lucide-react';
+import { BarChart3, CheckCircle2, Globe, Loader2 } from 'lucide-react';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { discoverSite, type DiscoveryResponse } from '../api/discovery';
+import {
+  formatProperty,
+  getGscConnectUrl,
+  getGscProperties,
+  getGscStatus,
+  propertyCovers,
+} from '../api/gsc';
+import { queryKeys } from '../queries/queryKeys';
 
 const METHOD_LABELS: Record<string, string> = {
   gsc: 'Search Console',
@@ -42,6 +51,67 @@ export function DomainDiscoveryPanel({ side, label, hint, emphasis = false, onDi
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<DiscoveryResponse | null>(null);
+  // undefined = let auto-detection decide; null = the user explicitly chose to
+  // run without Search Console. Collapsing those two into null would make
+  // opting out silently fall back to the auto-detected property.
+  const [chosenProperty, setChosenProperty] = useState<string | null | undefined>(undefined);
+  const [pickingProperty, setPickingProperty] = useState(false);
+  const [connecting, setConnecting] = useState(false);
+
+  // Only the old side has traffic to lose, so it is the only side where
+  // Search Console changes the answer.
+  const isTrafficSide = side === 'old';
+
+  const statusQuery = useQuery({
+    queryKey: queryKeys.gsc.status,
+    queryFn: getGscStatus,
+    enabled: isTrafficSide,
+  });
+  const connected = !!statusQuery.data?.connected;
+  // `configured` false means the server has no OAuth client — offering to
+  // connect would dead-end.
+  const gscAvailable = statusQuery.data?.configured !== false;
+
+  const propertiesQuery = useQuery({
+    queryKey: queryKeys.gsc.properties,
+    queryFn: getGscProperties,
+    enabled: isTrafficSide && connected,
+    staleTime: 5 * 60 * 1000,
+  });
+  const properties = propertiesQuery.data ?? [];
+
+  /**
+   * The property we would use for what has been typed so far.
+   *
+   * Mirrors the server's preference for a domain property, which covers www
+   * and bare alike, so the UI never promises one property and the API uses
+   * another.
+   */
+  const matchedProperty = useMemo(() => {
+    if (!domain.trim() || properties.length === 0) return null;
+    const covering = properties
+      .map((p) => p.site_url)
+      .filter((p) => propertyCovers(p, domain));
+    if (covering.length === 0) return null;
+    covering.sort((a, b) => (a.startsWith('sc-domain:') ? 0 : 1) - (b.startsWith('sc-domain:') ? 0 : 1));
+    return covering[0];
+  }, [domain, properties]);
+
+  const effectiveProperty = chosenProperty === undefined ? matchedProperty : chosenProperty;
+
+  const handleConnect = async () => {
+    setConnecting(true);
+    posthog?.capture('gsc_connect_started', { source: 'ingestion_old_side' });
+    try {
+      // BrowserRouter with no basename, so this is the router's path too —
+      // and it keeps this panel usable outside a Router.
+      const url = await getGscConnectUrl(window.location.pathname);
+      window.location.href = url;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not start Search Console sign-in.');
+      setConnecting(false);
+    }
+  };
 
   const handleDiscover = async () => {
     const trimmed = domain.trim();
@@ -49,10 +119,15 @@ export function DomainDiscoveryPanel({ side, label, hint, emphasis = false, onDi
 
     setIsLoading(true);
     setError(null);
-    posthog?.capture('domain_discovery_started', { side, domain: trimmed });
+    posthog?.capture('domain_discovery_started', {
+      side,
+      domain: trimmed,
+      gsc_connected: connected,
+      gsc_property: effectiveProperty ?? undefined,
+    });
 
     try {
-      const response = await discoverSite(trimmed, side);
+      const response = await discoverSite(trimmed, side, effectiveProperty ?? undefined);
       setResult(response);
       onDiscovered(side, response);
       posthog?.capture('domain_discovery_completed', {
@@ -171,6 +246,86 @@ export function DomainDiscoveryPanel({ side, label, hint, emphasis = false, onDi
         </p>
       )}
       {error && <p className="text-sm text-destructive mt-2">{error}</p>}
+
+      {isTrafficSide && gscAvailable && !connected && !statusQuery.isLoading && (
+        <div className="mt-3 pt-3 border-t border-border/60">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleConnect}
+            disabled={connecting}
+            className="w-full sm:w-auto"
+          >
+            {connecting ? (
+              <Loader2 className="h-3.5 w-3.5 mr-2 animate-spin" />
+            ) : (
+              <BarChart3 className="h-3.5 w-3.5 mr-2" />
+            )}
+            Import the pages that get traffic
+          </Button>
+          <p className="text-xs text-muted-foreground mt-2">
+            Read-only. We read which pages earn clicks so we can tell you what a bad
+            redirect would cost — we never change anything on your site.
+          </p>
+        </div>
+      )}
+
+      {isTrafficSide && connected && (
+        <div className="mt-3 pt-3 border-t border-border/60">
+          {!domain.trim() ? (
+            <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
+              Search Console connected — we&rsquo;ll weight these pages by real traffic.
+            </p>
+          ) : propertiesQuery.isLoading ? (
+            <p className="text-xs text-muted-foreground">Checking your properties…</p>
+          ) : effectiveProperty ? (
+            <div className="flex items-start justify-between gap-2">
+              <p className="text-xs text-muted-foreground flex items-start gap-1.5">
+                <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 flex-shrink-0 mt-px" />
+                <span>
+                  Traffic from{' '}
+                  <span className="text-foreground">{formatProperty(effectiveProperty)}</span>
+                </span>
+              </p>
+              {properties.length > 1 && (
+                <button
+                  type="button"
+                  className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground flex-shrink-0"
+                  onClick={() => setPickingProperty((v) => !v)}
+                >
+                  {pickingProperty ? 'Done' : 'Change'}
+                </button>
+              )}
+            </div>
+          ) : (
+            <p className="text-xs text-muted-foreground">
+              No Search Console property covers this domain
+              {properties.length > 0 && ' — pick one below if it should'}.
+            </p>
+          )}
+
+          {(pickingProperty || (!!domain.trim() && !effectiveProperty && properties.length > 0)) && (
+            <select
+              className="mt-2 w-full text-xs bg-background border border-border rounded px-2 py-1.5 text-foreground"
+              value={effectiveProperty ?? ''}
+              onChange={(e) => {
+                const value = e.target.value || null;
+                setChosenProperty(value);
+                posthog?.capture('gsc_property_overridden', { property: value ?? undefined });
+              }}
+              aria-label="Search Console property"
+            >
+              <option value="">Don&rsquo;t use Search Console</option>
+              {properties.map((p) => (
+                <option key={p.site_url} value={p.site_url}>
+                  {formatProperty(p.site_url)}
+                </option>
+              ))}
+            </select>
+          )}
+        </div>
+      )}
     </div>
   );
 }

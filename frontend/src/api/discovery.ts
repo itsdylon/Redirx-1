@@ -43,14 +43,17 @@ export interface DiscoveryResponse {
 
 export async function discoverSite(
   url: string,
-  side: 'old' | 'new' = 'old'
+  side: 'old' | 'new' = 'old',
+  gscProperty?: string
 ): Promise<DiscoveryResponse> {
   try {
     const response = await fetch(`${API_BASE_URL}/api/discovery/discover`, {
       method: 'POST',
       headers: getAuthHeaders(),
       // The old side leads with Search Console; the new site isn't indexed yet.
-      body: JSON.stringify({ url, side }),
+      body: JSON.stringify(
+        gscProperty ? { url, side, gsc_property: gscProperty } : { url, side }
+      ),
     });
 
     if (!response.ok) {

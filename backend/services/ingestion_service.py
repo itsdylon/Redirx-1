@@ -222,19 +222,51 @@ class IngestionService:
             return None
         return old_property if property_matches_host(old_property, bare_host(new_domain)) else None
 
+    def verified_property(self, user_id: str, site_url: str) -> Optional[str]:
+        """
+        `site_url` if the user actually has it verified, else None.
+
+        The property can be chosen in the UI, so it arrives from the client and
+        cannot be trusted. Google would reject a property this user has no
+        permission on anyway, but checking here keeps an unauthorized value from
+        reaching the API call at all — and lets us fall back to auto-detection
+        instead of surfacing a Google error.
+        """
+        service = self.gsc
+        if service is None or not site_url:
+            return None
+        try:
+            if not self.connection_db.get_connection(user_id):
+                return None
+            properties = {p["site_url"] for p in service.list_properties(user_id)}
+        except GSCError:
+            return None
+        except Exception:
+            logger.warning("GSC property check unavailable", exc_info=True)
+            return None
+        return site_url if site_url in properties else None
+
     def gsc_urls_for_domain(
         self,
         user_id: str,
         domain: str,
         lookback_days: Optional[int] = None,
+        gsc_property: Optional[str] = None,
     ) -> tuple[List[Dict[str, Any]], Optional[str]]:
         """
         Search Analytics rows for a domain, restricted to that host.
 
         A domain property covers subdomains too, so results are filtered to the
         host actually being migrated.
+
+        `gsc_property` overrides auto-detection for the case auto-detection
+        cannot resolve on its own: an agency with several verified properties,
+        or a host covered by both a domain and a URL-prefix property.
         """
-        site_url = self.find_property(user_id, domain)
+        site_url = (
+            self.verified_property(user_id, gsc_property)
+            or self.find_property(user_id, domain)
+        )
         if not site_url:
             return [], None
 
@@ -293,6 +325,7 @@ class IngestionService:
         time_budget: float,
         capture_baseline: bool = True,
         source_session_id=None,
+        gsc_property_override: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Build the tagged URL set for one side of a migration.
@@ -309,7 +342,10 @@ class IngestionService:
 
         if side == "old":
             gsc_rows, gsc_property = await asyncio.to_thread(
-                self.gsc_urls_for_domain, user_id, domain
+                self.gsc_urls_for_domain,
+                user_id,
+                domain,
+                gsc_property=gsc_property_override,
             )
             if gsc_rows and capture_baseline and gsc_property:
                 baseline_id = await asyncio.to_thread(

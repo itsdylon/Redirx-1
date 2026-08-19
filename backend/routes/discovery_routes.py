@@ -59,6 +59,10 @@ def discover():
         else Config.DISCOVERY_MAX_URLS_PAID
     )
 
+    # Chosen in the UI when auto-detection cannot pick between several verified
+    # properties. Validated against the user's own list before it is used.
+    gsc_property = str(body.get("gsc_property") or "").strip() or None
+
     try:
         ingestion = asyncio.run(IngestionService().ingest_side(
             user_id=user_id,
@@ -66,6 +70,7 @@ def discover():
             side=side,
             max_urls=max_urls,
             time_budget=Config.DISCOVERY_TIME_BUDGET_SECONDS,
+            gsc_property_override=gsc_property,
         ))
     except DiscoveryError as e:
         return jsonify({

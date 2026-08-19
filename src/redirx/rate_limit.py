@@ -29,6 +29,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import time
 from dataclasses import dataclass
 from email.utils import parsedate_to_datetime
 from datetime import datetime, timezone
@@ -147,39 +148,105 @@ def limiter_dsn() -> Optional[str]:
     return os.getenv("CRAWL_LIMITER_DATABASE_URL") or os.getenv("DATABASE_URL") or None
 
 
+# How long to wait for the pool to open, and how long to stop trying after it
+# fails. Without the cooldown a failed open is retried on every single limiter
+# call, so each fetch pays the full timeout again: measured in production, an
+# unreachable DSN turned one discovery request into repeated 10s stalls and
+# pushed it past gunicorn's request timeout, which killed the worker and
+# returned a bodiless 500. A limiter outage must degrade to a fast no-op.
+POOL_OPEN_TIMEOUT = float(os.getenv("CRAWL_LIMITER_OPEN_TIMEOUT", "5"))
+POOL_RETRY_COOLDOWN = float(os.getenv("CRAWL_LIMITER_RETRY_COOLDOWN", "60"))
+POOL_CLOSE_TIMEOUT = float(os.getenv("CRAWL_LIMITER_CLOSE_TIMEOUT", "2"))
+
 _pool = None
 _pool_lock = asyncio.Lock()
+_pool_failed_at: float | None = None
+
+
+def _is_connectivity_error(exc: BaseException) -> bool:
+    """
+    Whether a failure means the database is unreachable, as opposed to a query
+    being wrong. Only the former should disable the limiter: a bad statement
+    fails in milliseconds and must not switch politeness off for every host.
+    """
+    try:
+        from psycopg_pool import PoolTimeout
+
+        if isinstance(exc, PoolTimeout):
+            return True
+    except Exception:
+        pass
+    try:
+        import psycopg
+
+        if isinstance(exc, psycopg.OperationalError):
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def _in_failure_cooldown() -> bool:
+    return (
+        _pool_failed_at is not None
+        and (time.monotonic() - _pool_failed_at) < POOL_RETRY_COOLDOWN
+    )
 
 
 async def _get_pool():
-    """Lazily open one shared async pool per process."""
-    global _pool
+    """
+    Lazily open one shared async pool per process.
+
+    Returns None when no database is configured or a recent open failed, so
+    callers fail open immediately instead of blocking on a dead host.
+    """
+    global _pool, _pool_failed_at
     if _pool is not None:
         return _pool
+    if _in_failure_cooldown():
+        return None
     async with _pool_lock:
-        if _pool is None:
-            dsn = limiter_dsn()
-            if not dsn:
-                return None
-            from psycopg_pool import AsyncConnectionPool
+        if _pool is not None:
+            return _pool
+        if _in_failure_cooldown():
+            return None
+        dsn = limiter_dsn()
+        if not dsn:
+            return None
+        from psycopg_pool import AsyncConnectionPool
 
-            pool = AsyncConnectionPool(
-                dsn,
-                min_size=0,
-                max_size=int(os.getenv("CRAWL_LIMITER_POOL_SIZE", "4")),
-                open=False,
-                timeout=10,
-                # Transaction-pooler friendly: no server-side prepared statements.
-                kwargs={"prepare_threshold": None},
-            )
-            await pool.open(wait=True, timeout=10)
-            _pool = pool
+        pool = AsyncConnectionPool(
+            dsn,
+            min_size=0,
+            max_size=int(os.getenv("CRAWL_LIMITER_POOL_SIZE", "4")),
+            open=False,
+            timeout=POOL_OPEN_TIMEOUT,
+            # Transaction-pooler friendly: no server-side prepared statements.
+            kwargs={"prepare_threshold": None},
+        )
+        try:
+            await pool.open(wait=True, timeout=POOL_OPEN_TIMEOUT)
+        except Exception:
+            _pool_failed_at = time.monotonic()
+            # The pool spawns reconnect workers even when open() times out, so
+            # it has to be closed or they spin forever. close() itself blocks
+            # until an in-flight connect finishes, which against a blackholed
+            # host is indefinitely — bound it rather than trade one hang for
+            # another. The cooldown caps this to once per window.
+            try:
+                await asyncio.wait_for(pool.close(), timeout=POOL_CLOSE_TIMEOUT)
+            except Exception:
+                pass
+            raise
+        _pool = pool
+        _pool_failed_at = None
     return _pool
 
 
 async def close_pool() -> None:
     """Close the shared pool (tests, worker shutdown)."""
-    global _pool
+    global _pool, _pool_failed_at
+    _pool_failed_at = None
     if _pool is not None:
         await _pool.close()
         _pool = None
@@ -224,9 +291,24 @@ class HostRateLimiter:
         self._warned: set[str] = set()
 
     async def _call(self, sql: str, params: tuple):
+        global _pool_failed_at
+        if _in_failure_cooldown():
+            raise RuntimeError("limiter database unavailable (cooldown)")
         pool = await _get_pool()
         if pool is None:
             raise RuntimeError("no limiter database configured")
+        # A pool with min_size=0 opens instantly, so an unreachable database
+        # surfaces here — when checking out a connection — not at open(). This
+        # is the path that actually stalled in production, so it is the one
+        # that has to arm the cooldown.
+        try:
+            return await self._execute(pool, sql, params)
+        except Exception as exc:
+            if _is_connectivity_error(exc):
+                _pool_failed_at = time.monotonic()
+            raise
+
+    async def _execute(self, pool, sql: str, params: tuple):
         async with pool.connection() as conn:
             async with conn.cursor() as cur:
                 await cur.execute(sql, params)

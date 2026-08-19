@@ -9,11 +9,13 @@ import asyncio
 import os
 import sys
 import unittest
+import unittest.mock
 
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
 sys.path.insert(0, BASE_DIR)
 sys.path.insert(0, os.path.join(BASE_DIR, "src"))
 
+from redirx import rate_limit
 from redirx.rate_limit import (
     AcquireResult,
     CircuitOpen,
@@ -159,6 +161,71 @@ class TestFailureRecording(unittest.TestCase):
     def test_record_failure_survives_database_error(self):
         limiter = FakeLimiter(fail_with=RuntimeError("boom"))
         self.assertFalse(run(limiter.record_failure("https://example.com/a")))
+
+
+class TestUnreachableDatabaseCooldown(unittest.TestCase):
+    """
+    An unreachable limiter database must cost the crawl one timeout, not one
+    per fetch.
+
+    Measured in production: the API had no working limiter DSN, so every
+    discovery fetch spent the full pool timeout before failing open. Those
+    stalls pushed a single /api/discovery/discover request past gunicorn's
+    30s limit; the worker was SIGKILLed and the browser got a bodiless 500,
+    which the frontend reported as "Connection lost."
+    """
+
+    def setUp(self):
+        rate_limit._pool_failed_at = None
+        self.addCleanup(setattr, rate_limit, "_pool_failed_at", None)
+
+    def _limiter(self, exc):
+        """
+        A limiter whose real _call runs — the cooldown lives there — with only
+        the pool checkout and statement execution faked out.
+        """
+        attempts = []
+
+        async def fake_get_pool():
+            return object()  # a pool that is never actually used
+
+        async def fake_execute(pool, sql, params):
+            attempts.append(sql)
+            raise exc
+
+        limiter = HostRateLimiter(enabled=True)
+        limiter._execute = fake_execute
+        patcher = unittest.mock.patch.object(rate_limit, "_get_pool", fake_get_pool)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        return limiter, attempts
+
+    def test_connectivity_failure_arms_cooldown(self):
+        from psycopg_pool import PoolTimeout
+
+        limiter, _ = self._limiter(PoolTimeout("couldn't get a connection"))
+        run(limiter.acquire("https://a.example/x"))
+        self.assertTrue(rate_limit._in_failure_cooldown())
+
+    def test_later_hosts_skip_the_database_entirely(self):
+        from psycopg_pool import PoolTimeout
+
+        limiter, attempts = self._limiter(PoolTimeout("couldn't get a connection"))
+        run(limiter.acquire("https://a.example/x"))
+        self.assertEqual(len(attempts), 1)
+        for host in ("b", "c", "d"):
+            run(limiter.acquire(f"https://{host}.example/x"))
+        # Still one: the later hosts never reached the database at all.
+        self.assertEqual(len(attempts), 1)
+
+    def test_query_error_does_not_disable_the_limiter(self):
+        # A broken statement fails in milliseconds; switching politeness off
+        # for every host because of it would be a much worse trade.
+        limiter, attempts = self._limiter(RuntimeError("syntax error"))
+        run(limiter.acquire("https://a.example/x"))
+        self.assertFalse(rate_limit._in_failure_cooldown())
+        run(limiter.acquire("https://b.example/x"))
+        self.assertEqual(len(attempts), 2)
 
 
 if __name__ == "__main__":

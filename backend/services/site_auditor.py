@@ -278,26 +278,66 @@ class SiteAuditor:
 
     # ---- URL Discovery Methods ----
 
+    # How many child documents of a sitemap index to fetch. WordPress splits by
+    # post type, so a handful covers the whole site.
+    MAX_SITEMAP_CHILDREN = 10
+
     async def _try_sitemap(self, session: aiohttp.ClientSession, base_url: str) -> list[str]:
-        """Fetch /sitemap.xml and extract URLs."""
-        urls: list[str] = []
+        """Fetch /sitemap.xml and extract page URLs, expanding a sitemap index."""
+        return await self._collect_sitemap(session, f"{base_url}/sitemap.xml", base_url)
+
+    async def _collect_sitemap(
+        self, session: aiohttp.ClientSession, sitemap_url: str, base_url: str
+    ) -> list[str]:
+        """
+        Page URLs from one sitemap document.
+
+        A sitemap index lists other sitemaps, not pages, so its children have to
+        be fetched. Returning the child document URLs instead — as this did —
+        yielded a non-empty list that suppressed the robots.txt and crawl
+        fallbacks, and then got stripped by UrlPruneStage for being .xml. Every
+        site whose /sitemap.xml is an index (Yoast, Rank Math, most WordPress)
+        audited as "Could not discover any pages".
+        """
         try:
-            sitemap_url = f"{base_url}/sitemap.xml"
-            async with session.get(sitemap_url) as resp:
-                if resp.status != 200:
-                    return []
-                text = await resp.text()
+            text = await self._fetch_text(session, sitemap_url)
+            if text is None:
+                return []
+            locs, is_index = self._parse_sitemap_xml(text)
+            if not is_index:
+                return locs
 
-            urls = self._parse_sitemap_xml(text, base_url)
-        except Exception:
-            pass
-        return urls
-
-    def _parse_sitemap_xml(self, xml_text: str, base_url: str, depth: int = 0) -> list[str]:
-        """Parse sitemap XML, handling sitemapindex recursively (sync parse only)."""
-        urls: list[str] = []
-        if depth > 1:  # Limit recursion
+            urls: list[str] = []
+            for child in locs[: self.MAX_SITEMAP_CHILDREN]:
+                child_text = await self._fetch_text(session, child)
+                if child_text is None:
+                    continue
+                child_locs, child_is_index = self._parse_sitemap_xml(child_text)
+                # One level of expansion only; nested indexes are vanishingly rare.
+                if not child_is_index:
+                    urls.extend(child_locs)
             return urls
+        except Exception:
+            return []
+
+    async def _fetch_text(self, session: aiohttp.ClientSession, url: str) -> str | None:
+        """Body of a sitemap document, or None if it is not usable."""
+        try:
+            async with session.get(url, allow_redirects=True) as resp:
+                if resp.status != 200:
+                    return None
+                return await resp.text()
+        except Exception:
+            return None
+
+    def _parse_sitemap_xml(self, xml_text: str) -> tuple[list[str], bool]:
+        """
+        Parse a sitemap document.
+
+        Returns (locs, is_index). When is_index is True the locs are other
+        sitemap documents; otherwise they are pages.
+        """
+        locs: list[str] = []
         try:
             root = ET.fromstring(xml_text)
             ns = ""
@@ -305,24 +345,15 @@ class SiteAuditor:
             if root.tag.startswith("{"):
                 ns = root.tag.split("}")[0] + "}"
 
-            # Check if it's a sitemap index
-            if root.tag == f"{ns}sitemapindex":
-                # We'll only fetch child sitemaps synchronously parsed from this XML
-                for sitemap in root.findall(f"{ns}sitemap"):
-                    loc = sitemap.find(f"{ns}loc")
-                    if loc is not None and loc.text:
-                        urls.append(loc.text.strip())
-                # Return child sitemap URLs — they'll be fetched in _try_sitemap_index
-                return urls
-
-            # Regular urlset
-            for url_elem in root.findall(f"{ns}url"):
-                loc = url_elem.find(f"{ns}loc")
+            is_index = root.tag == f"{ns}sitemapindex"
+            container = f"{ns}sitemap" if is_index else f"{ns}url"
+            for elem in root.findall(container):
+                loc = elem.find(f"{ns}loc")
                 if loc is not None and loc.text:
-                    urls.append(loc.text.strip())
+                    locs.append(loc.text.strip())
+            return locs, is_index
         except ET.ParseError:
-            pass
-        return urls
+            return [], False
 
     async def _try_robots_txt(self, session: aiohttp.ClientSession, base_url: str) -> list[str]:
         """Fetch /robots.txt, extract Sitemap: directives, fetch those sitemaps."""
@@ -340,15 +371,10 @@ class SiteAuditor:
                     sitemap_url = line.split(":", 1)[1].strip()
                     sitemap_urls.append(sitemap_url)
 
-            # Fetch up to 5 sitemaps
+            # Fetch up to 5 sitemaps. These are usually indexes too, so they go
+            # through the same expansion as /sitemap.xml.
             for sm_url in sitemap_urls[:5]:
-                try:
-                    async with session.get(sm_url) as resp:
-                        if resp.status == 200:
-                            xml_text = await resp.text()
-                            urls.extend(self._parse_sitemap_xml(xml_text, base_url))
-                except Exception:
-                    continue
+                urls.extend(await self._collect_sitemap(session, sm_url, base_url))
         except Exception:
             pass
         return urls

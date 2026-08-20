@@ -137,7 +137,15 @@ def check_now(watch_id: str):
     if not _owned_watch(watch_id):
         return jsonify({"success": False, "error": "Watch not found."}), 404
 
-    watch = WatchService().set_status(watch_id, "active")
+    watch = WatchService().queue_check_now(watch_id)
+    if watch is None:
+        # Paused or ended. Resuming is a deliberate act, not a side effect of
+        # asking for a check.
+        return jsonify({
+            "success": False,
+            "error": "This watch is paused. Resume it first, then check.",
+        }), 409
+
     return jsonify({
         "success": True,
         "watch": watch,

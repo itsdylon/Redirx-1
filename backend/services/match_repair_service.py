@@ -74,7 +74,7 @@ class MatchRepairService:
         while True:
             page = (
                 self.client.table("url_mappings")
-                .select("id, old_url, new_url, needs_review")
+                .select("id, old_url, new_url, needs_review, repaired_url")
                 .eq("session_id", str(session_id))
                 .range(offset, offset + PAGE_SIZE - 1)
                 .execute()
@@ -148,15 +148,36 @@ class MatchRepairService:
 
         by_old_url = {m["old_url"]: m for m in flagged_rows}
         exact = section = 0
+        proposed_ids: set[str] = set()
         for repair in repairs:
             row = by_old_url.get(repair.old_url)
             if not row:
                 continue
             self._persist(row["id"], repair)
+            proposed_ids.add(row["id"])
             if repair.how == "exact":
                 exact += 1
             else:
                 section += 1
+
+        # Clear proposals that no longer earn their place. Without this a
+        # re-run whose rules changed leaves the old suggestion standing next
+        # to evidence that no longer supports it.
+        stale_ids = [
+            m["id"]
+            for m in flagged_rows
+            if m.get("repaired_url") and m["id"] not in proposed_ids
+        ]
+        if stale_ids:
+            self.client.table("url_mappings").update(
+                {
+                    "repaired_url": None,
+                    "repair_method": None,
+                    "repair_confidence": None,
+                    "repair_support": None,
+                    "repair_evidence": None,
+                }
+            ).in_("id", stale_ids).execute()
 
         return RepairOutcome(
             flagged=len(flagged_rows),
@@ -177,9 +198,8 @@ class MatchRepairService:
             }
         ).eq("id", mapping_id).execute()
 
-    # Accepting a proposal is deliberately not implemented here. Review
-    # decisions in this product are client-side state until export — approve
-    # and inline-edit both only call setRedirects — so taking a suggestion is
-    # an edit like any other. A server-side accept would be the only review
-    # action that persists, which is a change to how review works rather than
-    # a part of this feature.
+    # Accepting a proposal is deliberately not implemented here. The review
+    # UI persists its decisions through PATCH /results/<sid>/mappings/<mid>
+    # (pipeline_routes.update_mapping), and taking a suggestion is just that
+    # PATCH with new_url + clear_repair — one write path for every review
+    # action rather than a parallel one owned by this service.

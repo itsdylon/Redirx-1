@@ -413,3 +413,96 @@ class TestUrlSelection(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class TestCheckNow(unittest.TestCase):
+    def _svc(self, status):
+        return service({
+            "redirect_watches": [{
+                "id": WATCH_ID, "status": status,
+                "next_check_at": "2099-01-01T00:00:00+00:00",
+            }]
+        })
+
+    def test_bumps_the_schedule_of_an_active_watch(self):
+        svc = self._svc("active")
+        result = svc.queue_check_now(WATCH_ID)
+        self.assertIsNotNone(result)
+        self.assertNotEqual(
+            svc.client.tables["redirect_watches"][0]["next_check_at"],
+            "2099-01-01T00:00:00+00:00",
+        )
+
+    def test_refuses_to_touch_a_paused_watch(self):
+        """
+        Regression: check-now used to call set_status('active'), so asking a
+        paused watch for one check silently resumed recurring monitoring the
+        user had turned off.
+        """
+        svc = self._svc("paused")
+        self.assertIsNone(svc.queue_check_now(WATCH_ID))
+        row = svc.client.tables["redirect_watches"][0]
+        self.assertEqual(row["status"], "paused")
+        self.assertEqual(row["next_check_at"], "2099-01-01T00:00:00+00:00")
+
+
+class TestPreDeployGrace(unittest.TestCase):
+    """
+    "Start monitoring" is offered on the review page, before anything is
+    deployed. The first sweep of an undeployed site finds every URL still
+    serving its old page — an email listing the whole migration as broken
+    would be the feature's first impression.
+    """
+
+    def _watch(self):
+        return {
+            "id": WATCH_ID, "user_id": "user-1", "session_id": "sess-1",
+            "old_domain": "old.com", "alert_email": "owner@example.com",
+        }
+
+    def _issue(self, url, issue_type):
+        return {
+            "id": url, "watch_id": WATCH_ID, "old_url": url,
+            "issue_type": issue_type, "severity": rp.SEVERITY[issue_type],
+            "occurrences": 1, "resolved_at": None, "alerted_at": None,
+            "clicks_at_risk": 0,
+        }
+
+    def _check(self, urls_ok):
+        return {
+            "id": f"c{urls_ok}", "watch_id": WATCH_ID,
+            "status": "completed", "urls_ok": urls_ok,
+        }
+
+    def test_all_no_redirect_and_no_deploy_ever_seen_holds_the_alert(self):
+        svc = service({
+            "watch_issues": [self._issue("u1", rp.NO_REDIRECT), self._issue("u2", rp.NO_REDIRECT)],
+            "watch_checks": [self._check(urls_ok=0)],
+            "migration_sessions": [{"id": "sess-1", "project_name": "P"}],
+        })
+        self.assertEqual(svc.send_alert_if_needed(self._watch()), 0)
+        self.assertEqual(svc.email_service.sent, [])
+        # Unreported, so the next sweep re-evaluates rather than forgetting.
+        self.assertIsNone(svc.client.tables["watch_issues"][0]["alerted_at"])
+
+    def test_any_working_redirect_in_history_means_alerts_flow(self):
+        # A post-deploy config wipe serves 200 everywhere again — but a past
+        # sweep saw redirects work, so silence would hide a regression.
+        svc = service({
+            "watch_issues": [self._issue("u1", rp.NO_REDIRECT)],
+            "watch_checks": [self._check(urls_ok=5), self._check(urls_ok=0)],
+            "migration_sessions": [{"id": "sess-1", "project_name": "P"}],
+        })
+        self.assertEqual(svc.send_alert_if_needed(self._watch()), 1)
+
+    def test_a_mixed_failure_set_is_not_held(self):
+        # A 404 or wrong target is never "you just have not deployed yet".
+        svc = service({
+            "watch_issues": [self._issue("u1", rp.NO_REDIRECT), self._issue("u2", rp.NOT_FOUND)],
+            "watch_checks": [self._check(urls_ok=0)],
+            "migration_sessions": [{"id": "sess-1", "project_name": "P"}],
+        })
+        self.assertEqual(svc.send_alert_if_needed(self._watch()), 2)
+
+
+if __name__ == "__main__":
+    unittest.main()

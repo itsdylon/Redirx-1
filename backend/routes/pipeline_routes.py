@@ -663,3 +663,102 @@ def get_alternatives(session_id: str, mapping_id: str):
             "success": False,
             "error": f"Failed to retrieve alternatives: {str(e)}"
         }), 500
+
+
+@pipeline_blueprint.route("/results/<session_id>/mappings/<mapping_id>", methods=["PATCH"])
+@require_auth
+def update_mapping(session_id: str, mapping_id: str):
+    """
+    Persist a review decision.
+
+    Until now approve, inline-edit and accept-repair lived only in React state,
+    which made the database's needs_review a fiction everything downstream
+    believed: the watch monitored only pipeline-confident rows and compared
+    live sites against pre-edit targets (filing wrong_target for correctly
+    deployed fixes), and the v1 export could disagree with the file the browser
+    built. Review decisions are product data, not UI state.
+
+    Accepts a partial body; only these fields, all optional:
+      approved     bool   -> stored as needs_review = not approved
+      new_url      str    -> the reviewed target (edit or accepted repair)
+      match_type   str    -> e.g. 'manual', 'rule_repaired'
+      confidence   float  -> 0..1
+      clear_repair bool   -> drop any pending repair proposal
+    """
+    try:
+        session_uuid = UUID(session_id)
+        mapping_uuid = UUID(mapping_id)
+    except ValueError:
+        return jsonify({"success": False, "error": "Invalid id format."}), 400
+
+    session_db = MigrationSessionDB()
+    try:
+        session_metadata = session_db.get_session(session_uuid)
+    except ValueError:
+        return jsonify({"success": False, "error": "Session not found."}), 404
+
+    if session_metadata.get('user_id') != str(request.user.id):
+        return jsonify({
+            "success": False,
+            "error": "Unauthorized: Session belongs to another user"
+        }), 403
+
+    mapping_db = URLMappingDB()
+    mapping = mapping_db.get_mapping_by_id(mapping_uuid)
+    # Session-scoped: a mapping id from someone else's session must 404 here
+    # even though the session check above passed for *this* session.
+    if not mapping or str(mapping.get('session_id')) != str(session_uuid):
+        return jsonify({"success": False, "error": "Mapping not found."}), 404
+
+    body = request.get_json(silent=True) or {}
+    updates = {}
+
+    if 'approved' in body:
+        if not isinstance(body['approved'], bool):
+            return jsonify({"success": False, "error": "'approved' must be a boolean."}), 400
+        updates['needs_review'] = not body['approved']
+
+    if 'new_url' in body:
+        new_url = body['new_url']
+        if not isinstance(new_url, str) or not new_url.strip() or len(new_url) > 2048:
+            return jsonify({"success": False, "error": "'new_url' must be a non-empty URL."}), 400
+        updates['new_url'] = new_url.strip()
+
+    if 'match_type' in body:
+        match_type = body['match_type']
+        if not isinstance(match_type, str) or not (0 < len(match_type) <= 40):
+            return jsonify({"success": False, "error": "'match_type' must be a short string."}), 400
+        updates['match_type'] = match_type
+
+    if 'confidence' in body:
+        try:
+            confidence = float(body['confidence'])
+        except (TypeError, ValueError):
+            return jsonify({"success": False, "error": "'confidence' must be a number."}), 400
+        if not 0.0 <= confidence <= 1.0:
+            return jsonify({"success": False, "error": "'confidence' must be between 0 and 1."}), 400
+        updates['confidence_score'] = confidence
+
+    if body.get('clear_repair'):
+        updates.update({
+            'repaired_url': None,
+            'repair_method': None,
+            'repair_confidence': None,
+            'repair_support': None,
+            'repair_evidence': None,
+        })
+
+    if not updates:
+        return jsonify({"success": False, "error": "Nothing to update."}), 400
+
+    try:
+        mapping_db.client.table('url_mappings').update(updates).eq(
+            'id', str(mapping_uuid)
+        ).execute()
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": f"Failed to save review decision: {str(e)}"
+        }), 500
+
+    return jsonify({"success": True}), 200

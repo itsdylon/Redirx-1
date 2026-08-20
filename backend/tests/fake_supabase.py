@@ -142,11 +142,18 @@ class _Deferred:
 
 
 class RecordingEmailService:
-    """Captures alert sends instead of calling Resend."""
+    """
+    Captures alert sends instead of calling Resend.
 
-    def __init__(self):
+    `message_id` mirrors the real EmailService contract: the provider message
+    id on success, None when the send was skipped or failed. Set it to None to
+    simulate an undelivered alert.
+    """
+
+    def __init__(self, message_id: Optional[str] = "msg_fake"):
         self.sent: list[dict] = []
+        self.message_id = message_id
 
     def send_watch_alert(self, **kwargs):
         self.sent.append(kwargs)
-        return "msg_fake"
+        return self.message_id

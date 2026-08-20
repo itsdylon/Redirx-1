@@ -13,6 +13,7 @@ import { PricingPage } from './components/PricingPage';
 import { DemoPage } from './components/DemoPage';
 import { QuickMatchLandingPage } from './components/QuickMatchLandingPage';
 import { WatchPage } from './components/WatchPage';
+import { ApiKeysPage } from './components/ApiKeysPage';
 import { Toaster } from './components/ui/sonner';
 import { isEnterprisePlan } from './lib/plans';
 import {
@@ -97,6 +98,13 @@ export default function App() {
             ? (canAccessUpload(user?.plan) ? <UploadPage /> : <Navigate to={ROUTES.quickMatch} replace />)
             : <Navigate to={ROUTES.login} replace />
         }
+      />
+      {/* Any signed-in account: a free plan can drive Quick Match over the
+          API, so key management cannot sit behind the enterprise-only
+          Settings page. */}
+      <Route
+        path={ROUTES.apiKeys}
+        element={user ? <ApiKeysPage /> : <Navigate to={ROUTES.login} replace />}
       />
       <Route
         path={ROUTES.watch}

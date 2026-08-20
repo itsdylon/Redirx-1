@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Loader2, User, Settings2, Bell, CreditCard, ExternalLink } from 'lucide-react';
+import { Loader2, User, Settings2, Bell, CreditCard, ExternalLink, KeyRound } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { DashboardLayout } from './DashboardLayout';
@@ -11,6 +11,7 @@ import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Switch } from './ui/switch';
+import { ApiKeysPanel } from './ApiKeysPanel';
 
 import { useAuth } from '../contexts/AuthContext';
 import { createAgencyCheckout, createPortalSession, getBillingStatus } from '../api/billing';
@@ -211,12 +212,19 @@ export function Settings() {
         </div>
 
         <Tabs value={activeTab} onValueChange={setTab}>
-          <TabsList className="grid w-full grid-cols-4">
+          <TabsList className="grid w-full grid-cols-5">
             <TabsTrigger value="profile" className="gap-2"><User className="h-4 w-4" />Profile</TabsTrigger>
             <TabsTrigger value="defaults" className="gap-2"><Settings2 className="h-4 w-4" />Defaults</TabsTrigger>
             <TabsTrigger value="subscription" className="gap-2"><CreditCard className="h-4 w-4" />Subscription</TabsTrigger>
             <TabsTrigger value="notifications" className="gap-2"><Bell className="h-4 w-4" />Notifications</TabsTrigger>
+            <TabsTrigger value="api-keys" className="gap-2"><KeyRound className="h-4 w-4" />API keys</TabsTrigger>
           </TabsList>
+
+          {/* Same panel as the standalone /api-keys route, which is where
+              non-enterprise accounts reach this — Settings is enterprise-only. */}
+          <TabsContent value="api-keys" className="mt-6">
+            <ApiKeysPanel />
+          </TabsContent>
 
           <TabsContent value="profile" className="mt-6">
             <Card className="p-6 space-y-4">

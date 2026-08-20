@@ -74,6 +74,18 @@ export interface RedirectMapping {
   contentSimilarity: number;
   gscClicks?: number;
   gscImpressions?: number;
+  /**
+   * A better target proposed from this site's own rename conventions, present
+   * only on rows the matcher flagged. Advisory — `newUrl` above is still what
+   * the matcher chose until someone accepts this.
+   */
+  repair?: {
+    url: string;
+    method: 'exact' | 'section';
+    confidence: number;
+    support: number;
+    evidence: string;
+  };
 }
 
 interface ReviewInterfaceProps {
@@ -465,6 +477,37 @@ export function ReviewInterface({ layoutVariant = 'dashboard' }: ReviewInterface
     }
   };
 
+  /**
+   * Take a proposed repair: point the row at it and clear the suggestion.
+   *
+   * Local state, matching how approve and inline-edit already work here —
+   * review decisions are not persisted until export.
+   */
+  const handleAcceptRepair = (id: string) => {
+    setRedirects((prev) =>
+      prev.map((r) =>
+        r.id === id && r.repair
+          ? {
+              ...r,
+              newUrl: r.repair.url,
+              confidence: r.repair.confidence,
+              matchScore: r.repair.confidence,
+              matchType: 'rule_repaired',
+              approved: true,
+              warnings: r.warnings.filter((w) => w !== 'needs-review'),
+              repair: undefined,
+            }
+          : r
+      )
+    );
+  };
+
+  const handleDismissRepair = (id: string) => {
+    setRedirects((prev) =>
+      prev.map((r) => (r.id === id ? { ...r, repair: undefined } : r))
+    );
+  };
+
   const handleApproveRow = (id: string) => {
     const redirect = redirects.find(r => r.id === id);
     const newApproved = !redirect?.approved;
@@ -788,6 +831,8 @@ export function ReviewInterface({ layoutVariant = 'dashboard' }: ReviewInterface
             onToggleExpand={handleToggleExpand}
             onEdit={handleEdit}
             onApprove={handleApproveRow}
+            onAcceptRepair={handleAcceptRepair}
+            onDismissRepair={handleDismissRepair}
             hasActiveFilters={hasActiveFilters}
             onClearFilters={handleClearFilters}
             totalRedirectsCount={redirects.length}

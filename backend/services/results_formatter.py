@@ -155,6 +155,19 @@ def transform_mapping_for_frontend(
         'contentSimilarity': content_sim
     }
 
+    # A proposed better target, where the session's own rename conventions had
+    # something to say about a flagged row. Advisory: newUrl above is still
+    # what the matcher chose, and stays that way until someone accepts this.
+    repaired_url = db_record.get('repaired_url')
+    if repaired_url:
+        result['repair'] = {
+            'url': repaired_url,
+            'method': db_record.get('repair_method'),
+            'confidence': int(round((db_record.get('repair_confidence') or 0) * 100)),
+            'support': db_record.get('repair_support'),
+            'evidence': db_record.get('repair_evidence'),
+        }
+
     if gsc_metrics_map is not None:
         metrics = gsc_metrics_map.get(old_url)
         result['gscClicks'] = int(metrics['clicks']) if metrics else 0

@@ -653,7 +653,7 @@ class WatchService:
         critical = [i for i in pending if i.get("severity") == CRITICAL]
         clicks_at_risk = sum(int(i.get("clicks_at_risk") or 0) for i in pending)
 
-        self.email_service.send_watch_alert(
+        message_id = self.email_service.send_watch_alert(
             user_id=str(watch.get("user_id")),
             to_email=to_email,
             project_name=project_name,
@@ -665,6 +665,25 @@ class WatchService:
             critical_count=len(critical),
             clicks_at_risk=clicks_at_risk,
         )
+
+        # Only a delivered message counts as reported. EmailService swallows
+        # its own errors and returns None, so stamping unconditionally means a
+        # Resend outage, a bounce, or a missing API key silently burns the
+        # alert: the next sweep sees the issues as already reported and says
+        # nothing, forever. Caught in production — a send failed and all five
+        # issues were marked alerted anyway.
+        #
+        # The cost of not stamping is that a persistent misconfiguration
+        # retries once per sweep. That is the right trade: retrying a daily
+        # email beats never sending it.
+        if not message_id:
+            logger.warning(
+                "Watch %s alert was not delivered; leaving %d issues unreported "
+                "so the next sweep retries",
+                watch_id,
+                len(pending),
+            )
+            return 0
 
         now = _now().isoformat()
         for issue in pending:

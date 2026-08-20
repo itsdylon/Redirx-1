@@ -299,6 +299,36 @@ class TestSendAlert(unittest.TestCase):
         svc.send_alert_if_needed(watch)
         self.assertEqual(svc.email_service.sent[0]["to_email"], "account@example.com")
 
+    def test_a_failed_send_leaves_the_issues_unreported(self):
+        """
+        Regression, caught in production.
+
+        EmailService swallows its own errors and returns None. Stamping
+        alerted_at regardless meant a Resend failure burned the alert: the
+        next sweep saw the issues as already reported and stayed silent
+        forever. Observed live — a send failed and all five issues were marked
+        alerted anyway.
+        """
+        svc = service({
+            "watch_issues": [{
+                "id": "i1", "watch_id": WATCH_ID, "old_url": "u",
+                "issue_type": rp.NOT_FOUND, "severity": rp.CRITICAL,
+                "occurrences": 1, "resolved_at": None, "alerted_at": None,
+                "clicks_at_risk": 10,
+            }],
+            "migration_sessions": [{"id": "sess-1", "project_name": "P"}],
+        })
+        svc.email_service.message_id = None
+
+        self.assertEqual(svc.send_alert_if_needed(self._watch()), 0)
+        self.assertEqual(len(svc.email_service.sent), 1, "the send was attempted")
+        self.assertIsNone(svc.client.tables["watch_issues"][0]["alerted_at"])
+
+        # The next sweep must try again.
+        svc.email_service.message_id = "msg_ok"
+        self.assertEqual(svc.send_alert_if_needed(self._watch()), 1)
+        self.assertIsNotNone(svc.client.tables["watch_issues"][0]["alerted_at"])
+
     def test_no_address_anywhere_does_not_mark_issues_reported(self):
         # Otherwise the alert is lost forever the moment an email lookup fails.
         watch = self._watch()

@@ -50,6 +50,55 @@ EMAIL_TEMPLATES = [
             "session_id": "00000000-0000-0000-0000-000000000000",
         },
     },
+    {
+        "id": "watch_alert",
+        "name": "Watch Alert",
+        "description": "Sent when post-cutover monitoring finds new redirect problems",
+        "category": "transactional",
+        "email_type": "watch_alert",
+        "subject": "[TEST] Broken redirects found",
+        "template_name": "watch_alert.html",
+        "test_context": {
+            "project_name": "Example Migration",
+            "session_id": "00000000-0000-0000-0000-000000000000",
+            "watch_id": "00000000-0000-0000-0000-000000000000",
+            "domain": "old-site.com",
+            "total_issues": 3,
+            "critical_count": 2,
+            "clicks_at_risk": 4312,
+            # One of each severity, and one without traffic data, so the test
+            # send exercises every conditional branch in the template.
+            "issues": [
+                {
+                    "old_url": "https://old-site.com/blog/seo-tips-2024",
+                    "label": "Returns 404 — visitors and crawlers hit a dead end",
+                    "issue_type": "not_found",
+                    "severity": "critical",
+                    "clicks_at_risk": 3120,
+                    "suggested_target": "https://new-site.com/resources/seo-guide",
+                    "detail": "Returns 404",
+                },
+                {
+                    "old_url": "https://old-site.com/portfolio/client-work",
+                    "label": "Redirects somewhere other than the approved target",
+                    "issue_type": "wrong_target",
+                    "severity": "critical",
+                    "clicks_at_risk": 1192,
+                    "suggested_target": "https://new-site.com/case-studies",
+                    "detail": "Lands on https://new-site.com/",
+                },
+                {
+                    "old_url": "https://old-site.com/contact-us",
+                    "label": "Uses a temporary redirect — no ranking is passed on",
+                    "issue_type": "temporary_redirect",
+                    "severity": "warning",
+                    "clicks_at_risk": 0,
+                    "suggested_target": "https://new-site.com/company/contact",
+                    "detail": "Uses 302, not 301",
+                },
+            ],
+        },
+    },
     # ── Onboarding ─────────────────────────────────────────────────────
     {
         "id": "nudge_day1",

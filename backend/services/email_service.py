@@ -27,6 +27,7 @@ class EmailType:
     MAPPING_COMPLETE = "mapping_complete"
     MAPPING_FAILED = "mapping_failed"
     ONBOARD_NUDGE = "onboard_nudge"
+    WATCH_ALERT = "watch_alert"
 
     # Types that ignore preference opt-outs (always send)
     MANDATORY_TYPES = {WELCOME}
@@ -163,6 +164,54 @@ class EmailService:
                 "session_id": session_id,
                 "old_site_domain": old_site_domain,
                 "new_site_domain": new_site_domain,
+            },
+        )
+
+    def send_watch_alert(
+        self,
+        user_id: str,
+        to_email: str,
+        project_name: str,
+        session_id: str,
+        watch_id: str,
+        domain: str,
+        issues: list,
+        total_issues: int,
+        critical_count: int,
+        clicks_at_risk: int,
+    ) -> Optional[str]:
+        """
+        Report newly-detected redirect problems on a live site.
+
+        The subject line leads with traffic where we know it: this arrives in
+        an inbox competing with everything else, and the number that decides
+        whether it gets opened today is how much traffic is bleeding.
+        """
+        if clicks_at_risk:
+            subject = (
+                f"{total_issues} broken redirect{'' if total_issues == 1 else 's'} "
+                f"on {domain} — {clicks_at_risk:,} monthly clicks at risk"
+            )
+        else:
+            subject = (
+                f"{total_issues} broken redirect{'' if total_issues == 1 else 's'} on {domain}"
+            )
+
+        return self.send_email(
+            user_id=user_id,
+            to_email=to_email,
+            email_type=EmailType.WATCH_ALERT,
+            subject=subject,
+            template_name="watch_alert.html",
+            context={
+                "project_name": project_name,
+                "session_id": session_id,
+                "watch_id": watch_id,
+                "domain": domain,
+                "issues": issues,
+                "total_issues": total_issues,
+                "critical_count": critical_count,
+                "clicks_at_risk": clicks_at_risk,
             },
         )
 

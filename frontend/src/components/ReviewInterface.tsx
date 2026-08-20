@@ -10,6 +10,7 @@ import { ReviewToolbar } from './ReviewToolbar';
 import { RedirectTable } from './RedirectTable';
 import { InlineEditDialog } from './InlineEditDialog';
 import { ExportModal } from './ExportModal';
+import { WatchPrompt } from './WatchPrompt';
 import { KeyboardShortcutsDialog } from './KeyboardShortcutsDialog';
 import { Button } from './ui/button';
 import { Keyboard, Loader2 } from 'lucide-react';
@@ -894,6 +895,10 @@ export function ReviewInterface({ layoutVariant = 'dashboard' }: ReviewInterface
               </PaginationContent>
             </Pagination>
           </div>
+
+      {/* Post-cutover monitoring: the export is a prediction until the live
+          site confirms it. */}
+      {sessionId && <WatchPrompt sessionId={sessionId} />}
 
       {/* Floating Keyboard Shortcuts Button */}
       <div className="fixed bottom-6 right-6 z-40">

@@ -116,7 +116,16 @@ def _owned_session(session_id: str, user_id: str) -> tuple[Optional[dict], Optio
     except (ValueError, AttributeError):
         return None, _error("not_found", "No migration with that id.", 404)
 
-    session = MigrationSessionDB().get_session(uuid)
+    try:
+        session = MigrationSessionDB().get_session(uuid)
+    except ValueError:
+        # get_session raises when the row is absent rather than returning None.
+        # Letting that escape turned "no such migration" into a 500.
+        return None, _error("not_found", "No migration with that id.", 404)
+    except Exception:
+        logger.exception("v1 session lookup failed for %s", session_id)
+        return None, _error("lookup_failed", "Could not load that migration.", 502)
+
     if not session or str(session.get("user_id")) != str(user_id):
         return None, _error("not_found", "No migration with that id.", 404)
     return session, None

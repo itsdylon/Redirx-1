@@ -174,6 +174,20 @@ def create_migration():
     user_id = request.api_user_id
 
     if pipeline == "content":
+        # The same access model the upload flow enforces (pipeline_routes).
+        # Without it a key is simply a way around the checkout the browser
+        # requires: nothing downstream charges for this run either, because
+        # usage is only metered for agency plans after a job completes.
+        if UserQuotaDB().get_plan(user_id) == "free":
+            return _error(
+                "deep_match_requires_project_checkout",
+                "Deep Match requires project checkout. A free account can run "
+                "Quick Match (pipeline 'url_only') over the API; unlock Deep "
+                "Match for the project first.",
+                403,
+                next_action="pricing_checkout",
+                retryable=False,
+            )
         try:
             validate_content_job_url_counts(old_urls, new_urls)
         except ContentJobUrlCapExceeded as cap:

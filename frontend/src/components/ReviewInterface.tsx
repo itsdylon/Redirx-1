@@ -21,7 +21,7 @@ import {
 } from './ui/tooltip';
 import { toast } from 'sonner';
 import { Info } from 'lucide-react';
-import { getResults, getDeepPreview, type DeepPreviewResponse } from '../api/pipeline';
+import { getResults, getDeepPreview, persistReviewDecision, type DeepPreviewResponse, type ReviewDecision } from '../api/pipeline';
 import { getProjectUnlockStatus } from '../api/billing';
 import { isMac } from '../lib/keyboard';
 import { isEnterprisePlan } from '../lib/plans';
@@ -412,21 +412,56 @@ export function ReviewInterface({ layoutVariant = 'dashboard' }: ReviewInterface
     setEditingRow(redirect);
   };
 
+  /**
+   * Write a review decision to the server, keeping the optimistic local
+   * update either way. Decisions used to live only in this component's state,
+   * which made the database's needs_review a fiction everything downstream
+   * believed — the watch monitored the wrong rows and compared live sites
+   * against pre-edit targets, and the v1 export could disagree with the file
+   * this page builds. On failure the user is told the decision did not stick.
+   */
+  const persistDecision = (id: string, decision: ReviewDecision) => {
+    if (!sessionId) return;
+    persistReviewDecision(sessionId, id, decision).catch((error) => {
+      toast.error(
+        `Change shown here but not saved to the server — ${
+          error instanceof Error ? error.message : 'network error'
+        }`
+      );
+    });
+  };
+
   const handleSaveEdit = (updatedRedirect: RedirectMapping) => {
+    const previous = redirects.find((r) => r.id === updatedRedirect.id);
     setRedirects(redirects.map(r => r.id === updatedRedirect.id ? updatedRedirect : r));
     setEditingRow(null);
     toast.success('Redirect updated');
+    if (previous && previous.newUrl !== updatedRedirect.newUrl) {
+      persistDecision(updatedRedirect.id, {
+        new_url: updatedRedirect.newUrl,
+        match_type: 'manual',
+      });
+    }
   };
 
   const handleBulkAction = (action: string) => {
+    // Persist only rows whose state actually changes — approve-all-high mostly
+    // hits rows the pipeline already approved, and re-writing those would be
+    // hundreds of no-op requests.
     if (action === 'approve-all-high') {
       const highConfidenceCount = redirects.filter(r => r.confidenceBand === 'high').length;
+      redirects
+        .filter((r) => r.confidenceBand === 'high' && !r.approved)
+        .forEach((r) => persistDecision(r.id, { approved: true }));
       setRedirects(redirects.map((r) =>
         r.confidenceBand === 'high' ? { ...r, approved: true } : r
       ));
       toast.success(`${highConfidenceCount} redirect${highConfidenceCount !== 1 ? 's' : ''} approved`);
     } else if (action === 'approve-selected') {
       const count = selectedRows.size;
+      redirects
+        .filter((r) => selectedRows.has(r.id) && !r.approved)
+        .forEach((r) => persistDecision(r.id, { approved: true }));
       setRedirects(redirects.map((r) =>
         selectedRows.has(r.id) ? { ...r, approved: true } : r
       ));
@@ -434,6 +469,9 @@ export function ReviewInterface({ layoutVariant = 'dashboard' }: ReviewInterface
       toast.success(`${count} redirect${count !== 1 ? 's' : ''} approved`);
     } else if (action === 'reject-selected') {
       const count = selectedRows.size;
+      redirects
+        .filter((r) => selectedRows.has(r.id) && r.approved)
+        .forEach((r) => persistDecision(r.id, { approved: false }));
       setRedirects(redirects.map((r) =>
         selectedRows.has(r.id) ? { ...r, approved: false } : r
       ));
@@ -477,13 +515,18 @@ export function ReviewInterface({ layoutVariant = 'dashboard' }: ReviewInterface
     }
   };
 
-  /**
-   * Take a proposed repair: point the row at it and clear the suggestion.
-   *
-   * Local state, matching how approve and inline-edit already work here —
-   * review decisions are not persisted until export.
-   */
+  /** Take a proposed repair: point the row at it and clear the suggestion. */
   const handleAcceptRepair = (id: string) => {
+    const target = redirects.find((r) => r.id === id);
+    if (target?.repair) {
+      persistDecision(id, {
+        new_url: target.repair.url,
+        approved: true,
+        match_type: 'rule_repaired',
+        confidence: target.repair.confidence / 100,
+        clear_repair: true,
+      });
+    }
     setRedirects((prev) =>
       prev.map((r) =>
         r.id === id && r.repair
@@ -515,6 +558,7 @@ export function ReviewInterface({ layoutVariant = 'dashboard' }: ReviewInterface
       r.id === id ? { ...r, approved: newApproved } : r
     ));
     toast.success(newApproved ? 'Redirect approved' : 'Approval removed');
+    persistDecision(id, { approved: newApproved });
   };
 
   const handleDeepUnlockClick = () => {

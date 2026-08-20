@@ -160,6 +160,47 @@ class TestNewUrlUniverse(unittest.TestCase):
         universe = svc.new_url_universe(SESSION, [{"new_url": "https://new.com/b"}])
         self.assertEqual(universe, {"https://new.com/b"})
 
+class TestStaleProposals(unittest.TestCase):
+    def test_a_proposal_the_rules_no_longer_support_is_cleared(self):
+        """
+        A re-run whose rules changed must not leave the old suggestion
+        standing next to evidence that no longer supports it.
+        """
+        svc = build(
+            CONFIDENT,
+            [("https://old.com/uncovered/page", "https://new.com/")],
+            universe=["https://new.com/success-stories/acme"],
+        )
+        # Simulate a previous run having written a proposal on the flagged row.
+        flagged = next(r for r in svc.client.tables["url_mappings"] if r["needs_review"])
+        flagged.update({
+            "repaired_url": "https://new.com/old-suggestion",
+            "repair_method": "exact",
+            "repair_confidence": 0.9,
+            "repair_support": 5,
+            "repair_evidence": "outdated",
+        })
+
+        outcome = svc.repair_session(SESSION)
+
+        self.assertEqual(outcome.proposed, 0)
+        self.assertIsNone(flagged["repaired_url"])
+        self.assertIsNone(flagged["repair_evidence"])
+
+    def test_a_still_valid_proposal_is_rewritten_not_cleared(self):
+        svc = build(
+            CONFIDENT,
+            [("https://old.com/case-studies/acme", "https://new.com/")],
+            universe=["https://new.com/success-stories/acme"],
+        )
+        flagged = next(r for r in svc.client.tables["url_mappings"] if r["needs_review"])
+        flagged["repaired_url"] = "https://new.com/old-suggestion"
+
+        outcome = svc.repair_session(SESSION)
+
+        self.assertEqual(outcome.proposed, 1)
+        self.assertEqual(flagged["repaired_url"], "https://new.com/success-stories/acme")
+
 
 if __name__ == "__main__":
     unittest.main()

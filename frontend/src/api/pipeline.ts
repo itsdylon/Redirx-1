@@ -215,3 +215,39 @@ export async function getDeepPreview(sessionId: string): Promise<DeepPreviewResp
     throw error;
   }
 }
+
+export interface ReviewDecision {
+  approved?: boolean;
+  new_url?: string;
+  match_type?: string;
+  /** 0..1, matching the backend's confidence_score scale. */
+  confidence?: number;
+  clear_repair?: boolean;
+}
+
+/**
+ * Persist a review decision (approve, edit, accepted repair).
+ *
+ * Review used to live only in React state, which made needs_review in the
+ * database a fiction: the watch monitored the wrong rows and the v1 export
+ * could disagree with the file the browser built. The UI still updates
+ * optimistically — this write is what makes the decision survive the tab.
+ */
+export async function persistReviewDecision(
+  sessionId: string,
+  mappingId: string,
+  decision: ReviewDecision
+): Promise<void> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/results/${sessionId}/mappings/${mappingId}`,
+    {
+      method: 'PATCH',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(decision),
+    }
+  );
+  if (!response.ok) {
+    const userError = await handleApiError(null, response);
+    throw new Error(userError.message);
+  }
+}

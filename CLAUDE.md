@@ -299,6 +299,13 @@ because monitoring recurs forever.
 **Endpoints**: `/api/watches` (browser) and `/api/v1/migrations/<id>/watch`
 plus `.../watch/fixes` (agent).
 
+**Two guard behaviours worth knowing**: `check-now` refuses (409) on a paused
+watch rather than silently resuming it, and alerts are **held while every open
+issue is `no_redirect` and no sweep has ever seen a working redirect** — the
+pre-deploy grace, since "start monitoring" is offered before the user deploys.
+Any working redirect in history (or any other failure type) releases alerts,
+so a post-deploy config wipe still fires.
+
 ## Match Repair (low-confidence matches, before export)
 
 ~25% of production matches come back `needs_review` (2,062 of 8,344), almost
@@ -332,9 +339,13 @@ and 70 against an unrelated `oven-towel`, so the repair replaced a correct
 match with a wrong one.
 
 **Advisory only.** Proposals live in their own columns; `new_url`,
-`confidence_score` and `needs_review` are untouched. Accepting is client-side
-state in the review UI, consistent with how approve and inline-edit already
-work — review decisions are not persisted until export.
+`confidence_score` and `needs_review` are untouched until a human decides.
+Accepting — like approve, edit, and the bulk actions — persists through
+`PATCH /api/results/<sid>/mappings/<mid>` (`pipeline_routes.update_mapping`),
+the single write path for review decisions. This matters beyond the UI: the
+watch defines "correct" as `needs_review = false`, and the v1 export reads the
+DB — before persistence existed, the watch monitored the wrong rows and could
+file `wrong_target` against a correctly deployed human edit.
 
 **Where it runs**: worker post-pass after the pipeline stores mappings
 (`MatchRepairService.repair_session`). Measured 40% of flagged rows get a

@@ -24,8 +24,12 @@ from urllib.parse import urljoin, urlparse, urlunparse
 
 import aiohttp
 
+import logging
+
 from .rate_limit import CircuitOpen, get_limiter, parse_retry_after
 from .safe_fetch import SSRFBlockedError, validate_public_url
+
+logger = logging.getLogger(__name__)
 
 # A legitimate redirect chain is one hop, occasionally two (http->https->page).
 # Ten is far past "misconfigured" and into "loop the client hasn't noticed yet".
@@ -264,6 +268,10 @@ async def probe(session: aiohttp.ClientSession, url: str) -> ProbeResult:
             result.final_url = current
             return result
         except Exception:
+            # Reported as unreachable so one bad URL cannot kill a sweep, but
+            # logged loudly: anything landing here that is not a network
+            # failure is a bug in this module being misfiled as a site problem.
+            logger.exception("Unexpected error probing %s", current)
             result.error = "connection"
             result.final_url = current
             return result

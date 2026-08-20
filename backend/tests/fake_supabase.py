@@ -53,6 +53,14 @@ class _Query:
         self._filters.append((column, "is", value))
         return self
 
+    def gt(self, column, value):
+        self._filters.append((column, "gt", value))
+        return self
+
+    def in_(self, column, values):
+        self._filters.append((column, "in", list(values)))
+        return self
+
     def order(self, column, desc=False):
         self._order = (column, desc)
         return self
@@ -76,6 +84,12 @@ class _Query:
             elif op == "is":
                 # PostgREST spells IS NULL as the string "null".
                 if value == "null" and actual is not None:
+                    return False
+            elif op == "gt":
+                if actual is None or not actual > value:
+                    return False
+            elif op == "in":
+                if str(actual) not in {str(v) for v in value}:
                     return False
         return True
 

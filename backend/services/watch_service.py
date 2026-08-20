@@ -277,6 +277,23 @@ class WatchService:
         )
         return result.data[0] if result.data else {}
 
+    def queue_check_now(self, watch_id: str) -> Optional[dict[str, Any]]:
+        """
+        Move the next sweep to now, for an ACTIVE watch only.
+
+        Deliberately not set_status('active'): check-now on a paused watch used
+        to silently resume recurring monitoring the user had turned off. A
+        paused watch returns None and the caller says "resume it first".
+        """
+        result = (
+            self.client.table("redirect_watches")
+            .update({"next_check_at": _now().isoformat(), "updated_at": _now().isoformat()})
+            .eq("id", watch_id)
+            .eq("status", "active")
+            .execute()
+        )
+        return result.data[0] if result.data else None
+
     def list_issues(
         self, watch_id: str, include_resolved: bool = False
     ) -> list[dict[str, Any]]:
@@ -557,11 +574,15 @@ class WatchService:
 
         now = _now().isoformat()
         new_count = 0
+        # New issues share no prior row, so they can land in one request
+        # instead of one per URL — a broken deploy is exactly the sweep with
+        # the most inserts.
+        to_insert: list[dict[str, Any]] = []
 
         for url, finding in findings.items():
             prior = existing.get(url)
             if prior is None:
-                self.client.table("watch_issues").insert(
+                to_insert.append(
                     {
                         "watch_id": watch_id,
                         "old_url": url,
@@ -570,7 +591,7 @@ class WatchService:
                         "occurrences": 1,
                         **finding,
                     }
-                ).execute()
+                )
                 new_count += 1
                 continue
 
@@ -591,22 +612,30 @@ class WatchService:
             else:
                 updates["occurrences"] = int(prior.get("occurrences") or 0) + 1
 
+            # Per-row on purpose: each carries a different finding payload,
+            # and a PostgREST upsert would need full rows to avoid nulling
+            # NOT NULL columns.
             self.client.table("watch_issues").update(updates).eq(
                 "id", prior["id"]
             ).execute()
 
-        resolved_count = 0
-        for url, prior in existing.items():
-            if url in findings or prior.get("resolved_at") is not None:
-                continue
-            if url not in probed:
-                continue
+        if to_insert:
+            self.client.table("watch_issues").insert(to_insert).execute()
+
+        # Resolution is the same payload for every row, so it is one request.
+        resolved_ids = [
+            prior["id"]
+            for url, prior in existing.items()
+            if url not in findings
+            and prior.get("resolved_at") is None
+            and url in probed
+        ]
+        if resolved_ids:
             self.client.table("watch_issues").update(
                 {"resolved_at": now, "occurrences": 0}
-            ).eq("id", prior["id"]).execute()
-            resolved_count += 1
+            ).in_("id", resolved_ids).execute()
 
-        return {"new": new_count, "resolved": resolved_count}
+        return {"new": new_count, "resolved": len(resolved_ids)}
 
     # ------------------------------------------------------------------
     # Alerting
@@ -637,12 +666,50 @@ class WatchService:
             or int(row.get("occurrences") or 0) >= TRANSIENT_ALERT_THRESHOLD
         ]
 
+    def _deploy_detected(self, watch_id: str) -> bool:
+        """
+        Whether any sweep has ever seen evidence the redirects were deployed.
+
+        A completed check with urls_ok > 0 means at least one redirect worked
+        at some point. History is consulted, not just the latest sweep, so a
+        post-deploy config wipe (everything suddenly serving 200 again) still
+        alerts — the site once worked, so silence would hide a regression.
+        """
+        result = (
+            self.client.table("watch_checks")
+            .select("id")
+            .eq("watch_id", watch_id)
+            .eq("status", "completed")
+            .gt("urls_ok", 0)
+            .limit(1)
+            .execute()
+        )
+        return bool(result.data)
+
     def send_alert_if_needed(self, watch: dict[str, Any]) -> int:
         """Email the unreported issues, then mark them reported. Returns count."""
         watch_id = watch["id"]
         pending = self.pending_alerts(watch_id)
         if not pending:
             return 0
+
+        # The pre-deploy grace. "Start monitoring" is offered on the review
+        # page, which a user reaches before deploying anything — so the first
+        # sweep of an undeployed site finds every URL serving its old page and
+        # would open with an email listing the entire migration as broken.
+        # When the only problem is "nothing redirects yet" and no sweep has
+        # ever seen a working redirect, hold the alert; issues stay unreported
+        # (alerted_at null) so the next sweep re-evaluates, and the moment any
+        # URL redirects — or any other failure type appears — alerts flow.
+        if all(i.get("issue_type") == NO_REDIRECT for i in pending):
+            if not self._deploy_detected(watch_id):
+                logger.info(
+                    "Watch %s: every issue is no_redirect and no sweep has seen "
+                    "a working redirect yet — holding the alert until a deploy "
+                    "is detected",
+                    watch_id,
+                )
+                return 0
 
         to_email = watch.get("alert_email") or self._profile_email(watch.get("user_id"))
         if not to_email:
@@ -686,10 +753,9 @@ class WatchService:
             return 0
 
         now = _now().isoformat()
-        for issue in pending:
-            self.client.table("watch_issues").update({"alerted_at": now}).eq(
-                "id", issue["id"]
-            ).execute()
+        self.client.table("watch_issues").update({"alerted_at": now}).in_(
+            "id", [issue["id"] for issue in pending]
+        ).execute()
         return len(pending)
 
     @staticmethod

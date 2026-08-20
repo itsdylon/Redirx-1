@@ -30,6 +30,7 @@ from backend.services.job_limits import (
     validate_content_job_url_counts,
 )
 from backend.services.pipeline_runner import generate_deterministic_key
+from backend.services.watch_service import WatchService
 from src.redirx.database import MigrationSessionDB, URLMappingDB, UserQuotaDB
 
 logger = logging.getLogger(__name__)
@@ -326,3 +327,149 @@ def whoami():
         "user_id": user_id,
         "plan": UserQuotaDB().get_plan(user_id),
     }), 200
+
+
+# ---------------------------------------------------------------------------
+# Post-cutover monitoring
+# ---------------------------------------------------------------------------
+#
+# The zero-touch story does not end at export. An agent that deploys a redirect
+# file has no way to know whether the deploy worked, and "worked" is not
+# something the deploy tool can answer — only the live site can. These three
+# close that loop: start watching, read what broke, fetch the correction.
+
+
+@v1_blueprint.route("/migrations/<session_id>/watch", methods=["POST"])
+@limiter.limit("60 per hour")
+@require_api_key
+def start_watch(session_id: str):
+    """
+    Begin monitoring this migration's approved redirects on the live site.
+
+    Idempotent: calling it again returns the existing watch rather than
+    doubling the probe traffic aimed at the customer's origin.
+    """
+    session, error = _owned_session(session_id, request.api_user_id)
+    if error:
+        return error
+
+    body = request.get_json(silent=True) or {}
+    try:
+        watch = WatchService().create_watch(
+            user_id=str(request.api_user_id),
+            session_id=str(session_id),
+            alert_email=body.get("alert_email"),
+            check_interval_minutes=int(body.get("check_interval_minutes") or 1440),
+        )
+    except ValueError as exc:
+        if str(exc) == "no_old_domain":
+            return _error(
+                "no_old_domain",
+                "This migration has no old-site domain to monitor.",
+                400,
+            )
+        return _error("not_found", "No migration with that id.", 404)
+    except Exception:
+        logger.exception("v1 watch creation failed for %s", session_id)
+        return _error("watch_failed", "Could not start monitoring.", 502)
+
+    return jsonify({
+        "watch_id": watch.get("id"),
+        "session_id": session_id,
+        "status": watch.get("status"),
+        "domain": watch.get("old_domain"),
+        "next_check_at": watch.get("next_check_at"),
+    }), 201
+
+
+@v1_blueprint.route("/migrations/<session_id>/watch", methods=["GET"])
+@limiter.limit("240 per hour")
+@require_api_key
+def get_watch_status(session_id: str):
+    """
+    What monitoring currently sees. `issues` is open problems, worst traffic
+    first; `checked` says whether a sweep has run yet, so an agent polling
+    right after starting a watch can tell "clean" from "not looked yet".
+    """
+    session, error = _owned_session(session_id, request.api_user_id)
+    if error:
+        return error
+
+    service = WatchService()
+    watch = service.get_watch_for_session(session_id)
+    if not watch:
+        return _error("not_found", "No watch on that migration.", 404)
+
+    issues = service.list_issues(watch["id"])
+    return jsonify({
+        "watch_id": watch["id"],
+        "session_id": session_id,
+        "status": watch.get("status"),
+        "domain": watch.get("old_domain"),
+        "checked": watch.get("last_checked_at") is not None,
+        "last_checked_at": watch.get("last_checked_at"),
+        "next_check_at": watch.get("next_check_at"),
+        "open_issues": len(issues),
+        "critical": sum(1 for i in issues if i.get("severity") == "critical"),
+        "clicks_at_risk": sum(int(i.get("clicks_at_risk") or 0) for i in issues),
+        "issues": [
+            {
+                "old_url": i.get("old_url"),
+                "issue_type": i.get("issue_type"),
+                "severity": i.get("severity"),
+                "http_status": i.get("http_status"),
+                "final_url": i.get("final_url"),
+                "hops": i.get("hops"),
+                "expected_url": i.get("expected_url"),
+                "suggested_target": i.get("suggested_target"),
+                "clicks_at_risk": i.get("clicks_at_risk"),
+                "first_seen_at": i.get("first_seen_at"),
+            }
+            for i in issues
+        ],
+    }), 200
+
+
+@v1_blueprint.route("/migrations/<session_id>/watch/fixes", methods=["GET"])
+@limiter.limit("120 per hour")
+@require_api_key
+def export_watch_fixes(session_id: str):
+    """
+    A corrective redirect file for the URLs currently failing.
+
+    Same formats and the same `paths` default as the main export, so an agent
+    can deploy it through whatever path it deployed the original with.
+    """
+    session, error = _owned_session(session_id, request.api_user_id)
+    if error:
+        return error
+
+    service = WatchService()
+    watch = service.get_watch_for_session(session_id)
+    if not watch:
+        return _error("not_found", "No watch on that migration.", 404)
+
+    fmt = (request.args.get("format") or "csv").lower()
+    if fmt not in redirect_export.FORMATS:
+        return _error(
+            "invalid_format",
+            f"'format' must be one of: {', '.join(redirect_export.FORMATS)}.",
+            400,
+        )
+
+    url_format = (request.args.get("url_format") or "paths").lower()
+    if url_format not in ("paths", "full"):
+        return _error("invalid_parameter", "'url_format' must be 'paths' or 'full'.", 400)
+
+    rows = service.fix_rows(watch["id"])
+    content = redirect_export.build_export(rows, fmt, url_format=url_format)
+
+    response = Response(content, mimetype=redirect_export.content_type_for(fmt))
+    response.headers["Content-Disposition"] = (
+        f'attachment; filename="fix-{redirect_export.filename_for(fmt)}"'
+    )
+    response.headers["X-Redirect-Count"] = str(len(rows))
+    warning = redirect_export.warning_for(fmt, url_format)
+    if warning:
+        response.headers["X-Redirx-Warning"] = warning
+    return response

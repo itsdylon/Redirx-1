@@ -12,6 +12,7 @@ import { Settings } from './components/Settings';
 import { PricingPage } from './components/PricingPage';
 import { DemoPage } from './components/DemoPage';
 import { QuickMatchLandingPage } from './components/QuickMatchLandingPage';
+import { WatchPage } from './components/WatchPage';
 import { Toaster } from './components/ui/sonner';
 import { isEnterprisePlan } from './lib/plans';
 import {
@@ -96,6 +97,10 @@ export default function App() {
             ? (canAccessUpload(user?.plan) ? <UploadPage /> : <Navigate to={ROUTES.quickMatch} replace />)
             : <Navigate to={ROUTES.login} replace />
         }
+      />
+      <Route
+        path={ROUTES.watch}
+        element={user ? <WatchPage /> : <Navigate to={ROUTES.login} replace />}
       />
       <Route
         path={ROUTES.review}

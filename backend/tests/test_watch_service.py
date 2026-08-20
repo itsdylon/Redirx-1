@@ -316,6 +316,55 @@ class TestSendAlert(unittest.TestCase):
         self.assertIsNone(svc.client.tables["watch_issues"][0]["alerted_at"])
 
 
+class TestFixRows(unittest.TestCase):
+    """The corrective patch: only URLs we can actually repair, worst first."""
+
+    def _svc(self, issues):
+        return service({"watch_issues": issues})
+
+    @staticmethod
+    def _issue(url, target, clicks, issue_type=rp.NOT_FOUND):
+        return {
+            "id": url, "watch_id": WATCH_ID, "old_url": url,
+            "issue_type": issue_type, "severity": rp.SEVERITY[issue_type],
+            "resolved_at": None, "alerted_at": None,
+            "clicks_at_risk": clicks, "suggested_target": target,
+            "fix_source": "approved_mapping",
+        }
+
+    def test_issues_without_a_target_are_omitted_not_emitted_blank(self):
+        # A blank target would overwrite a working rule with a broken one.
+        svc = self._svc([
+            self._issue("https://old.com/a", "https://new.com/a", 10),
+            self._issue("https://old.com/b", None, 99, issue_type=rp.UNREACHABLE),
+        ])
+        rows = svc.fix_rows(WATCH_ID)
+        self.assertEqual([r["old_url"] for r in rows], ["https://old.com/a"])
+
+    def test_rows_are_ordered_by_traffic(self):
+        svc = self._svc([
+            self._issue("https://old.com/small", "https://new.com/small", 5),
+            self._issue("https://old.com/big", "https://new.com/big", 5000),
+        ])
+        rows = svc.fix_rows(WATCH_ID)
+        self.assertEqual(rows[0]["old_url"], "https://old.com/big")
+
+    def test_resolved_issues_are_not_in_the_patch(self):
+        issue = self._issue("https://old.com/a", "https://new.com/a", 10)
+        issue["resolved_at"] = "today"
+        self.assertEqual(self._svc([issue]).fix_rows(WATCH_ID), [])
+
+    def test_rows_feed_the_exporter_unchanged(self):
+        # The whole point of the old_url/new_url shape: the corrective file is
+        # produced by the same formatters as the original export.
+        from backend.services import redirect_export
+
+        svc = self._svc([self._issue("https://old.com/a", "https://new.com/b", 10)])
+        content = redirect_export.build_export(svc.fix_rows(WATCH_ID), "nginx")
+        self.assertIn("/a /b;", content)
+        self.assertTrue(content.strip().endswith("}"))
+
+
 class TestUrlSelection(unittest.TestCase):
     def test_a_small_site_is_checked_entirely(self):
         svc = service()

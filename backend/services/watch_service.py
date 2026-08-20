@@ -280,6 +280,33 @@ class WatchService:
         result = query.order("clicks_at_risk", desc=True).execute()
         return result.data or []
 
+    def fix_rows(self, watch_id: str) -> list[dict[str, Any]]:
+        """
+        Open issues that have an actionable corrected target, worst first.
+
+        Shaped as old_url/new_url so it feeds `redirect_export.build_export`
+        unchanged — the corrective file is produced by the same formatters as
+        the original export, because a "fix" the customer cannot deploy with
+        their existing process is not a fix.
+
+        Issues without a target are omitted rather than emitted blank: a loop
+        or an outage is not repaired by choosing a different destination, and
+        a half-filled rule would break a working redirect.
+        """
+        rows = []
+        for issue in self.list_issues(watch_id):
+            target = issue.get("suggested_target")
+            if not target:
+                continue
+            rows.append({
+                "old_url": issue.get("old_url"),
+                "new_url": target,
+                "issue_type": issue.get("issue_type"),
+                "fix_source": issue.get("fix_source"),
+                "clicks_at_risk": int(issue.get("clicks_at_risk") or 0),
+            })
+        return rows
+
     def list_checks(self, watch_id: str, limit: int = 20) -> list[dict[str, Any]]:
         result = (
             self.client.table("watch_checks")

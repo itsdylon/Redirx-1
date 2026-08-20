@@ -77,6 +77,7 @@ The `Pipeline` class ([lib.py](src/redirx/lib.py)) orchestrates execution:
 - `004_add_listen_notify_trigger.sql` - LISTEN/NOTIFY infrastructure
 - `005_add_lease_columns.sql` - Lease-based locking with `claim_next_job()` and `reclaim_expired_leases()` RPC functions
 - `006_add_idempotency_keys.sql` - Prevent duplicate job creation
+- `029_add_post_cutover_watch.sql` - Redirect monitoring: `redirect_watches`, `watch_checks`, `watch_issues`, plus `claim_next_watch()` and `release_watch_lease()` RPCs
 - Run manually in Supabase SQL Editor (see `database/migrations/README.md`)
 
 **Embedding Strategy:**
@@ -108,6 +109,9 @@ The `Pipeline` class ([lib.py](src/redirx/lib.py)) orchestrates execution:
 - `WORKER_MAX_CONCURRENT` - Max concurrent jobs (default: 1)
 - `WORKER_FALLBACK_INTERVAL` - Fallback poll interval (default: 60)
 - `WORKER_MAX_ATTEMPTS` - Max retry attempts (default: 5)
+- `WATCH_ENABLED` - Run post-cutover monitoring sweeps in this worker (default: true)
+- `WATCH_POLL_INTERVAL` - Seconds between checks for a due watch (default: 60)
+- `WATCH_LEASE_DURATION` - Watch lease in seconds (default: 3600)
 
 **Idempotency** ([backend/services/pipeline_runner.py](backend/services/pipeline_runner.py)):
 - API generates deterministic `idempotency_key` from `SHA256(user_id + sorted_urls)`
@@ -207,6 +211,7 @@ python -m unittest tests.stage_tests.html_prune_test  # Specific test
 | `mapping_complete` | Job completes successfully (in `worker.py`) | `mapping_complete.html` |
 | `mapping_failed` | Job permanently fails (in `worker.py`) | `mapping_failed.html` |
 | `onboard_nudge` | Cron job (day 1, 3, 7 after signup) | `nudge_day1/3/7.html` |
+| `watch_alert` | Post-cutover monitoring finds new problems (in `watch_service.py`) | `watch_alert.html` |
 
 ### Environment Variables
 
@@ -229,6 +234,50 @@ python -m unittest tests.stage_tests.html_prune_test  # Specific test
 - **`email_preferences`** — Per-user opt-out by email type (`user_id + email_type` unique)
 - **`email_log`** — Records every send attempt with Resend message ID, status, error
 - **`user_profiles.welcome_email_sent`** — Boolean flag to ensure welcome email is sent only once
+
+## Post-Cutover Monitoring ("Watch")
+
+Exporting a redirect file is a prediction. A watch asks the live site what it
+actually does with each approved old URL, and ranks the failures by the traffic
+they cost.
+
+**Probing** ([src/redirx/redirect_probe.py](src/redirx/redirect_probe.py)):
+- Follows redirects one hop at a time (not `allow_redirects`), because the
+  diagnosis is in the shape of the chain — hop count, permanent vs temporary,
+  and where it actually landed.
+- Re-validates every hop against the SSRF rules: following a redirect means
+  letting another server pick our next URL.
+- HEAD first, retried as GET on statuses that mean "this server dislikes HEAD".
+- **Two normalisations, deliberately different.** `normalize_for_compare`
+  ignores scheme and `www.` so an HSTS hop is not reported as a wrong target.
+  `visit_identity` (loop detection) does not — reusing the former reported
+  github.com and google.com as redirect loops.
+
+**Issue types**: `no_redirect`, `not_found`, `server_error`, `wrong_target`,
+`redirect_chain`, `temporary_redirect`, `redirect_loop`, `unreachable`,
+`blocked`. Each needs an entry in `SEVERITY` and `DESCRIPTIONS` (enforced by a
+test) and in the frontend's `ISSUE_COPY`.
+
+**Service** ([backend/services/watch_service.py](backend/services/watch_service.py)):
+- Issues are current state keyed by URL, not an event log. A standing problem
+  is one row and one email; `alerted_at` gates re-reporting, and a *different*
+  failure at the same URL reopens it.
+- Closing an issue requires having re-probed that URL. Absence from a sweep's
+  findings is not evidence of repair — `MAX_URLS_PER_SWEEP` leaves a large
+  site's tail unchecked.
+- Transient types (`unreachable`, `blocked`) wait for two consecutive sightings
+  before alerting.
+- `fix_rows()` shapes issues as old_url/new_url so `redirect_export` renders
+  the correction in the same formats as the original export.
+
+**Scheduling**: sweeps run in the **worker**, never the API — probing thousands
+of URLs takes tens of minutes and the API is a single sync gunicorn worker. One
+sweep at a time, alongside jobs rather than taking a job slot. Sweeps use their
+own rate-limiter namespace (`WATCH_NAMESPACE`), paced slower than discovery
+because monitoring recurs forever.
+
+**Endpoints**: `/api/watches` (browser) and `/api/v1/migrations/<id>/watch`
+plus `.../watch/fixes` (agent).
 
 ## File Structure
 

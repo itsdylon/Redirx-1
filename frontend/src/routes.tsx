@@ -14,6 +14,7 @@ export const ROUTES = {
   pricing: '/pricing',
   account: '/account',
   demo: '/demo',
+  watch: '/watch/:watchId',
 } as const;
 
 export function getAuthedHomeRoute(plan?: string): string {

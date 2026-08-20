@@ -7,9 +7,10 @@ takes tens of minutes and the API is a single sync gunicorn worker — doing it
 here would block every other request in the process. Sweeps belong to the
 worker, and these endpoints only move rows it will act on.
 """
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, Response, jsonify, request
 
 from backend.extensions import limiter
+from backend.services import redirect_export
 from backend.services.auth_service import require_auth
 from backend.services.watch_service import WatchService
 
@@ -158,3 +159,61 @@ def list_issues(watch_id: str):
         "success": True,
         "issues": WatchService().list_issues(watch_id, include_resolved=include_resolved),
     }), 200
+
+
+@watch_blueprint.route("/<watch_id>/fixes", methods=["GET"])
+@require_auth
+def list_fixes(watch_id: str):
+    """The corrections we would deploy, for review before downloading them."""
+    if not _owned_watch(watch_id):
+        return jsonify({"success": False, "error": "Watch not found."}), 404
+
+    rows = WatchService().fix_rows(watch_id)
+    return jsonify({
+        "success": True,
+        "fixes": rows,
+        "count": len(rows),
+        "clicks_recovered": sum(r["clicks_at_risk"] for r in rows),
+    }), 200
+
+
+@watch_blueprint.route("/<watch_id>/fixes/export", methods=["GET"])
+@require_auth
+def export_fixes(watch_id: str):
+    """
+    A corrective redirect file covering only the URLs currently failing.
+
+    Built by the same formatters as the original export, so it drops into the
+    customer's existing deploy process. Defaults to `paths` for the same
+    reason the main export does: most targets match on the request path, and
+    an absolute source loads fine while silently redirecting nothing.
+    """
+    if not _owned_watch(watch_id):
+        return jsonify({"success": False, "error": "Watch not found."}), 404
+
+    fmt = (request.args.get("format") or "csv").lower()
+    if fmt not in redirect_export.FORMATS:
+        return jsonify({
+            "success": False,
+            "error": f"'format' must be one of: {', '.join(redirect_export.FORMATS)}.",
+        }), 400
+
+    url_format = (request.args.get("url_format") or "paths").lower()
+    if url_format not in ("paths", "full"):
+        return jsonify({
+            "success": False,
+            "error": "'url_format' must be 'paths' or 'full'.",
+        }), 400
+
+    rows = WatchService().fix_rows(watch_id)
+    content = redirect_export.build_export(rows, fmt, url_format=url_format)
+
+    response = Response(content, mimetype=redirect_export.content_type_for(fmt))
+    response.headers["Content-Disposition"] = (
+        f'attachment; filename="fix-{redirect_export.filename_for(fmt)}"'
+    )
+    response.headers["X-Redirect-Count"] = str(len(rows))
+    warning = redirect_export.warning_for(fmt, url_format)
+    if warning:
+        response.headers["X-Redirx-Warning"] = warning
+    return response

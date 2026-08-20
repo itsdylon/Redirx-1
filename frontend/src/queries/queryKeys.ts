@@ -25,6 +25,9 @@ export const queryKeys = {
   user: {
     profile: ['user', 'profile'] as const,
   },
+  apiKeys: {
+    all: ['api-keys', 'all'] as const,
+  },
   watches: {
     all: ['watches', 'all'] as const,
     detail: (watchId: string) => ['watches', 'detail', watchId] as const,

@@ -236,6 +236,25 @@ python -m unittest tests.stage_tests.html_prune_test  # Specific test
 - **`email_log`** — Records every send attempt with Resend message ID, status, error
 - **`user_profiles.welcome_email_sent`** — Boolean flag to ensure welcome email is sent only once
 
+## API Keys (agent access)
+
+Backend has existed since the public API shipped (`/api/keys` GET/POST/DELETE,
+`api_key_service.py`); the UI did not, so `POST /api/keys` had no caller and
+documentation pointing agents at the app went nowhere.
+
+- **`ApiKeysPanel`** — the whole UI. Plaintext is shown once at creation and
+  the copy explains why (only a hash is stored). Deleting is confirmed and
+  says what breaks.
+- **Two entry points, one panel**: the `/api-keys` route for any signed-in
+  account, and a Settings tab for enterprise accounts who live there.
+  `/api-keys` exists because Settings is enterprise-only (`canAccessSettingsAndAccount`)
+  while a **free account can drive Quick Match over the API** — so key
+  management cannot sit behind a plan gate. `/api-keys` is the URL external
+  docs and `llms.txt` should point at.
+- Deep Match over the API is gated to paid plans in `v1_routes.create_migration`,
+  mirroring `pipeline_routes.py`. That gate is what makes self-serve key
+  issuing safe; do not remove one without the other.
+
 ## Post-Cutover Monitoring ("Watch")
 
 Exporting a redirect file is a prediction. A watch asks the live site what it

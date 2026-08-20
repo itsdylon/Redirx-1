@@ -1,0 +1,113 @@
+{% extends "_base.html" %}
+
+{% block title %}Redirect problems found on {{ domain }}{% endblock %}
+
+{% block content %}
+{#
+  The lead number is clicks, not URL count. "9 redirects are broken" is a
+  support ticket; "9 redirects are broken and they carried 4,300 clicks a
+  month" is a decision about what to do this afternoon.
+#}
+<table role="presentation" cellpadding="0" cellspacing="0" style="margin-bottom:24px;">
+  <tr>
+    <td width="48" height="48" style="width:48px;height:48px;border-radius:24px;background-color:#fef2f2;text-align:center;vertical-align:middle;font-size:26px;line-height:48px;color:#dc2626;">!</td>
+  </tr>
+</table>
+
+<h2 style="margin:0 0 8px;font-size:22px;font-weight:700;color:#18181b;letter-spacing:-0.3px;">
+  {{ total_issues }} redirect{{ '' if total_issues == 1 else 's' }} need{{ 's' if total_issues == 1 else '' }} attention
+</h2>
+<p style="margin:0 0 28px;font-size:15px;color:#52525b;line-height:1.6;">
+  We checked the live redirects for <strong style="color:#18181b;">{{ project_name }}</strong>
+  on <span style="font-family:'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace;">{{ domain }}</span>
+  and found problems that weren't there when you exported.
+</p>
+
+<!-- Headline numbers -->
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:28px;">
+  <tr>
+    <td style="background-color:#f9fafb;border-radius:8px;border-left:3px solid #dc2626;padding:0;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+        {% if clicks_at_risk %}
+        <tr>
+          <td style="padding:16px 20px 12px;">
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+              <tr>
+                <td style="font-size:11px;color:#71717a;font-weight:600;text-transform:uppercase;letter-spacing:0.8px;">Monthly Clicks At Risk</td>
+                <td align="right" style="font-size:24px;color:#dc2626;font-weight:700;">{{ '{:,}'.format(clicks_at_risk) }}</td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+        <tr><td style="padding:0 20px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td style="border-top:1px solid #e4e4e7;font-size:0;line-height:0;">&nbsp;</td></tr></table></td></tr>
+        {% endif %}
+        <tr>
+          <td style="padding:{{ '12px 20px 16px' if clicks_at_risk else '16px 20px' }};">
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+              <tr>
+                <td style="font-size:11px;color:#71717a;font-weight:600;text-transform:uppercase;letter-spacing:0.8px;">Critical</td>
+                <td align="right" style="font-size:18px;color:#18181b;font-weight:700;">{{ critical_count }}</td>
+              </tr>
+              <tr><td colspan="2" style="height:10px;font-size:0;line-height:0;">&nbsp;</td></tr>
+              <tr>
+                <td style="font-size:11px;color:#71717a;font-weight:600;text-transform:uppercase;letter-spacing:0.8px;">Warnings</td>
+                <td align="right" style="font-size:18px;color:#18181b;font-weight:700;">{{ total_issues - critical_count }}</td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>
+
+<!-- Per-URL findings -->
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:28px;">
+  {% for issue in issues %}
+  <tr>
+    <td style="padding:14px 16px;border:1px solid #e4e4e7;border-radius:8px;background-color:#ffffff;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+        <tr>
+          <td style="font-size:13px;font-family:'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace;color:#18181b;word-break:break-all;">{{ issue.old_url }}</td>
+          {% if issue.clicks_at_risk %}
+          <td align="right" valign="top" style="font-size:12px;color:#71717a;white-space:nowrap;padding-left:12px;">{{ '{:,}'.format(issue.clicks_at_risk) }} clicks</td>
+          {% endif %}
+        </tr>
+        <tr>
+          <td colspan="2" style="padding-top:6px;font-size:13px;color:{{ '#dc2626' if issue.severity == 'critical' else '#b45309' }};">
+            {{ issue.label }}{% if issue.detail %} &middot; <span style="color:#71717a;">{{ issue.detail }}</span>{% endif %}
+          </td>
+        </tr>
+        {% if issue.suggested_target %}
+        <tr>
+          <td colspan="2" style="padding-top:6px;font-size:12px;color:#52525b;">
+            Should point to
+            <span style="font-family:'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace;color:#18181b;word-break:break-all;">{{ issue.suggested_target }}</span>
+          </td>
+        </tr>
+        {% endif %}
+      </table>
+    </td>
+  </tr>
+  <tr><td style="height:10px;font-size:0;line-height:0;">&nbsp;</td></tr>
+  {% endfor %}
+</table>
+
+{% if total_issues > issues|length %}
+<p style="margin:0 0 24px;font-size:13px;color:#71717a;">
+  Showing the {{ issues|length }} highest-traffic problems of {{ total_issues }}.
+</p>
+{% endif %}
+
+<table role="presentation" cellpadding="0" cellspacing="0" style="margin-bottom:28px;">
+  <tr>
+    <td style="border-radius:8px;background-color:#2DD4A4;">
+      <a href="{{ app_url }}/watch/{{ watch_id }}" style="display:inline-block;padding:14px 32px;color:#ffffff;font-size:15px;font-weight:600;text-decoration:none;">Review &amp; Fix &rarr;</a>
+    </td>
+  </tr>
+</table>
+
+<p style="margin:0;font-size:13px;color:#a1a1aa;line-height:1.5;">
+  We'll keep checking and only email you when something new breaks — not every time we look.
+</p>
+{% endblock %}

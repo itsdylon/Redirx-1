@@ -65,6 +65,16 @@ DISCOVERY_CAPACITY = float(os.getenv("DISCOVERY_BURST_CAPACITY", "5"))
 DISCOVERY_RATE = float(os.getenv("DISCOVERY_DEFAULT_RATE", "4"))
 DISCOVERY_NAMESPACE = "discovery"
 
+# Post-cutover monitoring sends HEADs that a server answers from its redirect
+# table without touching the application — cheaper than discovery's sitemap
+# reads. It is paced more conservatively anyway, because unlike a crawl it
+# recurs forever: a rate a site tolerates once is a rate it will be asked to
+# tolerate every few hours for months, and a monitor that gets a customer's
+# own site to ban us has failed at the only thing it does.
+WATCH_CAPACITY = float(os.getenv("WATCH_BURST_CAPACITY", "4"))
+WATCH_RATE = float(os.getenv("WATCH_DEFAULT_RATE", "2"))
+WATCH_NAMESPACE = "watch"
+
 # Statuses that mean "you are going too fast" or "you are not welcome".
 BACKOFF_STATUSES = (403, 429, 503)
 

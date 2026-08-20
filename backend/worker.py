@@ -17,7 +17,12 @@ import json
 import time
 
 # Add project root to path for imports
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, _BASE_DIR)
+# ...and src/, so `redirx.x` resolves here the same way it does under the API.
+# Services shared with the Flask app (which adds both) import that way, and a
+# worker that only understood `src.redirx.x` would fail on them at runtime.
+sys.path.insert(0, os.path.join(_BASE_DIR, "src"))
 
 from src.redirx.database import MigrationSessionDB, SupabaseClient, URLMappingDB, UserQuotaDB
 from src.redirx.lib import Pipeline
@@ -79,6 +84,21 @@ WORKER_MAX_CONCURRENT = _bounded_env_int('WORKER_MAX_CONCURRENT', 1, 1, 32)
 WORKER_FALLBACK_INTERVAL = int(os.getenv('WORKER_FALLBACK_INTERVAL', '60'))  # 60 seconds
 WORKER_MAX_ATTEMPTS = int(os.getenv('WORKER_MAX_ATTEMPTS', '5'))  # Max retries
 
+# Post-cutover monitoring. Sweeps ride along in this process because it is the
+# only long-lived one we run: the API is a single sync gunicorn worker where a
+# multi-minute crawl would block every other request.
+WATCH_ENABLED = os.getenv('WATCH_ENABLED', 'true').strip().lower() not in (
+    '0', 'false', 'no', 'off',
+)
+# How often to look for a due watch. Cheap — one indexed query returning
+# nothing in the common case.
+WATCH_POLL_INTERVAL = _bounded_env_int('WATCH_POLL_INTERVAL', 60, 10, 3600)
+# Long by job standards, because a paced sweep of a few thousand URLs takes
+# tens of minutes. Nothing is waiting on it, so a stale lease costs an hour of
+# monitoring latency rather than a user-visible delay — which buys the right to
+# skip a lease-extension loop entirely.
+WATCH_LEASE_DURATION = _bounded_env_int('WATCH_LEASE_DURATION', 3600, 300, 21600)
+
 # Worker identifier: hostname-pid-uuid
 WORKER_ID = f"{socket.gethostname()}-{os.getpid()}-{str(uuid_module.uuid4())[:8]}"
 
@@ -87,6 +107,19 @@ class RedirxWorker:
     """
     Push-based worker using PostgreSQL LISTEN/NOTIFY.
     """
+
+    # Watch-sweep state, declared on the class rather than only in __init__.
+    # The loops are exercised by tests that build an instance via __new__ to
+    # isolate them from the database, so anything the loops touch has to exist
+    # without __init__ having run. All immutable, so no shared-state hazard.
+    #
+    # At most one sweep runs at a time regardless of job concurrency: sweeps
+    # are almost entirely idle time waiting on the host rate limiter, so one
+    # alongside jobs costs nothing, while two would double the request rate a
+    # customer's origin sees from us.
+    watch_task: Optional[asyncio.Task] = None
+    last_watch_poll: float = 0.0
+    watches_swept: int = 0
 
     def __init__(self):
         self.worker_id = WORKER_ID
@@ -762,6 +795,97 @@ class RedirxWorker:
             print(f"[Worker] Error reclaiming expired leases: {e}")
             return 0
 
+    # ------------------------------------------------------------------
+    # Post-cutover watch sweeps
+    # ------------------------------------------------------------------
+
+    async def _run_watch_sweep(self, watch: Dict[str, Any]) -> None:
+        """
+        Probe one watch's URLs and release its lease. Never raises.
+
+        A sweep failing is a monitoring outage, not a job failure: there is no
+        user waiting on a result and nothing to mark failed, so the error is
+        recorded on the watch and the next interval tries again.
+        """
+        from backend.services.watch_service import WatchService
+
+        watch_id = watch['id']
+        service = WatchService()
+        try:
+            outcome = await service.run_check(watch)
+            self.watches_swept += 1
+            print(
+                f"[Worker] Watch {watch_id}: checked {outcome.urls_checked}, "
+                f"{outcome.issues_open} open ({outcome.issues_new} new, "
+                f"{outcome.issues_resolved} resolved), "
+                f"{outcome.clicks_at_risk} clicks at risk, "
+                f"{outcome.alerted} alerted",
+                flush=True,
+            )
+            await asyncio.to_thread(service.release_watch, watch_id, None)
+        except Exception as e:
+            print(f"[Worker] Watch {watch_id} sweep failed: {e}", flush=True)
+            traceback.print_exc()
+            try:
+                await asyncio.to_thread(service.release_watch, watch_id, str(e))
+            except Exception as release_error:
+                # The lease expiry in claim_next_watch is the backstop; without
+                # it a watch orphaned here would never be picked up again.
+                print(
+                    f"[Worker] Could not release watch {watch_id}, "
+                    f"leaving it to lease expiry: {release_error}",
+                    flush=True,
+                )
+
+    async def _watch_tick(self) -> None:
+        """Claim and start one due watch, if it is time to look and none is running."""
+        if not WATCH_ENABLED:
+            return
+
+        if self.watch_task is not None:
+            if not self.watch_task.done():
+                return
+            # Surface anything the task itself failed to swallow.
+            try:
+                self.watch_task.result()
+            except Exception as e:
+                print(f"[Worker] Watch task ended abnormally: {e}", flush=True)
+            self.watch_task = None
+
+        now = time.time()
+        if now - self.last_watch_poll < WATCH_POLL_INTERVAL:
+            return
+        self.last_watch_poll = now
+
+        from backend.services.watch_service import WatchService
+
+        try:
+            # Synchronous supabase-py client, so keep it off the event loop.
+            watch = await asyncio.to_thread(
+                WatchService().claim_next_watch, self.worker_id, WATCH_LEASE_DURATION
+            )
+        except Exception as e:
+            print(f"[Worker] Could not claim a watch: {e}", flush=True)
+            return
+
+        if not watch:
+            return
+
+        print(
+            f"[Worker] Claimed watch {watch['id']} for {watch.get('old_domain')}",
+            flush=True,
+        )
+        self.watch_task = asyncio.create_task(self._run_watch_sweep(watch))
+
+    async def _await_watch_task(self) -> None:
+        """On shutdown, let an in-progress sweep finish releasing its lease."""
+        if self.watch_task is not None and not self.watch_task.done():
+            print("[Worker] Waiting for in-progress watch sweep...", flush=True)
+            try:
+                await self.watch_task
+            except Exception:
+                pass
+
     def _has_available_capacity(self) -> bool:
         """Return True when this worker can accept another in-flight job."""
         return len(self.in_flight_tasks) < self.max_concurrent
@@ -841,6 +965,7 @@ class RedirxWorker:
         try:
             while self.running:
                 await self._reap_finished_jobs(wait_for_one=False)
+                await self._watch_tick()
                 claimed = await self._dispatch_until_capacity("polling loop")
 
                 if claimed > 0:
@@ -858,6 +983,7 @@ class RedirxWorker:
             print("\n[Worker] Shutting down...")
         finally:
             await self._wait_for_in_flight_jobs()
+            await self._await_watch_task()
 
     async def listen_loop(self) -> None:
         """
@@ -890,6 +1016,12 @@ class RedirxWorker:
             while self.running:
                 try:
                     await self._reap_finished_jobs(wait_for_one=False)
+
+                    # Monitoring runs alongside jobs rather than competing for
+                    # a slot: a sweep is nearly all waiting on the host rate
+                    # limiter, so it does not consume the concurrency that
+                    # paid migration work needs.
+                    await self._watch_tick()
 
                     # Opportunistically fill all available capacity.
                     claimed = await self._dispatch_until_capacity("LISTEN dispatch")
@@ -944,6 +1076,7 @@ class RedirxWorker:
             print("\n[Worker] Shutting down...", flush=True)
         finally:
             await self._wait_for_in_flight_jobs()
+            await self._await_watch_task()
             if self.pg_conn:
                 self.pg_conn.close()
                 print("[Worker] PostgreSQL connection closed", flush=True)

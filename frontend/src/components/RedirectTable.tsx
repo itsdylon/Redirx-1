@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ChevronDown, ChevronRight, Edit2, AlertTriangle, CheckCircle, Circle, Search, FileQuestion, Link2 } from 'lucide-react';
+import { ChevronDown, ChevronRight, Edit2, AlertTriangle, CheckCircle, Circle, Search, FileQuestion, Link2, Wand2, X } from 'lucide-react';
 import { Checkbox } from './ui/checkbox';
 import { Badge } from './ui/badge';
 import { Button } from './ui/button';
@@ -88,6 +88,63 @@ function AnimateIn({ delay = 0, children, className = '' }: { delay?: number; ch
   );
 }
 
+/**
+ * A better target proposed from the site's own rename conventions.
+ *
+ * Shown directly beneath the current target so the comparison needs no
+ * clicking, and always with the evidence: a suggestion a reviewer cannot check
+ * is one they should not accept. Taking it is an ordinary edit — the row is
+ * repointed and approved locally, exactly as the inline editor does.
+ */
+function RepairSuggestion({
+  redirect,
+  onAccept,
+  onDismiss,
+}: {
+  redirect: RedirectMapping;
+  onAccept?: (id: string) => void;
+  onDismiss?: (id: string) => void;
+}) {
+  const repair = redirect.repair;
+  if (!repair) return null;
+
+  return (
+    <div className="mt-2 rounded-md border border-primary/30 bg-primary/5 p-2">
+      <div className="flex items-start gap-1.5">
+        <Wand2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
+        <div className="min-w-0 flex-1">
+          <div className="font-mono text-sm break-all text-foreground">{repair.url}</div>
+          <div className="mt-1 text-[11px] leading-snug text-muted-foreground">
+            {repair.evidence}
+          </div>
+          <div className="mt-1.5 flex items-center gap-2">
+            <Button
+              size="sm"
+              variant="default"
+              className="h-6 px-2 text-xs"
+              onClick={() => onAccept?.(redirect.id)}
+            >
+              Use this
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-6 px-1.5 text-xs text-muted-foreground"
+              onClick={() => onDismiss?.(redirect.id)}
+            >
+              <X className="mr-1 h-3 w-3" />
+              Dismiss
+            </Button>
+            <span className="ml-auto text-[11px] tabular-nums text-muted-foreground">
+              {repair.confidence}%
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 interface RedirectTableProps {
   redirects: RedirectMapping[];
   selectedRows: Set<string>;
@@ -96,6 +153,8 @@ interface RedirectTableProps {
   onToggleExpand: (id: string) => void;
   onEdit: (redirect: RedirectMapping) => void;
   onApprove: (id: string) => void;
+  onAcceptRepair?: (id: string) => void;
+  onDismissRepair?: (id: string) => void;
   hasActiveFilters?: boolean;
   onClearFilters?: () => void;
   totalRedirectsCount?: number;
@@ -112,6 +171,8 @@ export function RedirectTable({
   onToggleExpand,
   onEdit,
   onApprove,
+  onAcceptRepair,
+  onDismissRepair,
   hasActiveFilters = false,
   onClearFilters,
   totalRedirectsCount = 0,
@@ -357,6 +418,13 @@ export function RedirectTable({
                   <div className="text-foreground font-mono text-sm line-clamp-2 break-all">
                     {redirect.newUrl}
                   </div>
+                  {redirect.repair && (
+                    <RepairSuggestion
+                      redirect={redirect}
+                      onAccept={onAcceptRepair}
+                      onDismiss={onDismissRepair}
+                    />
+                  )}
                 </TableCell>
                 {showTraffic && (
                   <TableCell className="text-right">

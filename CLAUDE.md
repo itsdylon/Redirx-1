@@ -78,6 +78,7 @@ The `Pipeline` class ([lib.py](src/redirx/lib.py)) orchestrates execution:
 - `005_add_lease_columns.sql` - Lease-based locking with `claim_next_job()` and `reclaim_expired_leases()` RPC functions
 - `006_add_idempotency_keys.sql` - Prevent duplicate job creation
 - `029_add_post_cutover_watch.sql` - Redirect monitoring: `redirect_watches`, `watch_checks`, `watch_issues`, plus `claim_next_watch()` and `release_watch_lease()` RPCs
+- `030_add_match_repair.sql` - Advisory repair columns on `url_mappings` (`repaired_url`, `repair_method`, `repair_confidence`, `repair_support`, `repair_evidence`)
 - Run manually in Supabase SQL Editor (see `database/migrations/README.md`)
 
 **Embedding Strategy:**
@@ -278,6 +279,48 @@ because monitoring recurs forever.
 
 **Endpoints**: `/api/watches` (browser) and `/api/v1/migrations/<id>/watch`
 plus `.../watch/fixes` (agent).
+
+## Match Repair (low-confidence matches, before export)
+
+~25% of production matches come back `needs_review` (2,062 of 8,344), almost
+all URL-only matches that never saw page content. Escalating those to content
+matching is the paid Deep Match upgrade, so the free path works from evidence
+already on hand: the session's own high-confidence matches describe how the
+site renamed things.
+
+**Learning** ([src/redirx/match_repair.py](src/redirx/match_repair.py)):
+- Strip the tail two confident paths share; whatever prefix remains on each
+  side is the rename that pair demonstrates. Group, then require support
+  (`MIN_SUPPORT`) and consistency (`MIN_CONSISTENCY`).
+- **Tail comparison must tolerate slug rewrites but not section renames.**
+  Byte equality discarded all 274 confident matches of a real Shopify
+  re-platform (`ironpizzelle` vs `iron-pizzelle`); unrestricted fuzziness
+  folded `product`/`products` into the tail and erased the rule. Hence
+  `MIN_FUZZY_SLUG_LENGTH` — long leaves are fuzzy, short sections exact.
+
+**Applying**, strongest first:
+1. The rule's target published verbatim (`exact`).
+2. The closest-named page inside the section the rule identifies (`section`),
+   gated by `SECTION_MIN_SCORE` and a margin over the runner-up.
+
+**The load-bearing guard**: a proposed URL must exist in the session's new-URL
+universe. A wrong rule then proposes nothing instead of authoring a 404.
+
+**Scorer**: `token_set_ratio`, not the matcher's `token_sort_ratio`.
+Migrations *add* words to slugs (brand, size, pack count) and token_sort
+punishes exactly that — `bean-tower` scored 54 against its real destination
+and 70 against an unrelated `oven-towel`, so the repair replaced a correct
+match with a wrong one.
+
+**Advisory only.** Proposals live in their own columns; `new_url`,
+`confidence_score` and `needs_review` are untouched. Accepting is client-side
+state in the review UI, consistent with how approve and inline-edit already
+work — review decisions are not persisted until export.
+
+**Where it runs**: worker post-pass after the pipeline stores mappings
+(`MatchRepairService.repair_session`). Measured 40% of flagged rows get a
+proposal (51% on the real e-commerce re-platform), ~9s for 1,241 rows against
+3,749 candidates.
 
 ## File Structure
 

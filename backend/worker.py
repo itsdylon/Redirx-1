@@ -29,6 +29,7 @@ from src.redirx.lib import Pipeline
 from uuid import UUID
 from src.redirx.config import Config
 from backend.services.deep_preview_service import DeepPreviewService
+from backend.services.match_repair_service import MatchRepairService
 from backend.services.job_limits import (
     ContentJobUrlCapExceeded,
     validate_content_job_url_counts,
@@ -620,6 +621,27 @@ class RedirxWorker:
                     old_urls=old_urls,
                     new_urls=new_urls,
                 )
+
+            # Propose repairs for the rows the matcher flagged, using the
+            # rename conventions this session's own confident matches
+            # demonstrate. Advisory only — new_url is untouched — so a failure
+            # here costs suggestions, never the mappings themselves.
+            if not is_preview:
+                try:
+                    repair_outcome = await asyncio.to_thread(
+                        MatchRepairService().repair_session, str(session_id)
+                    )
+                    print(
+                        f"[Worker] Match repair for {session_id}: "
+                        f"{repair_outcome.as_dict()}",
+                        flush=True,
+                    )
+                except Exception as repair_err:
+                    print(
+                        f"[Worker] Match repair failed for {session_id} "
+                        f"(mappings are unaffected): {repair_err}",
+                        flush=True,
+                    )
 
             # Queue preview job after successful source url_only completion.
             if (not is_preview) and pipeline_type == 'url_only' and user_id:

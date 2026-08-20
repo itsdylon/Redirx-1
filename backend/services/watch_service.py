@@ -221,7 +221,13 @@ class WatchService:
         return result.data[0]
 
     def _infer_old_domain(self, session_id: str) -> str:
-        """Fall back to the mappings when the session has no domain recorded."""
+        """
+        Derive the monitored host from the mappings themselves.
+
+        This is the normal path, not a fallback: `old_site_domain` is NULL on
+        every session in production — the column exists but nothing writes it.
+        A watch that depended on it would never start.
+        """
         rows = (
             self.client.table("url_mappings")
             .select("old_url")

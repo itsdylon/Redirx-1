@@ -192,6 +192,101 @@ class TestDeepMatchAccess(unittest.TestCase):
 
         quota_db.get_plan.assert_not_called()
 
+class TestWatchAccess(unittest.TestCase):
+    """
+    Monitoring probes a customer's origin every few hours indefinitely — a
+    standing cost with no natural end — so creating a watch is paid-plan only,
+    and a key must not be a way around the entitlement the browser enforces.
+    """
+
+    API_KEY = "rdx_" + "b" * 32
+    SESSION_ID = "11111111-1111-1111-1111-111111111111"
+
+    def _client(self):
+        app = Flask(__name__)
+        app.register_blueprint(v1_routes.v1_blueprint, url_prefix="/api/v1")
+        return app.test_client()
+
+    def _post_watch(self, plan):
+        quota_db = Mock()
+        quota_db.get_plan.return_value = plan
+        session_db = Mock()
+        session_db.get_session.return_value = {"id": self.SESSION_ID, "user_id": "user-1"}
+        watch_service = Mock()
+        watch_service.create_watch.return_value = {
+            "id": "watch-1", "status": "active",
+            "old_domain": "old.com", "next_check_at": "2026-01-01T00:00:00+00:00",
+        }
+
+        with patch.object(v1_routes, "ApiKeyService") as key_cls, patch.object(
+            v1_routes, "UserQuotaDB", return_value=quota_db
+        ), patch.object(
+            v1_routes, "MigrationSessionDB", return_value=session_db
+        ), patch.object(
+            v1_routes, "WatchService", return_value=watch_service
+        ):
+            key_cls.return_value.resolve.return_value = "user-1"
+            response = self._client().post(
+                f"/api/v1/migrations/{self.SESSION_ID}/watch",
+                json={},
+                headers={"Authorization": f"Bearer {self.API_KEY}"},
+            )
+        return response, watch_service
+
+    def test_free_account_cannot_start_a_watch(self):
+        response, watch_service = self._post_watch("free")
+
+        self.assertEqual(response.status_code, 403)
+        error = response.get_json()["error"]
+        self.assertEqual(error["code"], "watch_requires_paid_plan")
+        self.assertEqual(error["next_action"], "pricing_checkout")
+        self.assertFalse(error["retryable"])
+        # Refused at the door: no recurring probing was ever scheduled.
+        watch_service.create_watch.assert_not_called()
+
+    def test_agency_account_can_start_a_watch(self):
+        response, watch_service = self._post_watch("agency")
+
+        self.assertEqual(response.status_code, 201)
+        watch_service.create_watch.assert_called_once()
+
+    def test_enterprise_account_can_start_a_watch(self):
+        response, watch_service = self._post_watch("enterprise")
+
+        self.assertEqual(response.status_code, 201)
+        watch_service.create_watch.assert_called_once()
+
+
+class TestWatchEntitlement(unittest.TestCase):
+    """The entitlement itself, defined once and asked by both routes."""
+
+    def test_paid_plans_allow_watch(self):
+        from backend.services.watch_service import plan_allows_watch
+
+        self.assertTrue(plan_allows_watch("agency"))
+        self.assertTrue(plan_allows_watch("enterprise"))
+        self.assertTrue(plan_allows_watch("AGENCY"))
+
+    def test_free_and_unknown_plans_do_not(self):
+        from backend.services.watch_service import plan_allows_watch
+
+        self.assertFalse(plan_allows_watch("free"))
+        self.assertFalse(plan_allows_watch(""))
+        self.assertFalse(plan_allows_watch(None))
+        # A plan nobody has heard of is not an entitlement.
+        self.assertFalse(plan_allows_watch("legacy_beta"))
+
+    def test_an_allowlisted_user_gets_watch_on_any_plan(self):
+        # Every account in production is on `free`, so without this the gate
+        # would make a working feature reachable by nobody.
+        from backend.services import watch_service
+
+        with patch.object(watch_service, "WATCH_ALLOWLIST", frozenset({"u1"})):
+            self.assertTrue(watch_service.plan_allows_watch("free", "u1"))
+            self.assertFalse(watch_service.plan_allows_watch("free", "u2"))
+            self.assertFalse(watch_service.plan_allows_watch("free"))
+
+
 
 if __name__ == "__main__":
     unittest.main()

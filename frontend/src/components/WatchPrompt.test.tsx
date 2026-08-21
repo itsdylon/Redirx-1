@@ -16,6 +16,13 @@ vi.mock('sonner', () => ({
   toast: { success: vi.fn(), error: vi.fn() },
 }));
 
+// Plan decides which variant renders; default to a paid plan so the existing
+// behaviour tests exercise the real prompt.
+let mockPlan = 'agency';
+vi.mock('../contexts/AuthContext', () => ({
+  useAuth: () => ({ user: { id: 'u1', plan: mockPlan } }),
+}));
+
 const listWatches = vi.fn();
 const createWatch = vi.fn();
 
@@ -42,6 +49,7 @@ function renderPrompt(sessionId = 'session-123') {
 describe('WatchPrompt', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockPlan = 'agency';
   });
 
   it('offers to start monitoring when the migration has no watch', async () => {
@@ -77,6 +85,21 @@ describe('WatchPrompt', () => {
 
     await userEvent.click(screen.getByRole('button', { name: /view/i }));
     expect(mockNavigate).toHaveBeenCalledWith('/watch/watch-1');
+  });
+
+  it('shows an upsell instead of the prompt on a free plan', async () => {
+    // Monitoring is paid; the server refuses creation for free accounts, so
+    // offering the button would be a dead end. The card stays visible as an
+    // upsell rather than vanishing.
+    mockPlan = 'free';
+    renderPrompt();
+
+    expect(await screen.findByText(/on paid plans/i)).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /start monitoring/i })).toBeNull();
+    expect(listWatches).not.toHaveBeenCalled();
+
+    await userEvent.click(screen.getByRole('button', { name: /see plans/i }));
+    expect(mockNavigate).toHaveBeenCalledWith('/pricing');
   });
 
   it('ignores a watch belonging to a different migration', async () => {

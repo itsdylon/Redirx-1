@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable, Optional
@@ -71,6 +72,32 @@ INTENSIVE_DAYS = 7
 # consecutive sweep saying the same thing is.
 TRANSIENT_TYPES = frozenset({UNREACHABLE, BLOCKED})
 TRANSIENT_ALERT_THRESHOLD = 2
+
+
+# Plans entitled to monitoring. Watch probes a customer's production origin
+# every few hours indefinitely — a standing cost with no natural end — so it
+# ships behind the paid plans. Pricing V3 sketches a standalone ~$29/mo Watch
+# subscription; when that SKU exists, its entitlement belongs HERE and nowhere
+# else — both the browser route and the v1 route ask this one function.
+WATCH_PLANS = frozenset({"agency", "enterprise"})
+
+# Comma-separated user ids granted Watch regardless of plan.
+#
+# Exists because every account in production is currently on `free`, so the
+# plan gate alone would make a shipped, working feature reachable by nobody.
+# The alternative — upgrading a design partner's plan — would also hand them
+# Deep Match, conflating two entitlements. Set on the API and the worker.
+WATCH_ALLOWLIST = frozenset(
+    uid.strip()
+    for uid in (os.getenv("WATCH_ALLOWLIST_USER_IDS") or "").split(",")
+    if uid.strip()
+)
+
+
+def plan_allows_watch(plan: Optional[str], user_id: Optional[str] = None) -> bool:
+    if user_id and str(user_id) in WATCH_ALLOWLIST:
+        return True
+    return (plan or "").lower() in WATCH_PLANS
 
 
 def _now() -> datetime:

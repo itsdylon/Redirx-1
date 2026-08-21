@@ -113,6 +113,7 @@ The `Pipeline` class ([lib.py](src/redirx/lib.py)) orchestrates execution:
 - `WATCH_ENABLED` - Run post-cutover monitoring sweeps in this worker (default: true)
 - `WATCH_POLL_INTERVAL` - Seconds between checks for a due watch (default: 60)
 - `WATCH_LEASE_DURATION` - Watch lease in seconds (default: 3600)
+- `WATCH_ALLOWLIST_USER_IDS` - Comma-separated user ids granted Watch regardless of plan (API + worker)
 
 **Idempotency** ([backend/services/pipeline_runner.py](backend/services/pipeline_runner.py)):
 - API generates deterministic `idempotency_key` from `SHA256(user_id + sorted_urls)`
@@ -298,6 +299,15 @@ because monitoring recurs forever.
 
 **Endpoints**: `/api/watches` (browser) and `/api/v1/migrations/<id>/watch`
 plus `.../watch/fixes` (agent).
+
+**Entitlement**: creating a watch is paid-plan only (`plan_allows_watch` in
+`watch_service.py` — the single definition both routes ask). `WATCH_PLANS` is
+agency/enterprise today; when the standalone ~$29/mo Watch SKU from Pricing V3
+exists, its entitlement belongs there and nowhere else. Only *creation* is
+gated — an existing watch can still be read, paused and resumed if a plan
+lapses. `WATCH_ALLOWLIST_USER_IDS` (comma-separated, set on API **and**
+worker) grants Watch regardless of plan, which is how a design partner gets it
+without also being handed Deep Match.
 
 **Two guard behaviours worth knowing**: `check-now` refuses (409) on a paused
 watch rather than silently resuming it, and alerts are **held while every open

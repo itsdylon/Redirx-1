@@ -30,7 +30,7 @@ from backend.services.job_limits import (
     validate_content_job_url_counts,
 )
 from backend.services.pipeline_runner import generate_deterministic_key
-from backend.services.watch_service import WatchService
+from backend.services.watch_service import WatchService, plan_allows_watch
 from src.redirx.database import MigrationSessionDB, URLMappingDB, UserQuotaDB
 
 logger = logging.getLogger(__name__)
@@ -366,6 +366,19 @@ def start_watch(session_id: str):
     session, error = _owned_session(session_id, request.api_user_id)
     if error:
         return error
+
+    # Same entitlement the browser enforces; a key must not be a way around
+    # it. GET on an existing watch stays open so a lapsed plan can still see
+    # what its watch last found.
+    if not plan_allows_watch(UserQuotaDB().get_plan(request.api_user_id), request.api_user_id):
+        return _error(
+            "watch_requires_paid_plan",
+            "Post-cutover monitoring is part of the paid plans. "
+            "See https://redirx.dev/#pricing.",
+            403,
+            next_action="pricing_checkout",
+            retryable=False,
+        )
 
     body = request.get_json(silent=True) or {}
     try:

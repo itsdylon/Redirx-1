@@ -12,7 +12,8 @@ from flask import Blueprint, Response, jsonify, request
 from backend.extensions import limiter
 from backend.services import redirect_export
 from backend.services.auth_service import require_auth
-from backend.services.watch_service import WatchService
+from backend.services.watch_service import WatchService, plan_allows_watch
+from src.redirx.database import UserQuotaDB
 
 watch_blueprint = Blueprint("watches", __name__)
 
@@ -59,6 +60,18 @@ def create_watch():
     session_id = body.get("session_id")
     if not session_id:
         return jsonify({"success": False, "error": "session_id is required."}), 400
+
+    # Monitoring recurs forever against the customer's origin, so it is a
+    # paid-plan feature. Creation is the only gated verb: an existing watch
+    # can still be paused, resumed or read if a plan ever lapses.
+    user_id = str(request.user.id)
+    if not plan_allows_watch(UserQuotaDB().get_plan(user_id), user_id):
+        return jsonify({
+            "success": False,
+            "error": "Monitoring is part of the paid plans.",
+            "code": "watch_requires_paid_plan",
+            "next_action": "pricing_checkout",
+        }), 403
 
     try:
         watch = WatchService().create_watch(

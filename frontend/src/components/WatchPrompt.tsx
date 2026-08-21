@@ -7,6 +7,8 @@ import { Card } from './ui/card';
 import { Button } from './ui/button';
 import { queryKeys } from '../queries/queryKeys';
 import { createWatch, listWatches } from '../api/watch';
+import { useAuth } from '../contexts/AuthContext';
+import { isEnterprisePlan } from '../lib/plans';
 
 /**
  * Offer post-cutover monitoring from the review page.
@@ -21,10 +23,17 @@ import { createWatch, listWatches } from '../api/watch';
 export function WatchPrompt({ sessionId }: { sessionId: string }) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const { user } = useAuth();
+  // Monitoring is a paid-plan feature (the server enforces this too). The
+  // prompt still renders for free accounts as an upsell rather than
+  // disappearing: post-cutover monitoring is the product's recurring half,
+  // and hiding it would mean free users never learn it exists.
+  const paidPlan = isEnterprisePlan(user?.plan);
 
   const watchesQuery = useQuery({
     queryKey: queryKeys.watches.all,
     queryFn: listWatches,
+    enabled: paidPlan,
   });
 
   const existing = watchesQuery.data?.find((w) => w.session_id === sessionId);
@@ -39,7 +48,32 @@ export function WatchPrompt({ sessionId }: { sessionId: string }) {
     onError: (error: Error) => toast.error(error.message),
   });
 
-  if (watchesQuery.isLoading) return null;
+  if (paidPlan && watchesQuery.isLoading) return null;
+
+  if (!paidPlan) {
+    return (
+      <Card className="mt-6 p-4">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div className="flex items-start gap-3">
+            <Activity className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" />
+            <div>
+              <p className="text-sm font-medium text-foreground">
+                Watch these redirects after you deploy
+              </p>
+              <p className="mt-0.5 text-sm text-muted-foreground">
+                On paid plans, we check the live site on a schedule and email you
+                if a redirect 404s, lands on the wrong page, or never shipped.
+              </p>
+            </div>
+          </div>
+          <Button size="sm" onClick={() => navigate('/pricing')}>
+            See plans
+            <ArrowRight className="ml-1.5 h-4 w-4" />
+          </Button>
+        </div>
+      </Card>
+    );
+  }
 
   return (
     <Card className="mt-6 p-4">

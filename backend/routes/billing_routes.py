@@ -73,13 +73,13 @@ def _map_value_error(exc: Exception):
             "requote",
         )
 
-    if "quick match source" in message or "source session must be completed" in message:
+    if "source session must be completed" in message:
         return (
             "pricing_source_not_ready",
-            "Run Quick Match first, then request a quote from the completed session.",
+            "Wait for the migration to finish running, then request a quote.",
             400,
             False,
-            "run_quick_match",
+            "wait_for_completion",
         )
 
     if "billing cycle" in message:

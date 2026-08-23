@@ -135,8 +135,9 @@ class PricingService:
             raise ValueError("Source session does not belong to this user")
         if session.get("is_preview"):
             raise ValueError("Preview sessions cannot be quoted")
-        if session.get("pipeline_type") != "url_only":
-            raise ValueError("Only Quick Match source sessions can be quoted")
+        pipeline_type = session.get("pipeline_type")
+        if pipeline_type not in ("url_only", "content"):
+            raise ValueError("Only Quick Match or Deep Match sessions can be quoted")
         if (session.get("status") or "").lower() not in {"completed", "permanently_failed"}:
             raise ValueError("Source session must be completed before quoting")
 
@@ -165,6 +166,14 @@ class PricingService:
             "updated_at": _now_iso(),
         }
 
+        if pipeline_type == "content":
+            # No separate Deep Match session to wait for — this session IS
+            # the deep match, already run for free. Self-link so
+            # get_quote_for_export() and the Stripe webhook's
+            # _queue_deep_session_for_quote() (which no-ops once
+            # deep_session_id is set) both treat it as already resolved.
+            payload["deep_session_id"] = source_session_id
+
         existing = self.client.table("project_pricing_quotes").select(
             "id,status,deep_session_id"
         ).eq("source_session_id", source_session_id).maybe_single().execute()
@@ -189,6 +198,28 @@ class PricingService:
     def get_quote_for_source(self, source_session_id: UUID | str, user_id: str) -> dict[str, Any] | None:
         result = self.client.table("project_pricing_quotes").select("*").eq(
             "source_session_id", str(source_session_id)
+        ).eq("user_id", user_id).maybe_single().execute()
+        return result.data if result else None
+
+    def get_quote_for_export(self, session_id: UUID | str, user_id: str) -> dict[str, Any] | None:
+        """
+        Find the quote that unlocks exporting `session_id`, whichever shape
+        it was created in: `deep_session_id` (the original Quick Match ->
+        quote -> pay -> Deep Match funnel, where the exported session is
+        created by the webhook after payment) or `source_session_id` (a
+        content session quoted directly, self-linked in
+        create_or_refresh_quote — the shape the agent/API surface uses).
+        """
+        session_id = str(session_id)
+        result = self.client.table("project_pricing_quotes").select("*").eq(
+            "deep_session_id", session_id
+        ).eq("user_id", user_id).maybe_single().execute()
+        quote = result.data if result else None
+        if quote:
+            return quote
+
+        result = self.client.table("project_pricing_quotes").select("*").eq(
+            "source_session_id", session_id
         ).eq("user_id", user_id).maybe_single().execute()
         return result.data if result else None
 

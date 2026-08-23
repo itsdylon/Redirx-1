@@ -161,30 +161,30 @@ def process_csv():
     # Get optional 'force' parameter from form data
     force = request.form.get('force', 'false').lower() == 'true'
 
-    # Determine requested/default pipeline type.
+    # Determine requested/default pipeline type. Deep Match is free at full
+    # quality for every plan now (Pricing V3) — Quick Match remains available
+    # as an explicit, faster opt-in, not the default a free plan is forced
+    # into.
     requested_pipeline_type = request.form.get('pipeline_type')
     if requested_pipeline_type not in (None, 'content', 'url_only'):
         requested_pipeline_type = 'content'
 
-    # Enforce new access model:
-    # - free: Quick Match only (url_only)
-    # - agency|enterprise: Quick Match or Deep Match
     quota_db = UserQuotaDB()
     user_plan = quota_db.get_plan(user_id)
-    pipeline_type = requested_pipeline_type or ('url_only' if user_plan == 'free' else 'content')
+    pipeline_type = requested_pipeline_type or 'content'
 
-    if user_plan == 'free' and pipeline_type == 'content':
-        return jsonify({
-            "success": False,
-            "code": "deep_match_requires_project_checkout",
-            "error": "Deep Match requires project checkout",
-            "user_message": (
-                "Free accounts can only start Quick Match from upload. "
-                "Use the pricing flow to unlock Deep Match for this project."
-            ),
-            "next_action": "pricing_checkout",
-            "retryable": False,
-        }), 403
+    entitlement_decision = None
+    if pipeline_type == 'content':
+        entitlement_decision = entitlement_service.check_deep_match_run(user_id, user_plan)
+        if not entitlement_decision.allowed:
+            return jsonify({
+                "success": False,
+                "code": entitlement_decision.code,
+                "error": entitlement_decision.user_message,
+                "user_message": entitlement_decision.user_message,
+                "next_action": entitlement_decision.next_action,
+                "retryable": False,
+            }), 429
 
     parsed_old_urls = None
     parsed_new_urls = None

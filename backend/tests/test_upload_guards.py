@@ -228,13 +228,13 @@ class UploadGuardTests(unittest.TestCase):
         # Deep Match is the default now — Quick Match is an explicit opt-in,
         # not what a free plan is forced into.
         self.assertEqual(first.get_json()["pipeline_type"], "content")
+        self.assertEqual(second.get_json()["pipeline_type"], "content")
         self.assertEqual(ledger_cls.return_value.record.call_count, 2)
-        self.assertEqual(second.get_json()["pipeline_type"], "url_only")
         self.assertEqual(run_pipeline.call_count, 2)
         first_kwargs = run_pipeline.call_args_list[0].kwargs
         second_kwargs = run_pipeline.call_args_list[1].kwargs
-        self.assertEqual(first_kwargs["pipeline_type"], "url_only")
-        self.assertEqual(second_kwargs["pipeline_type"], "url_only")
+        self.assertEqual(first_kwargs["pipeline_type"], "content")
+        self.assertEqual(second_kwargs["pipeline_type"], "content")
 
 
 if __name__ == "__main__":

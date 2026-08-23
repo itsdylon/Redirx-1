@@ -170,5 +170,34 @@ class TestRevoke(unittest.TestCase):
         self.assertFalse(ApiKeyService(client=client).revoke("user-1", "key-2"))
 
 
+class TestGetOrCreateServiceKey(unittest.TestCase):
+    """
+    The mcp-server's identity seam (agentic-pivot.md §5): a plaintext key
+    it can hold for a resolved OAuth subject. Never a real "get" — plaintext
+    is never stored — so this rotates instead: revoke whatever MCP-issued
+    key exists, mint a new one.
+    """
+
+    def test_no_existing_key_just_mints_one(self):
+        client = FakeClient(select_result=[])
+        key = ApiKeyService(client=client).get_or_create_service_key("user-1")
+
+        self.assertTrue(key.startswith(KEY_PREFIX))
+        self.assertEqual(client.store["updates"], [])
+        self.assertEqual(client.store["inserted"][0]["name"], "MCP (auto)")
+
+    def test_existing_mcp_key_is_revoked_before_minting_a_new_one(self):
+        client = FakeClient(select_result=[{"id": "old-key-1"}])
+        key = ApiKeyService(client=client).get_or_create_service_key("user-1")
+
+        self.assertTrue(key.startswith(KEY_PREFIX))
+        filters, payload = client.store["updates"][0]
+        self.assertEqual(filters.get("id"), "old-key-1")
+        self.assertEqual(filters.get("user_id"), "user-1")
+        self.assertIsNotNone(payload.get("revoked_at"))
+        # Exactly one live MCP-issued key at a time.
+        self.assertEqual(len(client.store["inserted"]), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

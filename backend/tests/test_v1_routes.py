@@ -302,6 +302,112 @@ class TestWatchEntitlement(unittest.TestCase):
             self.assertFalse(watch_service.plan_allows_watch("free"))
 
 
+class TestPreview(unittest.TestCase):
+    """
+    The MCP `preview` tool's backing endpoint: free, always, and reads only
+    what deep_match already wrote — it must never itself trigger work.
+    """
+
+    API_KEY = "rdx_" + "b" * 32
+
+    def _client(self):
+        app = Flask(__name__)
+        app.register_blueprint(v1_routes.v1_blueprint, url_prefix="/api/v1")
+        return app.test_client()
+
+    def _get(self, session):
+        with patch.object(v1_routes, "ApiKeyService") as key_cls, patch.object(
+            v1_routes, "MigrationSessionDB"
+        ) as session_db, patch.object(
+            v1_routes, "URLMappingDB"
+        ) as mapping_db:
+            key_cls.return_value.resolve.return_value = "user-1"
+            session_db.return_value.get_session.return_value = session
+            mapping_db.return_value.get_mappings_by_session.return_value = []
+            return self._client().get(
+                f"/api/v1/migrations/{session['id']}/preview",
+                headers={"Authorization": f"Bearer {self.API_KEY}"},
+            )
+
+    def test_refuses_before_the_pipeline_finishes(self):
+        # An agent polling deep_match's status and preview at the same time
+        # must get a reason to keep waiting, not an empty/misleading result.
+        response = self._get({
+            "id": "348697f0-d02e-457a-86af-1e746420e9d1",
+            "user_id": "user-1",
+            "status": "processing",
+        })
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.get_json()["error"]["code"], "not_ready")
+
+    def test_completed_session_returns_aggregates(self):
+        response = self._get({
+            "id": "348697f0-d02e-457a-86af-1e746420e9d1",
+            "user_id": "user-1",
+            "status": "completed",
+            "old_urls": ["https://old.example.com/a", "https://old.example.com/b"],
+        })
+        self.assertEqual(response.status_code, 200)
+        body = response.get_json()
+        self.assertEqual(body["status"], "completed")
+        self.assertEqual(body["total_mappings"], 0)
+        # Zero mappings against two old URLs: nothing matched.
+        self.assertEqual(body["unmatched_old_urls"], 2)
+        self.assertIn("confidence_distribution", body)
+        self.assertEqual(body["sample"], [])
+
+
+class TestDiscover(unittest.TestCase):
+    """API-key path onto the same crawl/sitemap logic /api/discover uses."""
+
+    API_KEY = "rdx_" + "c" * 32
+
+    def _client(self):
+        app = Flask(__name__)
+        app.register_blueprint(v1_routes.v1_blueprint, url_prefix="/api/v1")
+        return app.test_client()
+
+    def test_missing_url_is_a_400(self):
+        with patch.object(v1_routes, "ApiKeyService") as key_cls:
+            key_cls.return_value.resolve.return_value = "user-1"
+            response = self._client().post(
+                "/api/v1/discover",
+                json={},
+                headers={"Authorization": f"Bearer {self.API_KEY}"},
+            )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.get_json()["error"]["code"], "missing_url")
+
+    def test_found_urls_pass_through(self):
+        quota_db = Mock()
+        quota_db.get_plan.return_value = "free"
+
+        async def fake_ingest_side(**kwargs):
+            return {
+                "entries": [{"url": "https://old.example.com/a"}],
+                "summary": {"total": 1},
+                "root_url": "https://old.example.com",
+                "truncated": False,
+                "discovery_method": "sitemap",
+                "side": kwargs["side"],
+            }
+
+        with patch.object(v1_routes, "ApiKeyService") as key_cls, patch.object(
+            v1_routes, "UserQuotaDB", return_value=quota_db
+        ), patch.object(v1_routes, "IngestionService") as ingestion_cls:
+            key_cls.return_value.resolve.return_value = "user-1"
+            ingestion_cls.return_value.ingest_side = fake_ingest_side
+            response = self._client().post(
+                "/api/v1/discover",
+                json={"url": "old.example.com", "side": "old"},
+                headers={"Authorization": f"Bearer {self.API_KEY}"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.get_json()
+        self.assertEqual(body["urls"], ["https://old.example.com/a"])
+        self.assertEqual(body["discovery_method"], "sitemap")
+
 
 if __name__ == "__main__":
     unittest.main()

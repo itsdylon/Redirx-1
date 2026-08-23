@@ -15,6 +15,7 @@ JWT — see api_key_service for why.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from functools import wraps
 from typing import Any, Optional
@@ -24,14 +25,22 @@ from flask import Blueprint, Response, jsonify, request
 
 from backend.extensions import limiter
 from backend.services.api_key_service import ApiKeyService, looks_like_api_key
-from backend.services import entitlement_service, redirect_export
+from backend.services import entitlement_service, redirect_export, results_formatter
+from backend.services.ingestion_service import IngestionService
 from backend.services.job_limits import (
     ContentJobUrlCapExceeded,
     validate_content_job_url_counts,
 )
 from backend.services.pipeline_runner import generate_deterministic_key
 from backend.services.watch_service import WatchService, plan_allows_watch
-from src.redirx.database import MigrationSessionDB, URLMappingDB, UserQuotaDB
+from src.redirx.config import Config
+from src.redirx.database import (
+    GSCUrlMetricsDB,
+    MigrationSessionDB,
+    URLMappingDB,
+    UserQuotaDB,
+)
+from src.redirx.discovery import DiscoveryError
 
 logger = logging.getLogger(__name__)
 
@@ -360,6 +369,143 @@ def export_migration(session_id: str):
     if warning:
         response.headers["X-Redirx-Warning"] = warning
     return response
+
+
+@v1_blueprint.route("/migrations/<session_id>/preview", methods=["GET"])
+@limiter.limit("300 per hour")
+@require_api_key
+def preview_migration(session_id: str):
+    """
+    Aggregates and a small sample of matches — free, always. The pairing
+    already ran regardless of plan (Pricing V3: quality is never gated), so
+    an agent can judge whether a migration is worth exporting before
+    spending anything on it.
+
+    Not a partial run of anything — this reads the same `url_mappings` rows
+    `matches`/`export` do, just summarized. Reuses the same
+    stats/risk-summary code the review UI renders from
+    (`results_formatter`), so the numbers an agent sees here cannot drift
+    from what a human sees in the browser.
+    """
+    session, error = _owned_session(session_id, request.api_user_id)
+    if error:
+        return error
+
+    status = session.get("status")
+    if status != "completed":
+        return _error(
+            "not_ready",
+            f"Migration is '{status}', not completed yet. Poll GET /migrations/{{id}} until done.",
+            409,
+        )
+
+    rows = URLMappingDB().get_mappings_by_session(UUID(session_id))
+    gsc_metrics = None
+    if session.get("gsc_synced_at"):
+        gsc_metrics = GSCUrlMetricsDB().get_metrics_by_session(UUID(session_id))
+
+    formatted = results_formatter.format_results_response(rows, session, gsc_metrics)
+    mappings = formatted["mappings"]
+
+    old_url_count = len(session.get("old_urls") or [])
+    unmatched_estimate = max(0, old_url_count - len(mappings)) if old_url_count else None
+
+    # A small, representative sample rather than the highest-confidence rows
+    # only — an agent deciding whether to pay for the export needs to see
+    # what's shaky, not just what's good.
+    by_confidence = sorted(mappings, key=lambda m: m["confidence"])
+    sample_size = min(20, len(by_confidence))
+    half = sample_size // 2
+    sample = by_confidence[:half] + by_confidence[len(by_confidence) - (sample_size - half):]
+
+    return jsonify({
+        "migration_id": session_id,
+        "status": status,
+        "total_mappings": formatted["stats"]["total"],
+        "unmatched_old_urls": unmatched_estimate,
+        "confidence_distribution": {
+            "high": formatted["stats"]["high"],
+            "medium": formatted["stats"]["medium"],
+            "low": formatted["stats"]["low"],
+        },
+        "needs_review_count": sum(1 for m in mappings if not m["approved"]),
+        "gsc": formatted["gsc"],
+        "sample": [
+            {
+                "old_url": m["oldUrl"],
+                "new_url": m["newUrl"],
+                "confidence": m["confidence"],
+                "confidence_band": m["confidenceBand"],
+                "warnings": m["warnings"],
+            }
+            for m in sample
+        ],
+    }), 200
+
+
+@v1_blueprint.route("/discover", methods=["POST"])
+@limiter.limit("30 per hour")
+@require_api_key
+def discover():
+    """
+    Enumerate a site's page URLs from a root domain — sitemap, then CMS API,
+    then crawl, whichever answers first. Call once for the old domain and
+    once for the new domain before `deep_match`; its output is exactly
+    `deep_match`'s `old_urls`/`new_urls` input.
+
+    Body: {"url": "example.com", "side": "old" | "new"}
+
+    API-key variant of POST /api/discover (browser, session-authed) — same
+    IngestionService call, same plan-based URL cap, different credential.
+    """
+    body = request.get_json(silent=True) or {}
+    raw_url = str(body.get("url") or "").strip()
+    if not raw_url:
+        return _error("missing_url", "A 'url' field is required.", 400)
+
+    side = "old" if str(body.get("side") or "old").lower() == "old" else "new"
+    user_id = request.api_user_id
+    plan = UserQuotaDB().get_plan(user_id)
+    max_urls = (
+        Config.DISCOVERY_MAX_URLS_FREE if plan == "free" else Config.DISCOVERY_MAX_URLS_PAID
+    )
+
+    try:
+        ingestion = asyncio.run(IngestionService().ingest_side(
+            user_id=user_id,
+            domain=raw_url,
+            side=side,
+            max_urls=max_urls,
+            time_budget=Config.DISCOVERY_TIME_BUDGET_SECONDS,
+        ))
+    except DiscoveryError as e:
+        return _error(e.code, e.user_message, 422)
+    except Exception:
+        logger.exception("v1 discover failed for %s", raw_url)
+        return _error("discovery_failed", "Discovery failed.", 500)
+
+    entries = ingestion["entries"]
+    if not entries:
+        code = "robots_blocked" if ingestion.get("robots_blocked") else "no_urls_found"
+        status = 429 if ingestion["rate_limited"] else 422
+        return _error(
+            code,
+            f"Could not find any pages on {ingestion['root_url']}. Provide URLs "
+            "directly to deep_match instead.",
+            status,
+            root_url=ingestion["root_url"],
+        )
+
+    return jsonify({
+        "root_url": ingestion["root_url"],
+        "side": ingestion["side"],
+        "urls": [e["url"] for e in entries],
+        "count": len(entries),
+        "total_found": ingestion["summary"]["total"],
+        "truncated": ingestion["truncated"],
+        "max_urls": max_urls,
+        "discovery_method": ingestion["discovery_method"],
+    }), 200
 
 
 @v1_blueprint.route("/me", methods=["GET"])

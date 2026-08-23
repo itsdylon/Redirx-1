@@ -181,6 +181,60 @@ class StripeService:
 
         return str(session.url), str(session.id)
 
+    def create_mcp_export_checkout_session(
+        self,
+        *,
+        user_id: str,
+        email: str,
+        session_id: str,
+        success_url: str,
+        cancel_url: str,
+    ) -> tuple[str, str]:
+        """
+        One-time checkout for a single migration's export, bought through the
+        MCP `export` tool's pay-and-resume flow (agentic-pivot.md §3.5).
+
+        Deliberately its own flat price rather than `create_project_checkout_session`'s
+        graduated per-page pricing: an agent asking to unlock one export has
+        no quote object to price against, and per-page pricing needs a
+        project_pricing_quotes row this flow never creates. If the two prices
+        should converge, that is a pricing decision (open in
+        docs/PRICING_V3_OUTLINE.md), not something to guess here.
+        """
+        customer_id = self._get_or_create_customer(user_id, email)
+        amount_cents = Config.MCP_EXPORT_PRICE_CENTS
+
+        if Config.STRIPE_PRICE_ID_MCP_EXPORT:
+            line_items = [{"price": Config.STRIPE_PRICE_ID_MCP_EXPORT, "quantity": 1}]
+        else:
+            line_items = [
+                {
+                    "price_data": {
+                        "currency": "usd",
+                        "unit_amount": amount_cents,
+                        "product_data": {
+                            "name": "RedirX export unlock",
+                        },
+                    },
+                    "quantity": 1,
+                }
+            ]
+
+        session = stripe.checkout.Session.create(
+            customer=customer_id,
+            mode="payment",
+            line_items=line_items,
+            metadata={
+                "checkout_type": "mcp_export",
+                "supabase_user_id": user_id,
+                "source_session_id": session_id,
+            },
+            success_url=success_url,
+            cancel_url=cancel_url,
+        )
+
+        return str(session.url), str(session.id)
+
     def create_agency_checkout_session(
         self,
         *,
@@ -368,7 +422,27 @@ class StripeService:
             self._handle_agency_checkout_completion(session)
             return
 
+        if checkout_type == "mcp_export":
+            self._handle_mcp_export_checkout_completion(session)
+            return
+
         logger.info("Checkout completed with unhandled type=%s session=%s", checkout_type, session.get("id"))
+
+    def _handle_mcp_export_checkout_completion(self, session: Dict[str, Any]) -> None:
+        # Deferred import: export_resume_service imports this module's
+        # StripeService to *create* checkout sessions, so importing it back
+        # here at module load time would cycle. Both directions only need
+        # each other inside a function body, never at class-definition time.
+        from backend.services.export_resume_service import ExportResumeService
+
+        checkout_session_id = str(session.get("id") or "")
+        if not checkout_session_id:
+            logger.error("mcp_export checkout completed with no session id")
+            return
+
+        ExportResumeService(client=self.client).mark_paid(
+            stripe_checkout_session_id=checkout_session_id
+        )
 
     def _handle_subscription_updated(self, subscription: Dict[str, Any]) -> None:
         customer_id = str(subscription.get("customer") or "")

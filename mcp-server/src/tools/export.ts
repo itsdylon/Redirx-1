@@ -1,7 +1,13 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import * as z from 'zod';
 import { config } from '../config.js';
-import { buildExportPaymentChallenge, throwPaymentRequired } from '../payments/mpp.js';
+import {
+  attachReceipt,
+  buildExportPaymentChallenge,
+  decodeOpaque,
+  extractCredential,
+  throwPaymentRequired,
+} from '../payments/mpp.js';
 import { clientForCall, type ToolExtra } from './context.js';
 
 /**
@@ -39,16 +45,39 @@ export function registerExportTool(server: McpServer): void {
       },
       annotations: { readOnlyHint: false, idempotentHint: true, openWorldHint: false },
     },
-    async ({ migration_id, format, url_format, min_confidence }, extra) => {
+    async ({ migration_id, format, url_format, min_confidence, opaque }, extra) => {
       const { client } = await clientForCall(extra as ToolExtra);
-      const result = await client.getExport(migration_id, { format, urlFormat: url_format, minConfidence: min_confidence });
+
+      // A client that only echoes `opaque` back (rather than re-passing
+      // format/url_format/min_confidence explicitly) still gets the exact
+      // export it originally asked for — opaque is authoritative over the
+      // schema's defaults whenever both are present, exactly what MPP's
+      // "clients must echo opaque back unchanged" is for.
+      const resumed = opaque ? decodeOpaque(opaque) : null;
+      const effective = {
+        format: resumed?.format ?? format,
+        urlFormat: resumed?.urlFormat ?? url_format,
+        minConfidence: resumed?.minConfidence ?? min_confidence,
+      };
+
+      const result = await client.getExport(migration_id, effective);
 
       if (result.ok) {
+        // A Credential in _meta means this call is fulfilling a prior
+        // Payment Required challenge (protocol-faithful client behavior).
+        // We don't need it to decide anything — v1's own re-check is what
+        // actually gated this response — but a client that did the work of
+        // presenting one gets an explicit Receipt back, per MPP shape.
+        const credential = extractCredential((extra as ToolExtra)._meta);
+        const meta = credential
+          ? attachReceipt(undefined, { status: 'paid', migrationId: migration_id })
+          : undefined;
         return {
           content: [
             { type: 'text', text: `${result.redirectCount} redirects, ${result.filename}:` },
             { type: 'text', text: result.content },
           ],
+          ...(meta ? { _meta: meta } : {}),
         };
       }
 
@@ -56,9 +85,9 @@ export function registerExportTool(server: McpServer): void {
         const upgradeUrl = String(result.error.body.upgrade_url ?? `${config.backendBaseUrl}`);
         const challenge = buildExportPaymentChallenge({
           migrationId: migration_id,
-          format,
-          urlFormat: url_format,
-          minConfidence: min_confidence,
+          format: effective.format,
+          urlFormat: effective.urlFormat,
+          minConfidence: effective.minConfidence,
           realm: new URL(config.publicUrl).host,
           checkoutUrl: upgradeUrl,
           description: result.error.message,

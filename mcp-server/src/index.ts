@@ -39,7 +39,10 @@ async function main() {
 
   const app = createMcpExpressApp({
     host: config.host,
-    allowedHosts: [resourceServerUrl.host, ...config.allowedHosts],
+    // hostHeaderValidation compares against the Host header's hostname with
+    // the port already stripped (new URL(`http://${header}`).hostname) — an
+    // entry here that still has a port on it silently never matches.
+    allowedHosts: [resourceServerUrl.hostname, ...config.allowedHosts],
   });
 
   app.get('/health', (_req, res) => {

@@ -1,0 +1,161 @@
+# Render Blueprint — Infrastructure as Code for all four RedirX services.
+#
+# None of this existed before (docs/architecture/agentic-pivot.md §6.7):
+# production topology for the frontend, backend, and worker lived only in the
+# Render dashboard, not in git, and a fourth service (mcp-server) was about
+# to make that worse, not better. This is the "fix it for all four at once"
+# the doc's Task 2 called out, not just IaC for the new service.
+#
+# Secrets (sync: false) must be set once in the Render dashboard per service —
+# this file intentionally does not and must not contain real values. See
+# .env.example (backend/worker) and mcp-server/.env.example for the full list
+# and what each variable is for.
+#
+# First deploy: `render blueprint launch` or connect the repo in the Render
+# dashboard and point it at this file. Existing services already running
+# under different names can be adopted by matching `name:` below to them.
+
+services:
+  - type: web
+    name: redirx-backend
+    runtime: python
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn backend.app:create_app()
+    envVars:
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_KEY
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: EMAIL_FROM_ADDRESS
+        sync: false
+      - key: APP_BASE_URL
+        sync: false
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+      - key: STRIPE_PRICE_ID_AGENCY_MONTHLY
+        sync: false
+      - key: STRIPE_PRICE_ID_AGENCY_ANNUAL
+        sync: false
+      - key: STRIPE_PRICE_ID_AGENCY_OVERAGE
+        sync: false
+      - key: STRIPE_METER_EVENT_NAME
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false
+      - key: GOOGLE_OAUTH_CLIENT_ID
+        sync: false
+      - key: GOOGLE_OAUTH_CLIENT_SECRET
+        sync: false
+      - key: GSC_OAUTH_REDIRECT_URI
+        sync: false
+      - key: WATCH_ALLOWLIST_USER_IDS
+        sync: false
+      # Shared secret with redirx-mcp-server's /api/internal/* calls
+      # (backend/routes/internal_routes.py). Must match the mcp-server
+      # service's own MCP_INTERNAL_SECRET below exactly.
+      - key: MCP_INTERNAL_SECRET
+        sync: false
+      - key: FLASK_ENV
+        value: production
+
+  - type: worker
+    name: redirx-worker
+    runtime: python
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -m backend.worker
+    envVars:
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_KEY
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: APP_BASE_URL
+        sync: false
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_PRICE_ID_AGENCY_MONTHLY
+        sync: false
+      - key: STRIPE_PRICE_ID_AGENCY_ANNUAL
+        sync: false
+      - key: STRIPE_PRICE_ID_AGENCY_OVERAGE
+        sync: false
+      - key: STRIPE_METER_EVENT_NAME
+        sync: false
+      - key: CRAWL_LIMITER_DATABASE_URL
+        sync: false
+      - key: WATCH_ALLOWLIST_USER_IDS
+        sync: false
+      - key: WORKER_LEASE_DURATION
+        value: "600"
+      - key: WORKER_MAX_CONCURRENT
+        value: "1"
+      - key: WATCH_ENABLED
+        value: "true"
+
+  - type: web
+    name: redirx-mcp-server
+    runtime: node
+    plan: starter
+    rootDir: mcp-server
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_VERSION
+        value: 20.20.0
+      - key: MCP_PUBLIC_URL
+        # Must be the actual public HTTPS URL Render assigns (or a custom
+        # domain) — this becomes PRM's `resource` and the client-visible
+        # WWW-Authenticate resource_metadata URL. Get this wrong and OAuth
+        # discovery silently points clients at the wrong place.
+        sync: false
+      - key: REDIRX_BACKEND_URL
+        # e.g. https://redirx-backend.onrender.com — internal Render service
+        # URLs also work and avoid a public hop for gateway->backend calls.
+        sync: false
+      - key: MCP_INTERNAL_SECRET
+        sync: false
+      - key: MCP_AUTH_MODE
+        value: oauth
+      - key: OAUTH_ISSUER_URL
+        # https://<project-ref>.supabase.co/auth/v1 — see
+        # docs/architecture/agentic-pivot.md §3.3. Verify this against the
+        # live project once the Supabase DCR spike concludes; a wrong value
+        # here means PRM discovery fails and the server fails closed at boot
+        # (index.ts: "refusing to start in oauth mode").
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: POSTHOG_API_KEY
+        # Same PostHog project as frontend/.env's VITE_PUBLIC_POSTHOG_KEY —
+        # do not create a second project.
+        sync: false
+      - key: POSTHOG_HOST
+        value: https://us.i.posthog.com
+
+  - type: static
+    name: redirx-frontend
+    runtime: static
+    buildCommand: cd frontend && npm install && npm run build
+    staticPublishPath: frontend/build
+    envVars:
+      - key: VITE_API_BASE_URL
+        sync: false
+      - key: VITE_SUPABASE_URL
+        sync: false
+      - key: VITE_SUPABASE_ANON_KEY
+        sync: false
+      - key: VITE_PUBLIC_POSTHOG_KEY
+        sync: false
+      - key: VITE_PUBLIC_POSTHOG_HOST
+        sync: false

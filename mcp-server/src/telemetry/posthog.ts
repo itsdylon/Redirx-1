@@ -33,13 +33,32 @@ import type { VerifiedIdentity } from '../auth/types.js';
  * POSTHOG_API_KEY/POSTHOG_HOST to the SAME project, not a new one, so MCP
  * usage shows up alongside the web app's funnels instead of in an island.
  */
-export function setupTelemetry(server: McpServer): PostHog | null {
+// One posthog-node client for the process, not one per request/server
+// instance — the client batches and flushes internally, and instrument()
+// is documented as idempotent per *server* instance, not per client. A
+// fresh McpServer is built per stateless HTTP request (mcpServer.ts); the
+// PostHog client underneath every one of those must be the same long-lived
+// object, or every request leaks a client that's never flushed/shut down.
+let posthogSingleton: PostHog | null | undefined;
+
+function getPostHogClient(): PostHog | null {
+  if (posthogSingleton !== undefined) return posthogSingleton;
   if (!config.posthog.apiKey) {
     console.warn('[telemetry] POSTHOG_API_KEY not set — MCP analytics disabled.');
+    posthogSingleton = null;
     return null;
   }
+  posthogSingleton = new PostHog(config.posthog.apiKey, { host: config.posthog.host });
+  return posthogSingleton;
+}
 
-  const posthog = new PostHog(config.posthog.apiKey, { host: config.posthog.host });
+export async function shutdownTelemetry(): Promise<void> {
+  await posthogSingleton?.shutdown();
+}
+
+export function setupTelemetry(server: McpServer): void {
+  const posthog = getPostHogClient();
+  if (!posthog) return;
 
   instrument(server, posthog, {
     context: true,
@@ -68,6 +87,4 @@ export function setupTelemetry(server: McpServer): PostHog | null {
       }
     },
   });
-
-  return posthog;
 }

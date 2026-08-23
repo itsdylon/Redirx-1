@@ -55,7 +55,6 @@ export function registerDiscoverTool(server: McpServer): void {
             ].join('\n'),
           },
         ],
-        structuredContent: data as unknown as Record<string, unknown>,
       };
     },
   );

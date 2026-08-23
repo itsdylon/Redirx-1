@@ -59,7 +59,7 @@ def require_internal_secret(f):
 def _owns_session(user_id: str, session_id: str) -> bool:
     try:
         session = MigrationSessionDB().get_session(session_id)
-    except (ValueError, Exception):
+    except Exception:
         return False
     return bool(session) and str(session.get("user_id")) == str(user_id)
 
@@ -187,20 +187,18 @@ def export_checkout():
         logger.exception("mcp export checkout failed for session %s", session_id)
         return _error("checkout_failed", "Could not start checkout.", 502)
 
-    from src.redirx.config import Config as _Config  # local import: avoid shadowing above
-
     resume_token = ExportResumeService().create_pending(
         user_id=user_id,
         session_id=session_id,
         stripe_checkout_session_id=checkout_session_id,
-        amount_cents=_Config.MCP_EXPORT_PRICE_CENTS,
+        amount_cents=Config.MCP_EXPORT_PRICE_CENTS,
     )
 
     return jsonify({
         "checkout_url": checkout_url,
         "resume_token": resume_token,
-        "expires_in_seconds": _Config.MCP_EXPORT_RESUME_TOKEN_TTL_SECONDS,
-        "amount_cents": _Config.MCP_EXPORT_PRICE_CENTS,
+        "expires_in_seconds": Config.MCP_EXPORT_RESUME_TOKEN_TTL_SECONDS,
+        "amount_cents": Config.MCP_EXPORT_PRICE_CENTS,
         "currency": "usd",
     }), 201
 

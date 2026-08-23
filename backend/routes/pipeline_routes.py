@@ -1,4 +1,4 @@
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, Response, request, jsonify
 import os
 from uuid import UUID
 import numpy as np
@@ -7,6 +7,7 @@ from backend.services.results_formatter import format_results_response, calculat
 from backend.services.auth_service import require_auth
 from backend.services.deep_preview_service import DeepPreviewService
 from backend.services.pricing_service import PricingService
+from backend.services import entitlement_service, redirect_export
 from backend.services.job_limits import (
     ContentJobUrlCapExceeded,
     validate_content_job_url_counts,
@@ -214,15 +215,25 @@ def process_csv():
             pipeline_type=pipeline_type,
             old_urls=parsed_old_urls,
             new_urls=parsed_new_urls,
+            priority=(entitlement_decision.priority if entitlement_decision else 0),
         )
 
-        return jsonify({
+        # Only a genuinely new job drew on the worker; a duplicate returned
+        # by idempotency didn't, and must not consume the ceiling twice.
+        if pipeline_type == 'content' and not is_duplicate:
+            entitlement_service.record_deep_match_run(user_id, session_id, user_plan)
+
+        response = {
             "success": True,
             "message": "Pipeline completed successfully",
             "session_id": str(session_id),
             "is_duplicate": is_duplicate,
             "pipeline_type": pipeline_type
-        }), 200
+        }
+        if entitlement_decision and entitlement_decision.warning:
+            response["warning"] = entitlement_decision.warning
+            response["warning_message"] = entitlement_decision.warning_message
+        return jsonify(response), 200
 
     except ContentJobUrlCapExceeded as e:
         return jsonify(e.to_api_payload()), 422
@@ -315,6 +326,87 @@ def get_results(session_id: str):
             "success": False,
             "error": f"Failed to retrieve results: {str(e)}"
         }), 500
+
+
+@pipeline_blueprint.route("/results/<session_id>/export", methods=["GET"])
+@require_auth
+def export_results(session_id: str):
+    """
+    A deploy-ready redirect file for a browser session.
+
+    Viewing results is free; this is the Pricing V3 gate. `?format=` one of
+    apache|nginx|wordpress|vercel|cloudflare|shopify|csv|json, `?url_format=`
+    paths|full (paths by default). Mirrors v1_routes.export_migration —
+    same entitlement check, same redirect_export module, different auth.
+    """
+    try:
+        session_uuid = UUID(session_id)
+    except ValueError:
+        return jsonify({
+            "success": False,
+            "error": f"Invalid session_id format: {session_id}"
+        }), 400
+
+    user_id = str(request.user.id)
+    session_db = MigrationSessionDB()
+    try:
+        session_metadata = session_db.get_session(session_uuid)
+    except ValueError as e:
+        return jsonify({"success": False, "error": str(e)}), 404
+
+    if session_metadata.get('user_id') != user_id:
+        return jsonify({
+            "success": False,
+            "error": "Unauthorized: Session belongs to another user"
+        }), 403
+
+    user_plan = UserQuotaDB().get_plan(user_id)
+    decision = entitlement_service.check_export(user_id, user_plan, session_uuid)
+    if not decision.allowed:
+        return jsonify({
+            "success": False,
+            "code": decision.code,
+            "error": decision.user_message,
+            "user_message": decision.user_message,
+            "next_action": decision.next_action,
+            "retryable": False,
+            **decision.extra,
+        }), 402
+
+    fmt = (request.args.get("format") or "csv").lower()
+    if fmt not in redirect_export.FORMATS:
+        return jsonify({
+            "success": False,
+            "error": f"'format' must be one of: {', '.join(redirect_export.FORMATS)}.",
+        }), 400
+
+    url_format = (request.args.get("url_format") or "paths").lower()
+    if url_format not in ("paths", "full"):
+        return jsonify({"success": False, "error": "'url_format' must be 'paths' or 'full'."}), 400
+
+    try:
+        min_confidence = float(request.args.get("min_confidence", 0))
+    except ValueError:
+        return jsonify({"success": False, "error": "'min_confidence' must be a number."}), 400
+
+    rows = [
+        r for r in URLMappingDB().get_mappings_by_session(session_uuid)
+        if (r.get("confidence_score") or 0) >= min_confidence
+    ]
+
+    content = redirect_export.build_export(rows, fmt, url_format=url_format)
+    warning = redirect_export.warning_for(fmt, url_format)
+
+    entitlement_service.record_export(user_id, session_uuid)
+
+    response = Response(content, mimetype=redirect_export.content_type_for(fmt))
+    response.headers["Content-Disposition"] = (
+        f'attachment; filename="{redirect_export.filename_for(fmt)}"'
+    )
+    response.headers["X-Redirect-Count"] = str(len(rows))
+    if warning:
+        response.headers["X-Redirx-Warning"] = warning
+    return response
 
 
 @pipeline_blueprint.route("/results/<session_id>/deep-preview", methods=["GET"])

@@ -28,6 +28,7 @@ class _Query:
         self._range: Optional[tuple[int, int]] = None
         self._op = "select"
         self._payload: Any = None
+        self._single = False
 
     # -- builders ----------------------------------------------------------
 
@@ -57,6 +58,18 @@ class _Query:
         self._filters.append((column, "gt", value))
         return self
 
+    def gte(self, column, value):
+        self._filters.append((column, "gte", value))
+        return self
+
+    def lt(self, column, value):
+        self._filters.append((column, "lt", value))
+        return self
+
+    def lte(self, column, value):
+        self._filters.append((column, "lte", value))
+        return self
+
     def in_(self, column, values):
         self._filters.append((column, "in", list(values)))
         return self
@@ -73,6 +86,10 @@ class _Query:
         self._range = (start, end)
         return self
 
+    def maybe_single(self):
+        self._single = True
+        return self
+
     # -- execution ---------------------------------------------------------
 
     def _matches(self, row) -> bool:
@@ -87,6 +104,15 @@ class _Query:
                     return False
             elif op == "gt":
                 if actual is None or not actual > value:
+                    return False
+            elif op == "gte":
+                if actual is None or not actual >= value:
+                    return False
+            elif op == "lt":
+                if actual is None or not actual < value:
+                    return False
+            elif op == "lte":
+                if actual is None or not actual <= value:
                     return False
             elif op == "in":
                 if str(actual) not in {str(v) for v in value}:
@@ -127,7 +153,12 @@ class _Query:
             selected = selected[start : end + 1]
         if self._limit is not None:
             selected = selected[: self._limit]
-        return _Result([dict(r) for r in selected])
+        selected = [dict(r) for r in selected]
+        if self._single:
+            # Real supabase-py's maybe_single(): .data is a dict or None,
+            # never a list.
+            return _Result(selected[0] if selected else None)
+        return _Result(selected)
 
 
 class FakeSupabase:

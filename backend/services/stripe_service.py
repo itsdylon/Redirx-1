@@ -20,6 +20,7 @@ sys.path.insert(0, SRC_DIR)
 from redirx.config import Config
 from redirx.database import SupabaseClient, MigrationSessionDB
 from backend.services.pricing_service import PricingService, PRICING_VERSION
+from backend.services.entitlement_service import QUEUE_PRIORITY_PAID
 
 
 logger = logging.getLogger(__name__)
@@ -347,6 +348,9 @@ class StripeService:
             new_urls=source.get("new_urls") or [],
             pipeline_type="content",
             source_session_id=source_session_id,
+            # Paid work jumps the free-run queue (migration 027) — this
+            # session only exists because Stripe confirmed payment.
+            priority=QUEUE_PRIORITY_PAID,
         )
 
         self.pricing_service.attach_deep_session(str(quote["id"]), deep_session_id)

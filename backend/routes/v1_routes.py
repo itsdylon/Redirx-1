@@ -24,7 +24,7 @@ from flask import Blueprint, Response, jsonify, request
 
 from backend.extensions import limiter
 from backend.services.api_key_service import ApiKeyService, looks_like_api_key
-from backend.services import redirect_export
+from backend.services import entitlement_service, redirect_export
 from backend.services.job_limits import (
     ContentJobUrlCapExceeded,
     validate_content_job_url_counts,
@@ -173,19 +173,20 @@ def create_migration():
 
     user_id = request.api_user_id
 
+    # Deep Match is free at full quality for every plan (Pricing V3) — the
+    # only gate at creation time is the free-run abuse ceiling, not plan.
+    # Export is where payment is actually required (see export_migration).
+    entitlement_decision = None
+    user_plan = None
     if pipeline == "content":
-        # The same access model the upload flow enforces (pipeline_routes).
-        # Without it a key is simply a way around the checkout the browser
-        # requires: nothing downstream charges for this run either, because
-        # usage is only metered for agency plans after a job completes.
-        if UserQuotaDB().get_plan(user_id) == "free":
+        user_plan = UserQuotaDB().get_plan(user_id)
+        entitlement_decision = entitlement_service.check_deep_match_run(user_id, user_plan)
+        if not entitlement_decision.allowed:
             return _error(
-                "deep_match_requires_project_checkout",
-                "Deep Match requires project checkout. A free account can run "
-                "Quick Match (pipeline 'url_only') over the API; unlock Deep "
-                "Match for the project first.",
-                403,
-                next_action="pricing_checkout",
+                entitlement_decision.code,
+                entitlement_decision.user_message,
+                429,
+                next_action=entitlement_decision.next_action,
                 retryable=False,
             )
         try:
@@ -204,15 +205,25 @@ def create_migration():
         new_urls=new_urls,
         idempotency_key=idempotency_key,
         pipeline_type=pipeline,
+        priority=(entitlement_decision.priority if entitlement_decision else 0),
     )
 
-    return jsonify({
+    if pipeline == "content":
+        entitlement_service.record_deep_match_run(
+            user_id, session_id, user_plan
+        )
+
+    response_body = {
         "id": str(session_id),
         "status": "pending",
         "pipeline": pipeline,
         "old_url_count": len(old_urls),
         "new_url_count": len(new_urls),
-    }), 201
+    }
+    if entitlement_decision and entitlement_decision.warning:
+        response_body["warning"] = entitlement_decision.warning
+        response_body["warning_message"] = entitlement_decision.warning_message
+    return jsonify(response_body), 201
 
 
 @v1_blueprint.route("/migrations/<session_id>", methods=["GET"])
@@ -286,7 +297,12 @@ def get_matches(session_id: str):
 @require_api_key
 def export_migration(session_id: str):
     """
-    A deploy-ready redirect file.
+    A deploy-ready redirect file. The paywall (Pricing V3): running Deep
+    Match is free, this is what's paid for. A free-plan session needs a paid
+    quote — see entitlement_service.check_export and
+    pricing_service.get_quote_for_export. Returns 402 rather than 403,
+    since this is the one place in v1 the refusal is specifically about
+    payment, not identity or plan eligibility.
 
     `?format=` one of apache|nginx|wordpress|vercel|cloudflare|shopify|csv|json.
     `?url_format=paths|full` — paths by default, because most targets match on
@@ -295,6 +311,19 @@ def export_migration(session_id: str):
     session, error = _owned_session(session_id, request.api_user_id)
     if error:
         return error
+
+    user_id = request.api_user_id
+    decision = entitlement_service.check_export(
+        user_id, UserQuotaDB().get_plan(user_id), session_id
+    )
+    if not decision.allowed:
+        return _error(
+            decision.code,
+            decision.user_message,
+            402,
+            next_action=decision.next_action,
+            **decision.extra,
+        )
 
     fmt = (request.args.get("format") or "csv").lower()
     if fmt not in redirect_export.FORMATS:
@@ -320,6 +349,8 @@ def export_migration(session_id: str):
 
     content = redirect_export.build_export(rows, fmt, url_format=url_format)
     warning = redirect_export.warning_for(fmt, url_format)
+
+    entitlement_service.record_export(user_id, session_id)
 
     response = Response(content, mimetype=redirect_export.content_type_for(fmt))
     response.headers["Content-Disposition"] = (

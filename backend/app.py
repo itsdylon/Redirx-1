@@ -26,6 +26,7 @@ from backend.routes.discovery_routes import discovery_blueprint
 from backend.routes.api_key_routes import api_key_blueprint
 from backend.routes.watch_routes import watch_blueprint
 from backend.routes.v1_routes import v1_blueprint
+from backend.routes.internal_routes import internal_blueprint
 from backend.extensions import limiter, register_error_handlers
 
 def create_app():
@@ -58,6 +59,9 @@ def create_app():
     app.register_blueprint(watch_blueprint, url_prefix="/api/watches")
     # Public, agent-facing. Versioned because agents pin to it.
     app.register_blueprint(v1_blueprint, url_prefix="/api/v1")
+    # Service-to-service only (shared-secret protected) — called by the
+    # mcp-server gateway, never by a browser or an agent's own API key.
+    app.register_blueprint(internal_blueprint, url_prefix="/api/internal")
 
     @app.route("/")
     def home():

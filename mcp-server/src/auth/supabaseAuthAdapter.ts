@@ -5,15 +5,30 @@ import type { OAuthMetadata } from '@modelcontextprotocol/sdk/shared/auth.js';
 import type { AuthorizationServerAdapter, VerifiedIdentity } from './types.js';
 
 /**
- * The bet docs/architecture/agentic-pivot.md §3.3 recommends: Supabase Auth's
- * OAuth 2.1 Server (public beta) as the authorization server, this gateway as
- * a pure resource server. Token *verification* here does not depend on
- * whether Dynamic Client Registration works the way the doc's still-pending
- * spike hopes — `GET /auth/v1/user` validates any token Supabase issued,
- * including ones from a plain browser session, the same call
- * backend/services/auth_service.py's `verify_token()` already makes. DCR only
- * changes how a *client* obtained the token in the first place, which this
- * adapter has no opinion on.
+ * The bet docs/architecture/agentic-pivot.md §3.3 recommended, since resolved
+ * GO by docs/spikes/dcr-auth-spike.md (run against the real production
+ * project, not docs): Supabase Auth's OAuth 2.1 Server, including Dynamic
+ * Client Registration, actually works end-to-end — DCR was the named
+ * likely-failure-point and isn't one. That spike also confirms the issuer
+ * shape this adapter expects: `https://<project-ref>.supabase.co/auth/v1`.
+ *
+ * Token *verification* here does not depend on DCR at all — `GET
+ * /auth/v1/user` validates any token Supabase issued, including ones from a
+ * plain browser session, the same call backend/services/auth_service.py's
+ * `verify_token()` already makes. DCR only changes how a *client* obtained
+ * the token in the first place, which this adapter has no opinion on.
+ *
+ * The spike's own recommendation is JWKS-based local verification instead of
+ * this round-trip, for the usual reason (no network call per request). That
+ * is deliberately NOT what's implemented here: the spike also found the
+ * project still signs tokens with HS256 (symmetric), and JWKS only publishes
+ * *public* keys — there is nothing meaningful to verify a HS256 signature
+ * against via JWKS until the project migrates to RS256/ES256 (the spike's
+ * own open item 3). The `/user` round-trip is the only approach that
+ * actually works against the project as it exists today, and it's exactly
+ * what the rest of this codebase already does. Revisit this if/when that
+ * migration happens — local JWKS verification would remove a network
+ * round-trip from every single tool call.
  *
  * `discoverAuthorizationServerMetadata` is the MCP SDK's own client-side
  * discovery helper (fetch + parse `.well-known/oauth-authorization-server`);

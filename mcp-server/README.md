@@ -38,22 +38,46 @@ them.
 
 ## Auth
 
-Deliberately pluggable (`src/auth/types.ts`'s `AuthorizationServerAdapter`) —
-the OAuth story depends on a still-open spike into whether Supabase Auth's
-OAuth 2.1 Server + Dynamic Client Registration is sufficient
-(`docs/architecture/agentic-pivot.md` §3.3). Two real adapters exist today:
+`docs/spikes/dcr-auth-spike.md` answered the open question in
+`docs/architecture/agentic-pivot.md` §3.3: **Supabase Auth's OAuth 2.1
+Server, including Dynamic Client Registration, works** — verified against
+the live production project, not just docs. Still pluggable
+(`src/auth/types.ts`'s `AuthorizationServerAdapter`) because that costs
+nothing, not because the choice is still open. Two real adapters:
 
 - **`SupabaseAuthAdapter`** (`MCP_AUTH_MODE=oauth`, the production default):
   verifies tokens via Supabase's `GET /auth/v1/user`, and serves Protected
   Resource Metadata pointing at Supabase's own authorization server metadata
-  (discovered at boot, not hand-guessed).
+  (discovered at boot, not hand-guessed). Deliberately does NOT do local
+  JWKS-based verification despite that being the spike's general
+  recommendation — the project still signs tokens with HS256, and JWKS has
+  nothing meaningful to offer for a symmetric algorithm. Revisit if the
+  project migrates to RS256/ES256.
 - **`DevApiKeyAdapter`** (`MCP_AUTH_MODE=dev`): accepts a raw Redirx API key
-  (`rdx_...`) as the bearer token directly. No OAuth handshake. This is what
-  makes the server testable today without a live Supabase OAuth Server.
+  (`rdx_...`) as the bearer token directly. No OAuth handshake. Useful before
+  the consent page below exists, or in CI.
 
-A third, `GenericOidcAdapter`, is an intentional stub for a standalone OIDC
-provider if the Supabase spike comes back negative — it throws rather than
-pretend to validate tokens it doesn't actually check.
+A third, `GenericOidcAdapter`, is a documented extension point for a
+genuinely different future need (non-Supabase-hosted deployment, an
+enterprise SSO requirement) — it throws rather than pretend to validate
+tokens it doesn't actually check.
+
+**Two things the spike left as open, human decisions — not code changes —
+that block a real end-to-end connection:**
+
+1. **No consent page exists yet.** Supabase's OAuth authorize flow redirects
+   to the project's Authorization Path (`/oauth/consent` for redirx), and
+   nothing is deployed at that route in the frontend. This is real (small)
+   frontend work — see the spike's "Recommended path" item 2 — not something
+   this gateway can substitute for.
+2. **The OAuth Server + public DCR endpoint are live on the production
+   Supabase project right now, with no consent page behind them yet.**
+   Supabase's own confirmation dialog warns this allows "bad actors to
+   create malicious apps with legitimate-sounding names to phish your
+   users" — acceptable short-term while this gets built, not a "leave it
+   forever" default. Whoever picks up the consent page should treat shipping
+   it promptly (or temporarily disabling "Allow Dynamic OAuth Apps" until
+   then) as part of the same task, not a follow-up.
 
 ## Running locally
 
@@ -102,7 +126,6 @@ No IaC existed for any of the four before this; see
   today the entitlement check only runs where `export.ts` calls it, which is
   actually inside `v1_routes.export_migration` itself (the gateway adds no
   gate of its own), so this is not a gap specific to MCP.
-- Full Dynamic Client Registration verification against a live Supabase
-  project — `OAUTH_ISSUER_URL` is discovered at boot via the SDK's own
-  `discoverAuthorizationServerMetadata`, but nobody has pointed this at a
-  real project with DCR enabled yet.
+- The `/oauth/consent` page Supabase's authorize flow redirects to — see
+  "Auth" above. Without it, DCR and token issuance work (verified), but a
+  human has nowhere to click "Approve."

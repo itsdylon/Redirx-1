@@ -5,13 +5,17 @@ import type { OAuthMetadata } from '@modelcontextprotocol/sdk/shared/auth.js';
 import type { AuthorizationServerAdapter, VerifiedIdentity } from './types.js';
 
 /**
- * Fallback if docs/architecture/agentic-pivot.md §3.3's Supabase DCR spike
- * comes back negative and a standalone JWKS-based OIDC provider (Auth0 or
- * hand-rolled) is needed instead. Deliberately a stub, not a guess: a wrong
- * JWKS/audience/issuer check that *looks* like it works is worse than one
- * that visibly doesn't, and there is no concrete provider to validate against
- * yet. Wire in a real `jose`-based JWT verification (issuer, audience,
- * signature, expiry) against `issuerUrl`'s JWKS once that provider is chosen.
+ * docs/spikes/dcr-auth-spike.md answered GO on Supabase Auth as the
+ * authorization server, so this is no longer a live fallback for that
+ * decision — SupabaseAuthAdapter is the real, working adapter. Kept as a
+ * documented extension point for a genuinely different future need (a
+ * non-Supabase-hosted deployment, an enterprise customer requiring their own
+ * SSO/OIDC provider), not as a hedge. Deliberately a stub, not a guess: a
+ * wrong JWKS/audience/issuer check that *looks* like it works is worse than
+ * one that visibly doesn't, and there is no concrete provider to validate
+ * against yet. Wire in a real `jose`-based JWT verification (issuer,
+ * audience, signature, expiry) against `issuerUrl`'s JWKS once that provider
+ * is chosen.
  *
  * Until then this throws on every call, which fails loudly at first use
  * rather than silently accepting tokens it never actually validated —

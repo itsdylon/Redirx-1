@@ -128,11 +128,10 @@ services:
       - key: MCP_AUTH_MODE
         value: oauth
       - key: OAUTH_ISSUER_URL
-        # https://<project-ref>.supabase.co/auth/v1 — see
-        # docs/architecture/agentic-pivot.md §3.3. Verify this against the
-        # live project once the Supabase DCR spike concludes; a wrong value
-        # here means PRM discovery fails and the server fails closed at boot
-        # (index.ts: "refusing to start in oauth mode").
+        # https://<project-ref>.supabase.co/auth/v1 — confirmed shape by
+        # docs/spikes/dcr-auth-spike.md against the real production project.
+        # A wrong value here means PRM discovery fails and the server fails
+        # closed at boot (index.ts: "refusing to start in oauth mode").
         sync: false
       - key: SUPABASE_ANON_KEY
         sync: false

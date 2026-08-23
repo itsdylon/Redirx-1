@@ -14,14 +14,18 @@ export interface VerifiedIdentity {
 }
 
 /**
- * The seam docs/architecture/agentic-pivot.md §3.3 calls out as the design's
- * single highest-variance unknown: whether Supabase Auth's OAuth 2.1 Server +
- * Dynamic Client Registration (beta as of this writing) is sufficient, or a
- * dedicated authorization server is needed instead. Every piece of this
+ * The seam docs/architecture/agentic-pivot.md §3.3 called out as the design's
+ * single highest-variance unknown — whether Supabase Auth's OAuth 2.1 Server +
+ * Dynamic Client Registration is sufficient, or a dedicated authorization
+ * server is needed instead — is now resolved (docs/spikes/dcr-auth-spike.md:
+ * GO, verified against the live production project). `SupabaseAuthAdapter` is
+ * the real answer; `GenericOidcAdapter` remains only as a documented
+ * extension point (a future non-Supabase-hosted deployment, an enterprise
+ * SSO requirement), not a hedge against likely failure. Every piece of this
  * gateway downstream of `verifyAccessToken` — identity resolution, entitlement
  * checks, PostHog identify — only ever sees a `VerifiedIdentity`, never a raw
- * token or a specific AS's response shape, so that question can be answered
- * later (or re-answered) as a config change, not a rewrite.
+ * token or a specific AS's response shape, so a future change of AS stays a
+ * config change, not a rewrite.
  *
  * `metadata()` is only meaningful for adapters backing a real external AS —
  * it feeds `mcpAuthMetadataRouter`'s Protected Resource Metadata endpoint,

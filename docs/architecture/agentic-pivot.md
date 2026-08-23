@@ -308,3 +308,113 @@ Rough total for a solo dev, Supabase-spike-favorable case: **~18–22 days**, do
 7. **No deployment IaC exists for any of the three current services** (no `render.yaml`, no Dockerfile beyond the dev container) — adding a fourth service means either finally writing one or manually configuring yet another dashboard entry that nobody can reproduce from git. Task 2 is the natural moment to fix this for all four services at once.
 8. **GSC is accurately "traffic-aware triage," not "traffic-aware matching"** — zero wiring exists between GSC data and the pairing/confidence-scoring stage. If GSC gets pitched as improving `deep_match`'s actual match quality, that claim isn't true yet; it's true for `check_migration_health` and review prioritization, not for the matcher.
 9. **Two dead/orphaned subsystems sit directly adjacent to the auth rework** — `trial_routes.py` (unregistered, references dropped columns) and `session_discovered_urls`/`DiscoveredUrlDB` (modeled, implemented, zero callers). Neither blocks anything, but both are exactly the kind of landmine that gets accidentally resurrected when someone is deep in an auth/identity refactor and greps for "how do we currently create a user." Delete the first; leave the second alone and note it as available scaffolding.
+
+---
+
+## 7. Implemented: the shared entitlement layer (Tasks 7, 8, 11)
+
+Landed in `backend/services/entitlement_service.py`, migration
+`031_add_account_usage_events.sql`, and route wiring in `pipeline_routes.py`
+and `v1_routes.py`. This closes §0's finding — PR #29's paywall-move is now
+shipped as the single module both the web app and v1 ask, rather than a
+second implementation that would drift from it. Tests:
+`backend/tests/test_entitlement_service.py`.
+
+### What it decides
+
+- `check_deep_match_run(user_id, plan)` — Deep Match is never quality- or
+  size-gated for any plan. The only thing checked is a rolling-window
+  free-run ceiling (`FREE_RUN_WINDOW_HOURS`/`FREE_RUN_SOFT_CAP`/
+  `FREE_RUN_HARD_CAP`, all env-overridable), counted per account, exempt for
+  `agency`/`enterprise` and for `DEEP_MATCH_CEILING_ALLOWLIST_USER_IDS`. Under
+  the soft cap: allowed, no warning. Between soft and hard: allowed, with a
+  `warning`/`warning_message` the caller should surface (the grace period).
+  At or above hard cap: `allowed=False`, `code=free_run_ceiling_exceeded`,
+  429. Also returns `priority` — `QUEUE_PRIORITY_PAID` (10) or
+  `QUEUE_PRIORITY_FREE` (0) — for `MigrationSessionDB.create_session`
+  (migration 027's `priority` column, previously unused by any caller).
+- `record_deep_match_run(user_id, session_id, plan)` — call once, after the
+  session actually exists. A rejected request must never consume the
+  ceiling; free plans only (paid plans no-op).
+- `check_export(user_id, plan, session_id)` — the actual paywall. Paid plans
+  always allowed. Free plans need a paid `project_pricing_quotes` row linked
+  to that exact session — see `PricingService.get_quote_for_export` and the
+  `create_or_refresh_quote` self-link described below. Returns 402 with
+  `code=export_requires_payment`, `next_action=pricing_checkout`, and
+  `extra={source_session_id, upgrade_url}` when blocked.
+- `record_export(user_id, session_id)` — usage-ledger row, `kind='export'`.
+
+### The MCP contract
+
+An MCP `deep_match` tool should call `check_deep_match_run` before starting
+a job (or just let v1's `POST /api/v1/migrations` do it — same function,
+already wired) and treat a 429 there as "ceiling hit, offer upgrade,"
+never as "retry with smaller input" — there is no smaller-input path,
+quality and size are never gated. An `export` tool should expect 402 with
+the shape above and surface `upgrade_url` to the human; there is no
+resume-token flow yet (see below).
+
+### Why a new table, not generalizing `agency_usage_events`
+
+§2's table recommends generalizing `agency_usage_events`. That table turned
+out to be load-bearing for live Stripe metered billing
+(`stripe_service._handle_agency_checkout_completion`) and has
+`session_id UUID UNIQUE NOT NULL` — one row per session, not a general
+ledger. Reshaping it in place would touch a live billing write path for no
+benefit. `account_usage_events` is the new, general `(user_id, kind,
+quantity, session_id, domain, created_at)` ledger the doc describes;
+`agency_usage_events` keeps doing its one job. Full rationale is in the
+migration file's header comment.
+
+### The export-quote gap this closes
+
+`project_pricing_quotes`/Stripe checkout only worked for the web funnel:
+quote a `url_only` (Quick Match) session, pay, and a webhook
+(`stripe_service._queue_deep_session_for_quote`) creates the Deep Match
+session after payment. The agent/API surface has no Quick Match precursor —
+`v1_routes.create_migration` creates a `content` session directly — so there
+was no way for a free-plan agent user to ever pay for one. Fixed by relaxing
+`PricingService.create_or_refresh_quote` to also accept `content` sessions,
+self-linking `deep_session_id = source_session_id` at quote-creation time
+(no separate session to wait for — it already ran, for free). The webhook
+handler needed no changes: it already no-ops when `deep_session_id` is set.
+`PricingService.get_quote_for_export` checks both linkage shapes.
+
+### What is deliberately not built here
+
+- **The 402 resume-token flow** (§3.5, Task 13) — poll-after-pay, matching
+  the existing `unlock-status` pattern. `check_export`'s 402 today just says
+  "not paid, here's where to pay"; there's no way yet for an agent to retry
+  with proof of payment without a human re-driving the browser flow. Build
+  this once the transport-semantics question (§3.5, Task 1) is resolved.
+- **Per-domain entitlements** (ICP 2, multi-domain agencies) — schema only:
+  `account_usage_events.domain` exists, is nullable, and every query ignores
+  it today. `check_deep_match_run`/`check_export` take no domain parameter.
+  Add one when the first multi-domain account needs it, rather than guessing
+  the scoping rule now.
+- **The 90-day fixed-term Watch monitoring SKU** — does not fit
+  `usage_in_window()`'s rolling-sum model at all (see the migration's header
+  comment and the module docstring). Needs its own start/expiry-anchored
+  check, not a variant of this one.
+- **Stripe checkout UI for the content-session quote path** — the backend
+  now accepts it (see above), but `PricingPage.tsx`/`ExportModal.tsx` still
+  assume the old Quick-Match-first funnel and generate exports client-side
+  with no backend call at all. `pipeline_routes.export_results` (new,
+  mirrors v1's export endpoint) is ready for the frontend to call; nothing
+  calls it yet.
+
+### Overruling PR #29
+
+PR #29 (§2) proposed a page-count band: Deep Match ≤250 URLs free, above
+that still paid and graduated, with the cap explicitly framed as "a cost
+control" to be tuned once `started_at`/`completed_at` (migration 027, since
+landed) gave real duration data. This task's brief overrides that: Deep
+Match runs free on the **full URL set**, no page-count gate, because the
+audience is now agents that can evaluate result quality themselves — a
+crippled or size-capped run doesn't function as a monetization lever the way
+it did against a human clicking "upload." `CONTENT_MAX_OLD_URLS`/
+`CONTENT_MAX_NEW_URLS` (`job_limits.py`) still cap job size, but that's an
+existing infra/compute backstop (default 5,000/side), not a pricing
+boundary — it applies identically to free and paid. The free-run *count*
+ceiling (`check_deep_match_run`) replaces the page-count band as the actual
+abuse control.

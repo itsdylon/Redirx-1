@@ -1,7 +1,7 @@
 import { discoverAuthorizationServerMetadata } from '@modelcontextprotocol/sdk/client/auth.js';
+import { InvalidTokenError } from '@modelcontextprotocol/sdk/server/auth/errors.js';
 import type { AuthInfo } from '@modelcontextprotocol/sdk/server/auth/types.js';
 import type { OAuthMetadata } from '@modelcontextprotocol/sdk/shared/auth.js';
-import { McpError } from '@modelcontextprotocol/sdk/types.js';
 import type { AuthorizationServerAdapter, VerifiedIdentity } from './types.js';
 
 /**
@@ -62,18 +62,28 @@ export class SupabaseAuthAdapter implements AuthorizationServerAdapter {
     });
 
     if (!response.ok) {
-      throw new McpError(-32001, 'Invalid or expired access token');
+      throw new InvalidTokenError('Invalid or expired access token');
     }
 
     const user = (await response.json()) as { id?: string; email?: string };
     if (!user.id) {
-      throw new McpError(-32001, 'Access token did not resolve to a user');
+      throw new InvalidTokenError('Access token did not resolve to a user');
     }
 
     return {
       token,
       clientId: 'supabase',
       scopes: [],
+      // requireBearerAuth (bearerAuth.js) rejects any token with no
+      // expiresAt as invalid, even a genuinely valid one — GoTrue's
+      // /user endpoint confirms validity but doesn't hand back the
+      // token's own exp claim, so there is nothing honest to put here
+      // short of decoding the JWT ourselves. A short synthetic TTL is the
+      // lesser evil: it satisfies the expiresAt-required check without
+      // claiming knowledge we don't have, at the cost of re-verifying
+      // (one more GoTrue round-trip) more often than the token's real
+      // lifetime would require.
+      expiresAt: Math.floor(Date.now() / 1000) + 300,
       extra: { subject: user.id, email: user.email },
     };
   }

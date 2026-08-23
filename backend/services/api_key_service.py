@@ -28,6 +28,12 @@ KEY_BYTES = 32
 # Enough to identify a key in a list without narrowing the search space.
 DISPLAY_PREFIX_LENGTH = 12
 
+# Marks a key as gateway-issued (the mcp-server, via /api/internal/mcp/resolve)
+# rather than one a human created from the API Keys UI. Kept out of a human's
+# own key list implicitly by name alone today — nothing hides it, but nothing
+# a human does collides with this name either.
+MCP_SERVICE_KEY_NAME = "MCP (auto)"
+
 
 def generate_key() -> str:
     return f"{KEY_PREFIX}{secrets.token_urlsafe(KEY_BYTES)}"

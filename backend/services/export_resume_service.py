@@ -117,7 +117,7 @@ class ExportResumeService:
                 stripe_checkout_session_id,
             )
 
-    def mark_consumed(self, *, token_hash: str) -> None:
+    def mark_consumed(self, *, plaintext: str) -> None:
         """
         Best-effort bookkeeping only — NOT what gates a re-export. Once paid,
         usage_ledger_service.has_paid_for_session is what makes every later
@@ -127,4 +127,4 @@ class ExportResumeService:
         self.client.table("export_resume_tokens").update({
             "status": "consumed",
             "consumed_at": _now().isoformat(),
-        }).eq("token_hash", token_hash).eq("status", "paid").execute()
+        }).eq("token_hash", _hash(plaintext)).eq("status", "paid").execute()

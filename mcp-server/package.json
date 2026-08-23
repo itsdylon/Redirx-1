@@ -1,0 +1,32 @@
+{
+  "name": "@redirx/mcp-server",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Remote MCP gateway for RedirX — streamable HTTP, no stdio, no local binary. Thin wrapper over the existing Flask v1 API.",
+  "type": "module",
+  "engines": {
+    "node": ">=20.20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "dev": "tsx watch src/index.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@posthog/mcp": "^0.1.7",
+    "express": "^5.2.1",
+    "posthog-node": "^5.9.1",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}

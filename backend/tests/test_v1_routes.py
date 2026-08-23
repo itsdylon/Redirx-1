@@ -104,12 +104,10 @@ class TestUrlCleaning(unittest.TestCase):
 
 class TestDeepMatchAccess(unittest.TestCase):
     """
-    A key must not be a way around the checkout the browser requires.
-
-    The upload flow refuses a free account's Deep Match run (see
-    test_upload_guards); nothing downstream would charge for an API run
-    either, since usage is only metered for agency plans after a job
-    completes. So the refusal has to happen here, at the door.
+    Deep Match is free at full quality for every plan (Pricing V3) — a key
+    must not be more or less capable than the browser. The only gate left
+    at creation time is the free-run abuse ceiling, checked against the
+    account's own rolling-window usage, never against plan or per-job.
     """
 
     API_KEY = "rdx_" + "a" * 32
@@ -119,7 +117,7 @@ class TestDeepMatchAccess(unittest.TestCase):
         app.register_blueprint(v1_routes.v1_blueprint, url_prefix="/api/v1")
         return app.test_client()
 
-    def _post(self, plan, pipeline, session_id="session-1"):
+    def _post(self, plan, pipeline, session_id="session-1", usage=0):
         quota_db = Mock()
         quota_db.get_plan.return_value = plan
         session_db = Mock()
@@ -129,7 +127,10 @@ class TestDeepMatchAccess(unittest.TestCase):
             v1_routes, "UserQuotaDB", return_value=quota_db
         ), patch.object(
             v1_routes, "MigrationSessionDB", return_value=session_db
-        ):
+        ), patch.object(
+            v1_routes.entitlement_service, "UsageLedger"
+        ) as ledger_cls:
+            ledger_cls.return_value.usage_in_window.return_value = usage
             key_cls.return_value.resolve.return_value = "user-1"
             response = self._client().post(
                 "/api/v1/migrations",
@@ -140,28 +141,42 @@ class TestDeepMatchAccess(unittest.TestCase):
                 },
                 headers={"Authorization": f"Bearer {self.API_KEY}"},
             )
-        return response, session_db
+        return response, session_db, ledger_cls
 
-    def test_free_account_cannot_start_deep_match(self):
-        response, session_db = self._post("free", "content")
+    def test_free_account_can_start_deep_match_within_the_ceiling(self):
+        response, session_db, ledger_cls = self._post("free", "content", usage=0)
 
-        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.get_json()["pipeline"], "content")
+        session_db.create_session.assert_called_once()
+        # A successful run draws on the ceiling.
+        ledger_cls.return_value.record.assert_called_once()
+
+    def test_free_account_over_the_ceiling_is_refused(self):
+        from backend.services.entitlement_service import FREE_RUN_HARD_CAP
+
+        response, session_db, ledger_cls = self._post("free", "content", usage=FREE_RUN_HARD_CAP)
+
+        self.assertEqual(response.status_code, 429)
         error = response.get_json()["error"]
-        self.assertEqual(error["code"], "deep_match_requires_project_checkout")
+        self.assertEqual(error["code"], "free_run_ceiling_exceeded")
         self.assertEqual(error["next_action"], "pricing_checkout")
-        self.assertFalse(error["retryable"])
-        # Refused at the door: no billable job was ever created.
+        # Refused at the door: no billable job was ever created, and the
+        # refusal itself must not be recorded as a run.
         session_db.create_session.assert_not_called()
+        ledger_cls.return_value.record.assert_not_called()
 
     def test_free_account_can_still_run_quick_match(self):
-        response, session_db = self._post("free", "url_only")
+        response, session_db, _ = self._post("free", "url_only")
 
         self.assertEqual(response.status_code, 201)
         self.assertEqual(response.get_json()["pipeline"], "url_only")
         session_db.create_session.assert_called_once()
 
-    def test_agency_account_can_start_deep_match(self):
-        response, session_db = self._post("agency", "content")
+    def test_agency_account_has_no_ceiling(self):
+        from backend.services.entitlement_service import FREE_RUN_HARD_CAP
+
+        response, session_db, _ = self._post("agency", "content", usage=FREE_RUN_HARD_CAP + 10)
 
         self.assertEqual(response.status_code, 201)
         self.assertEqual(response.get_json()["pipeline"], "content")

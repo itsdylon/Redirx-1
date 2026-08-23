@@ -147,7 +147,9 @@ class UploadGuardTests(unittest.TestCase):
         self.assertEqual(payload["retryable"], False)
         quota_db.check_credits.assert_not_called()
 
-    def test_free_user_cannot_start_deep_match_from_upload(self):
+    def test_free_user_over_the_ceiling_cannot_start_deep_match_from_upload(self):
+        from backend.services.entitlement_service import FREE_RUN_HARD_CAP
+
         app = Flask(__name__)
         app.register_blueprint(pipeline_routes.pipeline_blueprint, url_prefix="/api")
         client = app.test_client()
@@ -158,7 +160,10 @@ class UploadGuardTests(unittest.TestCase):
         with patch("backend.services.auth_service.AuthService") as mock_auth_cls, patch(
             "backend.routes.pipeline_routes.UserQuotaDB",
             return_value=quota_db,
-        ):
+        ), patch.object(
+            pipeline_routes.entitlement_service, "UsageLedger"
+        ) as ledger_cls:
+            ledger_cls.return_value.usage_in_window.return_value = FREE_RUN_HARD_CAP
             mock_auth_cls.return_value.verify_token.return_value = SimpleNamespace(id="user-1")
 
             response = client.post(
@@ -172,12 +177,12 @@ class UploadGuardTests(unittest.TestCase):
                 content_type="multipart/form-data",
             )
 
-        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.status_code, 429)
         payload = response.get_json()
-        self.assertEqual(payload["code"], "deep_match_requires_project_checkout")
-        self.assertIn("quick match", payload["user_message"].lower())
+        self.assertEqual(payload["code"], "free_run_ceiling_exceeded")
+        self.assertEqual(payload["next_action"], "pricing_checkout")
 
-    def test_free_user_defaults_to_quick_match_and_can_repeat_runs(self):
+    def test_free_user_defaults_to_deep_match_and_can_repeat_runs_within_the_ceiling(self):
         app = Flask(__name__)
         app.register_blueprint(pipeline_routes.pipeline_blueprint, url_prefix="/api")
         client = app.test_client()
@@ -193,7 +198,10 @@ class UploadGuardTests(unittest.TestCase):
         with patch("backend.services.auth_service.AuthService") as mock_auth_cls, patch(
             "backend.routes.pipeline_routes.UserQuotaDB",
             return_value=quota_db,
-        ), patch("backend.routes.pipeline_routes.run_pipeline", run_pipeline):
+        ), patch("backend.routes.pipeline_routes.run_pipeline", run_pipeline), patch.object(
+            pipeline_routes.entitlement_service, "UsageLedger"
+        ) as ledger_cls:
+            ledger_cls.return_value.usage_in_window.return_value = 0
             mock_auth_cls.return_value.verify_token.return_value = SimpleNamespace(id="user-1")
 
             first = client.post(
@@ -217,7 +225,10 @@ class UploadGuardTests(unittest.TestCase):
 
         self.assertEqual(first.status_code, 200)
         self.assertEqual(second.status_code, 200)
-        self.assertEqual(first.get_json()["pipeline_type"], "url_only")
+        # Deep Match is the default now — Quick Match is an explicit opt-in,
+        # not what a free plan is forced into.
+        self.assertEqual(first.get_json()["pipeline_type"], "content")
+        self.assertEqual(ledger_cls.return_value.record.call_count, 2)
         self.assertEqual(second.get_json()["pipeline_type"], "url_only")
         self.assertEqual(run_pipeline.call_count, 2)
         first_kwargs = run_pipeline.call_args_list[0].kwargs

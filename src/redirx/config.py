@@ -41,15 +41,6 @@ class Config:
     STRIPE_PRICE_ID_AGENCY_OVERAGE: Optional[str] = os.getenv('STRIPE_PRICE_ID_AGENCY_OVERAGE')
     STRIPE_METER_EVENT_NAME: Optional[str] = os.getenv('STRIPE_METER_EVENT_NAME')
 
-    # MCP `export` tool's pay-and-resume checkout (agentic-pivot.md §3.5).
-    # A Stripe Price takes precedence when set; MCP_EXPORT_PRICE_CENTS is the
-    # ad-hoc price_data fallback so this works before a Price exists in Stripe.
-    STRIPE_PRICE_ID_MCP_EXPORT: Optional[str] = os.getenv('STRIPE_PRICE_ID_MCP_EXPORT')
-    MCP_EXPORT_PRICE_CENTS: int = int(os.getenv('MCP_EXPORT_PRICE_CENTS', '900'))
-    MCP_EXPORT_RESUME_TOKEN_TTL_SECONDS: int = int(
-        os.getenv('MCP_EXPORT_RESUME_TOKEN_TTL_SECONDS', str(24 * 3600))
-    )
-
     # Shared secret between the mcp-server (TypeScript) gateway and this
     # backend's /api/internal/* routes. Not a user credential — it identifies
     # the gateway process itself, the same way a service account key would.

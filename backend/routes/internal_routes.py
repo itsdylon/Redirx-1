@@ -3,35 +3,33 @@ Service-to-service routes for the mcp-server (TypeScript) gateway only.
 
 Not reachable by a user's own credential — a shared secret (`X-Internal-Secret`,
 `Config.MCP_INTERNAL_SECRET`) identifies the gateway process itself, the same
-way a service account key would. Nothing here is a "tool" an agent calls
-directly; the gateway calls these to turn a verified OAuth identity into a
-Redirx user_id + API key, and to run the export payment gate, then wraps the
-existing v1 endpoints for everything else. See
-docs/architecture/agentic-pivot.md §3.7 and §5 (Tasks 5, 11, 13).
+way a service account key would. See docs/architecture/agentic-pivot.md §3.7
+and §5 (Task 5): this is "the seam between the two languages," and nothing
+more. Everything else the gateway needs — starting a migration, checking
+status, exporting, and (Pricing V3) the export paywall itself — already
+exists on `/api/v1/*` and is API-key authed; the gateway calls those directly
+once it holds a key. Only identity resolution has no v1 equivalent, because
+v1 assumes you already have a Redirx API key, and turning a verified OAuth
+token into one is exactly the step that happens before that's true.
 
-Deliberately does not duplicate `require_api_key` or `require_auth`: those
-authenticate a *user*; this authenticates the *gateway*, which is then
-trusted to say which user it resolved on the gateway's own authority (its
-AuthorizationServerAdapter already verified the OAuth token before calling
-here). That trust boundary is why this blueprint must never be reachable from
-the public internet without the shared secret — it is not plan-gated or
-rate-limited per user the way v1 is.
+Deliberately does not duplicate any entitlement/quota logic. The export
+paywall now lives entirely in `backend/services/entitlement_service.py`,
+called from `v1_routes.export_migration` — the MCP `export` tool gets that
+gate for free by calling v1 like any other API-key holder, so there was
+nothing left for this file to reimplement (see the mcp-server's
+`payments/mpp.ts` for how a v1 402 becomes an MPP challenge).
 """
 from __future__ import annotations
 
 import logging
 from functools import wraps
-from typing import Any
 
 from flask import Blueprint, jsonify, request
 
 from backend.services.api_key_service import ApiKeyService
-from backend.services.export_resume_service import ExportResumeService
 from backend.services.gsc_service import GSCService
-from backend.services.stripe_service import StripeService
-from backend.services.usage_ledger_service import UsageLedgerService
 from src.redirx.config import Config
-from src.redirx.database import MigrationSessionDB, SupabaseClient, UserQuotaDB
+from src.redirx.database import SupabaseClient, UserQuotaDB
 
 logger = logging.getLogger(__name__)
 
@@ -55,18 +53,6 @@ def require_internal_secret(f):
 
     return decorated
 
-
-def _owns_session(user_id: str, session_id: str) -> bool:
-    try:
-        session = MigrationSessionDB().get_session(session_id)
-    except Exception:
-        return False
-    return bool(session) and str(session.get("user_id")) == str(user_id)
-
-
-# ---------------------------------------------------------------------------
-# Identity: verified OAuth subject -> Redirx user_id + API key
-# ---------------------------------------------------------------------------
 
 @internal_blueprint.route("/mcp/resolve", methods=["POST"])
 @require_internal_secret
@@ -134,107 +120,3 @@ def resolve_identity():
         "plan": plan,
         "gsc_connected": gsc_connected,
     }), 200
-
-
-# ---------------------------------------------------------------------------
-# Export quota + payment (MPP -32042 flow lives in the gateway; this is the
-# state the gateway checks and mutates)
-# ---------------------------------------------------------------------------
-
-@internal_blueprint.route("/mcp/export/quota", methods=["POST"])
-@require_internal_secret
-def export_quota():
-    body = request.get_json(silent=True) or {}
-    user_id = str(body.get("user_id") or "").strip()
-    session_id = str(body.get("session_id") or "").strip()
-    if not user_id or not session_id:
-        return _error("missing_fields", "'user_id' and 'session_id' are required.", 400)
-    if not _owns_session(user_id, session_id):
-        return _error("not_found", "No migration with that id.", 404)
-
-    plan = UserQuotaDB().get_plan(user_id)
-    allowance = UsageLedgerService().check_export_allowance(
-        user_id=user_id, plan=plan, session_id=session_id
-    )
-    return jsonify(allowance), 200
-
-
-@internal_blueprint.route("/mcp/export/checkout", methods=["POST"])
-@require_internal_secret
-def export_checkout():
-    body = request.get_json(silent=True) or {}
-    user_id = str(body.get("user_id") or "").strip()
-    email = str(body.get("email") or "").strip()
-    session_id = str(body.get("session_id") or "").strip()
-    success_url = str(body.get("success_url") or "").strip()
-    cancel_url = str(body.get("cancel_url") or "").strip()
-    if not all([user_id, email, session_id, success_url, cancel_url]):
-        return _error("missing_fields", "user_id, email, session_id, success_url, cancel_url are required.", 400)
-    if not _owns_session(user_id, session_id):
-        return _error("not_found", "No migration with that id.", 404)
-
-    try:
-        checkout_url, checkout_session_id = StripeService().create_mcp_export_checkout_session(
-            user_id=user_id,
-            email=email,
-            session_id=session_id,
-            success_url=success_url,
-            cancel_url=cancel_url,
-        )
-    except ValueError as exc:
-        return _error("checkout_failed", str(exc), 400)
-    except Exception:
-        logger.exception("mcp export checkout failed for session %s", session_id)
-        return _error("checkout_failed", "Could not start checkout.", 502)
-
-    resume_token = ExportResumeService().create_pending(
-        user_id=user_id,
-        session_id=session_id,
-        stripe_checkout_session_id=checkout_session_id,
-        amount_cents=Config.MCP_EXPORT_PRICE_CENTS,
-    )
-
-    return jsonify({
-        "checkout_url": checkout_url,
-        "resume_token": resume_token,
-        "expires_in_seconds": Config.MCP_EXPORT_RESUME_TOKEN_TTL_SECONDS,
-        "amount_cents": Config.MCP_EXPORT_PRICE_CENTS,
-        "currency": "usd",
-    }), 201
-
-
-@internal_blueprint.route("/mcp/export/resume", methods=["POST"])
-@require_internal_secret
-def export_resume():
-    body = request.get_json(silent=True) or {}
-    user_id = str(body.get("user_id") or "").strip()
-    resume_token = str(body.get("resume_token") or "").strip()
-    if not user_id or not resume_token:
-        return _error("missing_fields", "'user_id' and 'resume_token' are required.", 400)
-
-    service = ExportResumeService()
-    row = service.resolve(resume_token)
-    if not row or str(row.get("user_id")) != user_id:
-        return jsonify({"status": "invalid"}), 200
-
-    status = row.get("status")
-    if status == "pending":
-        if service.is_expired(row):
-            return jsonify({"status": "expired"}), 200
-        return jsonify({"status": "pending"}), 200
-
-    if status in ("paid", "consumed"):
-        if status == "paid":
-            # First successful resume after payment: charge the ledger once,
-            # then mark_consumed so every later resume of the same token is a
-            # no-op read rather than a second ledger row.
-            UsageLedgerService().record(
-                user_id=user_id,
-                kind="export",
-                session_id=row.get("session_id"),
-                metadata={"stripe_checkout_session_id": row.get("stripe_checkout_session_id")},
-            )
-            service.mark_consumed(plaintext=resume_token)
-        return jsonify({"status": "paid", "session_id": row.get("session_id")}), 200
-
-    return jsonify({"status": "expired"}), 200

@@ -59,7 +59,7 @@ const TOOLS: ToolCard[] = [
   {
     name: 'discover',
     copy:
-      "Enumerates a site's page URLs from a root domain — sitemap first, then the CMS's own API (WordPress, Shopify), then a crawl. Seconds, not minutes. Run it once for the old site, once for the new.",
+      "Enumerates a site’s page URLs from a root domain — sitemap first, then the CMS’s own API (WordPress, Shopify), then a crawl. Seconds, not minutes. Run it once for the old site, once for the new.",
     paid: false,
   },
   {
@@ -96,7 +96,7 @@ const SEQUENCE: SequenceStep[] = [
       <>
         <code>discover</code> twice — once with <code>side: "old"</code>, once with{' '}
         <code>side: "new"</code>. Its <code>urls</code> output is exactly{' '}
-        <code>deep_match</code>'s input.
+        <code>deep_match</code>’s input.
       </>
     ),
   },
@@ -181,9 +181,9 @@ const FAQ: FaqItem[] = [
     question: 'Is the free matching a limited version of the real thing?',
     answer: (
       <>
-        It's the same engine, the same pipeline, on your full URL set. Nothing about match quality
-        varies by plan. What's limited is how many Deep Match runs a free account can start in a
-        rolling 24-hour window — and that returns a clear "retry later," not a degraded result.
+        It’s the same engine, the same pipeline, on your full URL set. Nothing about match quality
+        varies by plan. What’s limited is how many Deep Match runs a free account can start in a
+        rolling 24-hour window — and that returns a clear “retry later,” not a degraded result.
       </>
     ),
   },
@@ -191,7 +191,7 @@ const FAQ: FaqItem[] = [
     question: 'Do I need to install anything?',
     answer: (
       <>
-        No. It's a remote server over Streamable HTTP — no stdio wrapper, no npx package, no local
+        No. It’s a remote server over Streamable HTTP — no stdio wrapper, no npx package, no local
         binary. You add a URL and a bearer token.
       </>
     ),
@@ -424,7 +424,7 @@ export function McpLandingPage() {
                 Four tools. Only one of them is paid.
               </h2>
               <p className="mcp-lead">
-                Matching quality is never gated. Paying doesn't change what was matched — it unlocks
+                Matching quality is never gated. Paying doesn’t change what was matched — it unlocks
                 the file you install.
               </p>
             </div>
@@ -498,7 +498,7 @@ export function McpLandingPage() {
                 Two steps. Nothing to install.
               </h2>
               <p className="mcp-lead">
-                It's a remote server over Streamable HTTP — no stdio wrapper, no npx, no local
+                It’s a remote server over Streamable HTTP — no stdio wrapper, no npx, no local
                 binary. Your client connects to a URL.
               </p>
             </div>
@@ -512,7 +512,7 @@ export function McpLandingPage() {
                   <Link to={ROUTES.apiKeys} className="mcp-link">
                     redirx.dev/api-keys
                   </Link>
-                  . It's shown once, starts with <code>rdx_</code>, and only a hash is stored — copy
+                  . It’s shown once, starts with <code>rdx_</code>, and only a hash is stored — copy
                   it when you create it.
                 </p>
               </div>
@@ -529,7 +529,7 @@ export function McpLandingPage() {
                 <p className="mcp-meta mcp-meta--caption">
                   Any MCP client that speaks Streamable HTTP works the same way — point it at the
                   URL and set a static <code>Authorization: Bearer</code> header. Check your
-                  client's docs for how it sets fixed headers.
+                  client’s docs for how it sets fixed headers.
                 </p>
                 <p className="mcp-meta">
                   One-click OAuth sign-in is coming; today you connect with an API key.
@@ -545,7 +545,7 @@ export function McpLandingPage() {
             <div className="mcp-section-head" data-reveal>
               <span className="mcp-eyebrow">The model</span>
               <h2 className="mcp-h2 mcp-h2--wide" id="model-heading">
-                Gating the match quality made sense for humans. It doesn't for agents.
+                Gating the match quality made sense for humans. It doesn’t for agents.
               </h2>
             </div>
 
@@ -554,18 +554,18 @@ export function McpLandingPage() {
                 <p className="mcp-body">
                   Most tools cripple the free tier and hope you upgrade to find out whether it
                   worked. That leverage disappears when the customer is an agent: a degraded run
-                  isn't a teaser, it's just bad data your agent will reason from and act on.
+                  isn’t a teaser, it’s just bad data your agent will reason from and act on.
                 </p>
                 <p className="mcp-body">
                   So Redirx inverted it. <code>deep_match</code> runs the same engine, on your full
                   URL set, at full quality, regardless of plan. <code>preview</code> shows you the
-                  weak matches on purpose. You decide to pay once you've already seen exactly what
-                  you'd be paying for.
+                  weak matches on purpose. You decide to pay once you’ve already seen exactly what
+                  you’d be paying for.
                 </p>
                 <p className="mcp-body">
                   The one thing we ration is volume, not quality: free accounts get a limited number
                   of Deep Match runs in a rolling 24-hour window. Hitting that returns a clear
-                  "retry later," never a worse result.
+                  “retry later,” never a worse result.
                 </p>
               </div>
 
@@ -626,8 +626,8 @@ export function McpLandingPage() {
                   autonomous agent-holds-a-card flow.
                 </p>
                 <p className="mcp-body">
-                  After payment, the agent just calls <code>export</code> again. There's no "confirm
-                  payment" step to get wrong — the tool re-checks entitlement on every single call,
+                  After payment, the agent just calls <code>export</code> again. There’s no “confirm
+                  payment” step to get wrong — the tool re-checks entitlement on every single call,
                   so retrying with the same arguments always works.
                 </p>
               </div>
@@ -699,7 +699,7 @@ export function McpLandingPage() {
             </div>
             <p className="mcp-meta mcp-meta--caption" data-reveal style={revealDelay(3)}>
               Built for the way agents actually work: start-then-poll, structured errors, and no
-              step an agent can't retry.
+              step an agent can’t retry.
             </p>
           </div>
         </section>

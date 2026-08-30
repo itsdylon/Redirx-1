@@ -354,6 +354,10 @@ export function McpLandingPage() {
 
   return (
     <div className="mcp-landing" ref={rootRef}>
+      <a href="#mcp-main" className="mcp-skip">
+        Skip to content
+      </a>
+
       <header className="mcp-masthead">
         <div className="mcp-container mcp-masthead__inner">
           <Link to={ROUTES.mcpPreview} className="mcp-wordmark">
@@ -362,7 +366,7 @@ export function McpLandingPage() {
         </div>
       </header>
 
-      <main>
+      <main id="mcp-main">
         {/* ---------- Hero ---------- */}
         <section className="mcp-hero">
           <div className="mcp-container mcp-hero__grid">
@@ -392,7 +396,7 @@ export function McpLandingPage() {
             </div>
 
             <figure className="mcp-card mcp-card--artifact" data-reveal style={revealDelay(2)}>
-              <div className="mcp-transcript">
+              <div className="mcp-transcript" translate="no">
                 {HERO_TRANSCRIPT.map((entry) => (
                   <div key={entry.call}>
                     <p className="mcp-transcript__call">{entry.call}</p>
@@ -434,7 +438,9 @@ export function McpLandingPage() {
                   style={revealDelay(index)}
                 >
                   <div className="mcp-tool__head">
-                    <h3 className="mcp-tool__name">{tool.name}</h3>
+                    <h3 className="mcp-tool__name" translate="no">
+                      {tool.name}
+                    </h3>
                     <span className={`mcp-chip ${tool.paid ? 'mcp-chip--paid' : 'mcp-chip--free'}`}>
                       {tool.paid ? 'Paid' : 'Free'}
                     </span>
@@ -468,7 +474,7 @@ export function McpLandingPage() {
                   </span>
                   <div className="mcp-seq__body">
                     <h3 className="mcp-h3">{step.title}</h3>
-                    <div className="mcp-seq__calls">
+                    <div className="mcp-seq__calls" translate="no">
                       {step.calls.map((call) => (
                         <code key={call} className="mcp-seq__call">
                           {call}
@@ -515,7 +521,7 @@ export function McpLandingPage() {
                 <p className="mcp-step-label">Step 2</p>
                 <h3 className="mcp-h3">Add the server to your client</h3>
                 <div className="mcp-terminal">
-                  <pre className="mcp-terminal__code">
+                  <pre className="mcp-terminal__code" translate="no">
                     <code ref={connectCodeRef}>{CONNECT_COMMAND}</code>
                   </pre>
                   <CopyCommandButton value={CONNECT_COMMAND} codeRef={connectCodeRef} />
@@ -564,35 +570,37 @@ export function McpLandingPage() {
               </div>
 
               <div className="mcp-card" data-reveal style={revealDelay(1)}>
-                <table className="mcp-compare">
-                  <caption>Where the free line usually falls, and where it falls here.</caption>
-                  <thead>
-                    <tr>
-                      <th scope="col">
-                        <span className="mcp-sr-only">Capability</span>
-                      </th>
-                      <th scope="col" className="mcp-compare__col">
-                        Usually free
-                      </th>
-                      <th scope="col" className="mcp-compare__col">
-                        Free here
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {COMPARE_ROWS.map((row) => (
-                      <tr key={row.label}>
-                        <th scope="row">{row.label}</th>
-                        <td className="mcp-compare__col">
-                          <Mark included={row.usually} />
-                        </td>
-                        <td className="mcp-compare__col">
-                          <Mark included={row.here} />
-                        </td>
+                <div className="mcp-compare-scroll">
+                  <table className="mcp-compare">
+                    <caption>Where the free line usually falls, and where it falls here.</caption>
+                    <thead>
+                      <tr>
+                        <th scope="col">
+                          <span className="mcp-sr-only">Capability</span>
+                        </th>
+                        <th scope="col" className="mcp-compare__col">
+                          Usually free
+                        </th>
+                        <th scope="col" className="mcp-compare__col">
+                          Free here
+                        </th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {COMPARE_ROWS.map((row) => (
+                        <tr key={row.label}>
+                          <th scope="row">{row.label}</th>
+                          <td className="mcp-compare__col">
+                            <Mark included={row.usually} />
+                          </td>
+                          <td className="mcp-compare__col">
+                            <Mark included={row.here} />
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </div>
           </div>
@@ -626,7 +634,7 @@ export function McpLandingPage() {
 
               <div className="mcp-card mcp-panels">
                 <div className="mcp-panel">
-                  <pre className="mcp-error-block">
+                  <pre className="mcp-error-block" translate="no">
                     <code>
                       {'{\n  "error": {\n    '}
                       <span className="mcp-key">"code"</span>

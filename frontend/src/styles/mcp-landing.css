@@ -56,6 +56,15 @@
   line-height: 1.6;
   min-height: 100dvh;
   -webkit-font-smoothing: antialiased;
+  /* This page is light-only by design. The app sets a `.dark` class variant on
+     the root; declaring the scheme here keeps UA-painted chrome (scrollbars,
+     form controls, the selection colour) light to match the surface. */
+  color-scheme: light;
+}
+
+/* Anchor jumps land with breathing room instead of flush against the top. */
+.mcp-landing [id] {
+  scroll-margin-top: 24px;
 }
 
 /* ============================================================
@@ -66,7 +75,8 @@
   width: 100%;
   max-width: 1120px;
   margin-inline: auto;
-  padding-inline: 24px;
+  /* full-bleed bands run edge to edge, so honour notch insets */
+  padding-inline: max(24px, env(safe-area-inset-left)) max(24px, env(safe-area-inset-right));
 }
 
 .mcp-landing .mcp-section {
@@ -129,6 +139,7 @@
   letter-spacing: -0.01em;
   color: var(--mcp-ink-900);
   margin: 0;
+  text-wrap: balance;
 }
 
 .mcp-landing .mcp-lead {
@@ -254,11 +265,21 @@
    Buttons and links: hover / focus-visible / active / disabled
    ============================================================ */
 
+/* Kill the 300ms double-tap-zoom delay and the default grey flash on every
+   control, rather than leaving either to the platform default. */
+.mcp-landing a,
+.mcp-landing button,
+.mcp-landing summary {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: rgba(11, 110, 119, 0.12);
+}
+
 .mcp-landing .mcp-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
+  min-height: 44px;
   border-radius: var(--mcp-r-md);
   font-family: var(--mcp-font-body);
   font-size: 0.9375rem;
@@ -362,6 +383,12 @@
 }
 
 .mcp-landing .mcp-wordmark {
+  display: inline-flex;
+  align-items: center;
+  /* the masthead is 68px tall; the padding buys a 44px hit target without
+     moving the wordmark */
+  min-height: 44px;
+  padding-inline: 2px;
   font-family: var(--mcp-font-heading);
   font-weight: 600;
   font-size: 1.0625rem;
@@ -396,14 +423,14 @@
 
 .mcp-landing .mcp-hero__grid {
   display: grid;
-  grid-template-columns: 1fr;
+  grid-template-columns: minmax(0, 1fr);
   gap: 48px;
   align-items: start;
 }
 
 @media (min-width: 1024px) {
   .mcp-landing .mcp-hero__grid {
-    grid-template-columns: 52fr 48fr;
+    grid-template-columns: minmax(0, 52fr) minmax(0, 48fr);
     gap: 64px;
     align-items: center;
   }
@@ -492,7 +519,7 @@
 
 .mcp-landing .mcp-tools {
   display: grid;
-  grid-template-columns: 1fr;
+  grid-template-columns: minmax(0, 1fr);
   gap: 20px;
 }
 
@@ -625,15 +652,19 @@
    Connect band + terminal
    ============================================================ */
 
+/* minmax(0, …) rather than a bare fr: an `fr` track floors at the item's
+   min-content width, and this item contains a `white-space: pre` terminal
+   line. Without the floor removed the track grew to the width of the longest
+   command and pushed the whole page into a horizontal scroll on mobile. */
 .mcp-landing .mcp-connect__steps {
   display: grid;
-  grid-template-columns: 1fr;
+  grid-template-columns: minmax(0, 1fr);
   gap: 40px;
 }
 
 @media (min-width: 900px) {
   .mcp-landing .mcp-connect__steps {
-    grid-template-columns: 34fr 66fr;
+    grid-template-columns: minmax(0, 34fr) minmax(0, 66fr);
     gap: 48px;
     align-items: start;
   }
@@ -693,6 +724,7 @@
   font-size: 0.8125rem;
   font-weight: 500;
   padding: 8px 14px;
+  min-height: 44px;
   white-space: nowrap;
   cursor: pointer;
   transition:
@@ -703,7 +735,7 @@
 @media (min-width: 640px) {
   .mcp-landing .mcp-copy {
     position: absolute;
-    top: 20px;
+    top: 16px;
     right: 20px;
     margin-top: 0;
   }
@@ -742,7 +774,7 @@
 
 @media (min-width: 900px) {
   .mcp-landing .mcp-model {
-    grid-template-columns: 52fr 48fr;
+    grid-template-columns: minmax(0, 52fr) minmax(0, 48fr);
     gap: 56px;
   }
 }
@@ -751,8 +783,17 @@
    Comparison table
    ============================================================ */
 
+/* The row labels plus two nowrap mark columns have a min-content width wider
+   than a narrow phone. Let the table scroll inside its own frame instead of
+   pushing the page sideways. */
+.mcp-landing .mcp-compare-scroll {
+  overflow-x: auto;
+  border-radius: inherit;
+}
+
 .mcp-landing .mcp-compare {
   width: 100%;
+  min-width: 320px;
   border-collapse: collapse;
   text-align: left;
 }
@@ -842,12 +883,12 @@
 
 .mcp-landing .mcp-panels {
   display: grid;
-  grid-template-columns: 1fr;
+  grid-template-columns: minmax(0, 1fr);
 }
 
 @media (min-width: 900px) {
   .mcp-landing .mcp-panels {
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   }
 }
 
@@ -940,6 +981,7 @@
   letter-spacing: -0.01em;
   color: var(--mcp-ink-900);
   margin: 0 0 8px;
+  text-wrap: balance;
 }
 
 .mcp-landing .mcp-faq__a {
@@ -947,6 +989,7 @@
   color: var(--mcp-ink-700);
   font-size: 1rem;
   line-height: 1.6;
+  text-wrap: pretty;
 }
 
 /* ============================================================
@@ -989,6 +1032,36 @@
   color: inherit;
   background: none;
   padding: 0;
+}
+
+/* ============================================================
+   Skip link — off-screen until focused, then pinned top-left.
+   Uses the existing accent-600/white pair (5.98:1), no new colour.
+   ============================================================ */
+
+.mcp-landing .mcp-skip {
+  position: fixed;
+  left: 8px;
+  top: 8px;
+  z-index: 20;
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 10px 16px;
+  border-radius: var(--mcp-r-md);
+  background-color: var(--mcp-accent-600);
+  color: #ffffff;
+  font-family: var(--mcp-font-body);
+  font-size: 0.875rem;
+  font-weight: 500;
+  text-decoration: none;
+  transform: translateY(calc(-100% - 16px));
+}
+
+.mcp-landing .mcp-skip:focus-visible {
+  transform: none;
+  outline: 2px solid var(--mcp-ink-900);
+  outline-offset: 2px;
 }
 
 .mcp-landing .mcp-sr-only {

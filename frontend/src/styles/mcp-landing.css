@@ -543,12 +543,13 @@
   background-color: var(--mcp-accent-100);
 }
 
+/* the line runs between the first and last step numbers, not past them */
 .mcp-landing .mcp-seq__step:first-child::before {
-  top: 28px;
+  top: 46px;
 }
 
 .mcp-landing .mcp-seq__step:last-child::before {
-  bottom: calc(100% - 28px);
+  bottom: calc(100% - 46px);
 }
 
 .mcp-landing .mcp-seq__num {

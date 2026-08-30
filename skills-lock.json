@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "skills": {
+    "apply-aesthetic": {
+      "source": "plugin87/ux-ui-agent-skills",
+      "sourceType": "github",
+      "skillPath": ".claude/skills/apply-aesthetic/SKILL.md",
+      "computedHash": "13cdf31405d57c13afdd80572564cdb0438c53edfcc10106419224bd82743d94"
+    },
+    "design-taste-frontend": {
+      "source": "leonxlnx/taste-skill",
+      "sourceType": "github",
+      "skillPath": "skills/taste-skill/SKILL.md",
+      "computedHash": "6d838b246d0e35d0b53f4f23f98ba7a1dd561937e64f7d0c7553b0928e376c3e"
+    },
+    "image-to-code": {
+      "source": "plugin87/ux-ui-agent-skills",
+      "sourceType": "github",
+      "skillPath": ".claude/skills/image-to-code/SKILL.md",
+      "computedHash": "d796c217f5df15ffb2cd339b73e33bd499929ed1085fd2dbf02ebd28088a895b"
+    },
+    "web-design-guidelines": {
+      "source": "vercel-labs/agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/web-design-guidelines/SKILL.md",
+      "computedHash": "f3bc47f890f42a44db1007ab390709ec368e4b8c089baee6b0007182236ac474"
+    }
+  }
+}

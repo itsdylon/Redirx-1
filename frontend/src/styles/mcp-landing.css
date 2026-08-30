@@ -271,7 +271,8 @@
 .mcp-landing button,
 .mcp-landing summary {
   touch-action: manipulation;
-  -webkit-tap-highlight-color: rgba(11, 110, 119, 0.12);
+  /* derived from the accent token, so no colour outside §2 is introduced */
+  -webkit-tap-highlight-color: color-mix(in srgb, var(--mcp-accent-600) 12%, transparent);
 }
 
 .mcp-landing .mcp-btn {

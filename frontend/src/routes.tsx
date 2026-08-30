@@ -16,6 +16,8 @@ export const ROUTES = {
   demo: '/demo',
   watch: '/watch/:watchId',
   apiKeys: '/api-keys',
+  // Isolated marketing draft for the MCP server. Deliberately not in any nav.
+  mcpPreview: '/mcp-preview',
 } as const;
 
 export function getAuthedHomeRoute(plan?: string): string {

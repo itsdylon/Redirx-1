@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { CSSProperties, ReactNode } from 'react';
+import type { CSSProperties, ReactNode, RefObject } from 'react';
 import { Link } from 'react-router-dom';
 import { Check, Copy, Lock } from 'lucide-react';
 import { ROUTES } from '../routes';
@@ -220,7 +220,7 @@ function revealDelay(index: number): CSSProperties {
  * without IntersectionObserver. Content is therefore always in the DOM and
  * always readable, script or no script.
  */
-function useEntranceReveals(rootRef: React.RefObject<HTMLDivElement | null>) {
+function useEntranceReveals(rootRef: RefObject<HTMLDivElement>) {
   useEffect(() => {
     const root = rootRef.current;
     if (!root) return;
@@ -233,24 +233,58 @@ function useEntranceReveals(rootRef: React.RefObject<HTMLDivElement | null>) {
       (entries) => {
         for (const entry of entries) {
           if (!entry.isIntersecting) continue;
+          // 20% of the element, per the brief. An element taller than the
+          // viewport can never reach that ratio (the sequence card on a
+          // phone is several screens tall), so 20% of the viewport counts
+          // too. Without this the sequence stays invisible on small screens.
+          const enough =
+            entry.intersectionRatio >= 0.2 ||
+            entry.intersectionRect.height >= window.innerHeight * 0.2;
+          if (!enough) continue;
           entry.target.classList.add('is-in');
           observer.unobserve(entry.target);
         }
       },
-      { threshold: 0.2 }
+      { threshold: [0, 0.2] }
     );
 
-    root.querySelectorAll('[data-reveal]').forEach((el) => observer.observe(el));
+    const targets = Array.from(root.querySelectorAll('[data-reveal]'));
+    targets.forEach((el) => observer.observe(el));
+
+    // Failsafe. If the observer has reported nothing at all by the time the
+    // page has settled, it is not working (throttled, or an environment that
+    // stubs it out) and the entrance would leave the page blank. Drop the
+    // animation rather than the content.
+    const failsafe = window.setTimeout(() => {
+      if (targets.some((el) => el.classList.contains('is-in'))) return;
+      observer.disconnect();
+      root.classList.remove('js-motion');
+    }, 1500);
 
     return () => {
+      window.clearTimeout(failsafe);
       observer.disconnect();
       root.classList.remove('js-motion');
     };
   }, [rootRef]);
 }
 
-function CopyCommandButton({ value }: { value: string }) {
-  const [copied, setCopied] = useState(false);
+type CopyState = 'idle' | 'copied' | 'failed';
+
+const COPY_LABEL: Record<CopyState, string> = {
+  idle: 'Copy',
+  copied: 'Copied',
+  failed: 'Select and copy',
+};
+
+const COPY_ANNOUNCEMENT: Record<CopyState, string> = {
+  idle: '',
+  copied: 'Connect command copied to clipboard.',
+  failed: 'Could not reach the clipboard. The command is selected, copy it manually.',
+};
+
+function CopyCommandButton({ value, codeRef }: { value: string; codeRef: RefObject<HTMLElement> }) {
+  const [state, setState] = useState<CopyState>('idle');
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -259,16 +293,31 @@ function CopyCommandButton({ value }: { value: string }) {
     };
   }, []);
 
+  const resetLater = useCallback(() => {
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => setState('idle'), 3000);
+  }, []);
+
   const handleCopy = useCallback(async () => {
     try {
       await navigator.clipboard.writeText(value);
-      setCopied(true);
-      if (timer.current) clearTimeout(timer.current);
-      timer.current = setTimeout(() => setCopied(false), 2400);
+      setState('copied');
     } catch {
-      setCopied(false);
+      // Clipboard access can be refused (permissions, an unfocused document,
+      // an insecure origin). Say so and select the text so the keyboard
+      // shortcut still works, rather than failing silently.
+      setState('failed');
+      const node = codeRef.current;
+      if (node && window.getSelection) {
+        const range = document.createRange();
+        range.selectNodeContents(node);
+        const selection = window.getSelection();
+        selection?.removeAllRanges();
+        selection?.addRange(range);
+      }
     }
-  }, [value]);
+    resetLater();
+  }, [value, codeRef, resetLater]);
 
   return (
     <button
@@ -277,10 +326,14 @@ function CopyCommandButton({ value }: { value: string }) {
       onClick={handleCopy}
       aria-label="Copy the connect command to the clipboard"
     >
-      {copied ? <Check size={14} aria-hidden="true" /> : <Copy size={14} aria-hidden="true" />}
-      <span aria-hidden="true">{copied ? 'Copied' : 'Copy'}</span>
+      {state === 'copied' ? (
+        <Check size={14} aria-hidden="true" />
+      ) : (
+        <Copy size={14} aria-hidden="true" />
+      )}
+      <span aria-hidden="true">{COPY_LABEL[state]}</span>
       <span className="mcp-sr-only" role="status" aria-live="polite">
-        {copied ? 'Command copied to clipboard' : ''}
+        {COPY_ANNOUNCEMENT[state]}
       </span>
     </button>
   );
@@ -288,6 +341,7 @@ function CopyCommandButton({ value }: { value: string }) {
 
 export function McpLandingPage() {
   const rootRef = useRef<HTMLDivElement>(null);
+  const connectCodeRef = useRef<HTMLElement>(null);
   useEntranceReveals(rootRef);
 
   useEffect(() => {
@@ -447,7 +501,7 @@ export function McpLandingPage() {
               <div data-reveal>
                 <p className="mcp-step-label">Step 1</p>
                 <h3 className="mcp-h3">Get an API key</h3>
-                <p className="mcp-body" style={{ marginTop: 10 }}>
+                <p className="mcp-body mcp-body--indent">
                   Sign in and create a key at{' '}
                   <Link to={ROUTES.apiKeys} className="mcp-link">
                     redirx.dev/api-keys
@@ -460,18 +514,18 @@ export function McpLandingPage() {
               <div data-reveal style={revealDelay(1)}>
                 <p className="mcp-step-label">Step 2</p>
                 <h3 className="mcp-h3">Add the server to your client</h3>
-                <div className="mcp-terminal" style={{ marginTop: 16 }}>
+                <div className="mcp-terminal">
                   <pre className="mcp-terminal__code">
-                    <code>{CONNECT_COMMAND}</code>
+                    <code ref={connectCodeRef}>{CONNECT_COMMAND}</code>
                   </pre>
-                  <CopyCommandButton value={CONNECT_COMMAND} />
+                  <CopyCommandButton value={CONNECT_COMMAND} codeRef={connectCodeRef} />
                 </div>
-                <p className="mcp-meta" style={{ marginTop: 14, maxWidth: '68ch' }}>
+                <p className="mcp-meta mcp-meta--caption">
                   Any MCP client that speaks Streamable HTTP works the same way — point it at the
                   URL and set a static <code>Authorization: Bearer</code> header. Check your
                   client's docs for how it sets fixed headers.
                 </p>
-                <p className="mcp-meta" style={{ marginTop: 10 }}>
+                <p className="mcp-meta">
                   One-click OAuth sign-in is coming; today you connect with an API key.
                 </p>
               </div>
@@ -489,16 +543,8 @@ export function McpLandingPage() {
               </h2>
             </div>
 
-            <div
-              style={{
-                display: 'grid',
-                gap: 48,
-                gridTemplateColumns: 'minmax(0, 1fr)',
-                alignItems: 'start',
-              }}
-              className="mcp-model__grid"
-            >
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }} data-reveal>
+            <div className="mcp-model">
+              <div className="mcp-prose" data-reveal>
                 <p className="mcp-body">
                   Most tools cripple the free tier and hope you upgrade to find out whether it
                   worked. That leverage disappears when the customer is an agent: a degraded run
@@ -562,11 +608,8 @@ export function McpLandingPage() {
               </h2>
             </div>
 
-            <div
-              style={{ display: 'flex', flexDirection: 'column', gap: 32 }}
-              data-reveal
-            >
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+            <div className="mcp-payment" data-reveal>
+              <div className="mcp-prose">
                 <p className="mcp-body">
                   When <code>export</code> needs payment, it returns a structured Payment Required
                   response — MPP, JSON-RPC error <code>-32042</code> — carrying a checkout URL. That
@@ -613,7 +656,7 @@ export function McpLandingPage() {
         {/* ---------- FAQ ---------- */}
         <section className="mcp-section" aria-labelledby="faq-heading">
           <div className="mcp-container mcp-faq">
-            <h2 className="mcp-h2" id="faq-heading" style={{ marginBottom: 8 }} data-reveal>
+            <h2 className="mcp-h2 mcp-faq__heading" id="faq-heading" data-reveal>
               Questions worth asking first.
             </h2>
             <div className="mcp-faq__list">
@@ -646,7 +689,7 @@ export function McpLandingPage() {
                 Get an API key
               </Link>
             </div>
-            <p className="mcp-meta" style={{ maxWidth: '70ch' }} data-reveal style={revealDelay(3)}>
+            <p className="mcp-meta mcp-meta--caption" data-reveal style={revealDelay(3)}>
               Built for the way agents actually work: start-then-poll, structured errors, and no
               step an agent can't retry.
             </p>

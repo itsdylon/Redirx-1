@@ -156,6 +156,16 @@
   color: var(--mcp-ink-900);
 }
 
+.mcp-landing .mcp-body--indent {
+  margin-top: 10px;
+}
+
+.mcp-landing .mcp-prose {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
 .mcp-landing .mcp-eyebrow {
   display: block;
   font-size: 0.8125rem;
@@ -172,6 +182,18 @@
   line-height: 1.5;
   color: var(--mcp-ink-500);
   margin: 0;
+}
+
+.mcp-landing .mcp-meta--caption {
+  max-width: 68ch;
+}
+
+.mcp-landing .mcp-terminal + .mcp-meta {
+  margin-top: 14px;
+}
+
+.mcp-landing .mcp-meta + .mcp-meta {
+  margin-top: 12px;
 }
 
 .mcp-landing .mcp-mono {
@@ -628,6 +650,7 @@
 
 .mcp-landing .mcp-terminal {
   position: relative;
+  margin-top: 16px;
   background-color: var(--mcp-ink-900);
   border-radius: var(--mcp-r-lg);
   padding: 22px 22px 22px;
@@ -651,8 +674,9 @@
     padding: 24px 28px;
   }
 
+  /* clearance for the absolutely-positioned copy button, at its widest label */
   .mcp-landing .mcp-terminal__code {
-    padding-right: 108px;
+    padding-right: 168px;
   }
 }
 
@@ -669,6 +693,7 @@
   font-size: 0.8125rem;
   font-weight: 500;
   padding: 8px 14px;
+  white-space: nowrap;
   cursor: pointer;
   transition:
     background-color var(--mcp-dur-state) var(--mcp-ease-state),
@@ -702,6 +727,24 @@
   opacity: 0.6;
   cursor: not-allowed;
   transform: none;
+}
+
+/* ============================================================
+   The model: prose beside the comparison frame
+   ============================================================ */
+
+.mcp-landing .mcp-model {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 40px;
+  align-items: start;
+}
+
+@media (min-width: 900px) {
+  .mcp-landing .mcp-model {
+    grid-template-columns: 52fr 48fr;
+    gap: 56px;
+  }
 }
 
 /* ============================================================
@@ -761,9 +804,12 @@
   border-top: 1px solid var(--mcp-hairline);
 }
 
+/* size the two mark columns to their headers so the labels stay on one line */
 .mcp-landing .mcp-compare__col {
-  width: 22%;
+  width: 1%;
+  white-space: nowrap;
   text-align: center;
+  padding-inline: 14px;
 }
 
 .mcp-landing .mcp-compare td.mcp-compare__col {
@@ -787,6 +833,12 @@
 /* ============================================================
    Payment panels
    ============================================================ */
+
+.mcp-landing .mcp-payment {
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
+}
 
 .mcp-landing .mcp-panels {
   display: grid;
@@ -860,6 +912,11 @@
   margin-inline: auto;
 }
 
+.mcp-landing .mcp-faq__heading {
+  max-width: 24ch;
+  margin-bottom: 8px;
+}
+
 .mcp-landing .mcp-faq__list {
   display: flex;
   flex-direction: column;
@@ -916,13 +973,22 @@
    Inline code
    ============================================================ */
 
-.mcp-landing code:not([class]) {
+/* Inline field names only. Code inside a <pre> keeps the block's own colours,
+   which matters on the dark terminal surface. */
+.mcp-landing :not(pre) > code:not([class]) {
   font-family: var(--mcp-font-mono);
   font-size: 0.875em;
   background-color: var(--mcp-accent-050);
   color: var(--mcp-accent-700);
   border-radius: 4px;
   padding: 1px 5px;
+}
+
+.mcp-landing pre > code {
+  font: inherit;
+  color: inherit;
+  background: none;
+  padding: 0;
 }
 
 .mcp-landing .mcp-sr-only {

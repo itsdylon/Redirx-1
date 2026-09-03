@@ -14,7 +14,6 @@ import { DemoPage } from './components/DemoPage';
 import { QuickMatchLandingPage } from './components/QuickMatchLandingPage';
 import { WatchPage } from './components/WatchPage';
 import { ApiKeysPage } from './components/ApiKeysPage';
-import { McpLandingPage } from './components/McpLandingPage';
 import { Toaster } from './components/ui/sonner';
 import { isEnterprisePlan } from './lib/plans';
 import {
@@ -74,13 +73,6 @@ export default function App() {
         path={ROUTES.demo}
         element={<DemoPage />}
       />
-      {/* Marketing draft for the MCP server. Public, unlinked, signed-in or
-          not: it is a landing page, and its CTAs point at /api-keys. */}
-      <Route
-        path={ROUTES.mcpPreview}
-        element={<McpLandingPage />}
-      />
-
       {/* Protected routes */}
       <Route
         path={ROUTES.root}

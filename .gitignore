@@ -50,3 +50,6 @@ data/content/
 # Claude Code conversation exports — may contain secrets pasted in chat
 *-local-command-caveat*.txt
 [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]-*-local-command-*.txt
+
+# Playwright MCP scratch output (console logs, page snapshots)
+.playwright-mcp/

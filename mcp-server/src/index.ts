@@ -30,7 +30,7 @@ function buildAdapter(): AuthorizationServerAdapter {
   if (!anonKey) {
     throw new Error('SUPABASE_ANON_KEY is required alongside OAUTH_ISSUER_URL in oauth mode.');
   }
-  return new SupabaseAuthAdapter(config.authIssuerUrl, anonKey);
+  return new SupabaseAuthAdapter(config.authIssuerUrl, anonKey, config.publicUrl);
 }
 
 async function main() {

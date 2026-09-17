@@ -14,25 +14,11 @@ export interface VerifiedIdentity {
 }
 
 /**
- * The seam docs/architecture/agentic-pivot.md §3.3 called out as the design's
- * single highest-variance unknown — whether Supabase Auth's OAuth 2.1 Server +
- * Dynamic Client Registration is sufficient, or a dedicated authorization
- * server is needed instead — is now resolved (docs/spikes/dcr-auth-spike.md:
- * GO, verified against the live production project). `SupabaseAuthAdapter` is
- * the real answer; `GenericOidcAdapter` remains only as a documented
- * extension point (a future non-Supabase-hosted deployment, an enterprise
- * SSO requirement), not a hedge against likely failure. Every piece of this
- * gateway downstream of `verifyAccessToken` — identity resolution, entitlement
- * checks, PostHog identify — only ever sees a `VerifiedIdentity`, never a raw
- * token or a specific AS's response shape, so a future change of AS stays a
- * config change, not a rewrite.
- *
- * `metadata()` is only meaningful for adapters backing a real external AS —
- * it feeds `mcpAuthMetadataRouter`'s Protected Resource Metadata endpoint,
- * telling clients where to go to get a token. An adapter with no discoverable
- * AS (see DevApiKeyAdapter) can return `null`; the caller then skips PRM
- * entirely, which is correct for that mode's audience (test/dev clients that
- * already hold a raw API key, not general MCP clients doing OAuth discovery).
+ * Pluggable authorization boundary. The prior Supabase spike established
+ * registration and token exchange, not production readiness. Adapters must
+ * verify tokens and constrain their intended resource before exposing identity.
+ * metadata() returns null for local API-key mode; OAuth startup fails closed
+ * if its provider metadata cannot be discovered and validated.
  */
 export interface AuthorizationServerAdapter {
   metadata(): Promise<OAuthMetadata | null>;

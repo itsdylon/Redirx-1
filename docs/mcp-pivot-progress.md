@@ -1,4 +1,4 @@
-# MCP-primary pivot — first implementation checkpoint
+# MCP-primary pivot — implementation checkpoints
 
 Date: 2026-09-17. Source execution plan: sibling landing repository,
 `docs/mcp-pivot-execution-plan.md` (P00–P19). This is **not** a completed pivot
@@ -23,7 +23,12 @@ or a production-readiness declaration.
   keys retain their existing path. Gateway cache uses the actual expiry,
   coalesces simultaneous resolutions, recovers from errors, and isolates
   developer keys. Added bootstrap-race handling and timing-safe comparison.
-  **External OAuth audience/resource validation is still a launch blocker.**
+  **Provider resource-bound issuance and live OAuth acceptance remain launch gates.**
+  In the second, budget-limited pass, the gateway now checks the exact PRM
+  resource audience, issuer, subject, OAuth client identity, real expiry and
+  optional issuance/activation times after provider verification. Browser
+  tokens are rejected. Provider calls are bounded, do not follow redirects,
+  and run on every request. Metadata issuer mismatches fail closed.
 - **P05 foundation only:** pure, side-effect-free policy preview with nine
   shared boundary fixtures. It is not wired into checkout or entitlements.
 - **P01/P07 prerequisite:** mappings and embeddings paginate beyond the
@@ -38,7 +43,9 @@ deployments were changed. No legacy UI or data was removed.
 
 - Backend targeted unittest suite: **60 passed** (policy, pagination,
   delegation, internal routes, v1 routes, manual API keys).
-- Full current MCP Vitest suite: **28 passed**; TypeScript build passed.
+- Full MCP Vitest suite: **62 passed** in second pass (34 new adapter cases);
+  TypeScript build passed. Backend/frontend counts below are from first pass;
+  neither surface changed in the second pass.
 - Frontend targeted auth/consent/routing suite: **41 passed**; Vite build passed.
 - `node scripts/check_pivot_contract.mjs`: 11 tools / 9 pricing fixtures valid.
 - `git diff --check`: clean.
@@ -60,15 +67,17 @@ deployments were changed. No legacy UI or data was removed.
    after all old gateways have drained. Do not revoke user-managed keys.
 4. Configure Supabase OAuth consent path, allowed clients, Site URL and exact
    callback URLs in a test environment; verify real approve/deny/reconnect
-   before production. Public OAuth resource/audience enforcement must be
-   completed before calling this production-safe.
+   before production. The gateway now enforces resource audience, but existing
+   generic-audience provider tokens will be rejected. Configure and verify
+   resource-bound issuance before deploying this gateway. See the MCP README
+   for exact audience matching and negative/positive live acceptance cases.
 
 ## Next execution order
 
 1. P01 durable migration/inventory/run/artifact schema and ownership-safe
    repository layer; include idempotency and upgrade/backfill tests.
-2. Finish P03 resource-bound OAuth validation; exercise real client flow for
-   P02. These are security gates, not optional polish.
+2. Finish P03 provider resource-bound issuance and live acceptance; exercise
+   the real client flow for P02. These are security gates, not optional polish.
 3. P04 durable discovery and P05 authoritative quote/entitlement logic; keep
    unresolved free-tier/Studio/capacity choices explicit and inactive.
 4. P06 payment completion/retries and P07 complete capacity enforcement.
@@ -87,3 +96,7 @@ Official Herdr skill v0.9.1 installed and used. Two bounded Codex helpers:
 (gpt-5.6-terra, medium). Both completed and are idle. Main reviewed, integrated,
 hardened, and re-tested their work. No further helpers started after a usage
 warning appeared in both sessions.
+
+Second pass used no subagents and added no dependencies. It focused solely
+on the OAuth boundary under the user's remaining-usage constraint; no database
+schema work or live provider configuration was attempted.

@@ -28,12 +28,6 @@ KEY_BYTES = 32
 # Enough to identify a key in a list without narrowing the search space.
 DISPLAY_PREFIX_LENGTH = 12
 
-# Marks a key as gateway-issued (the mcp-server, via /api/internal/mcp/resolve)
-# rather than one a human created from the API Keys UI. Kept out of a human's
-# own key list implicitly by name alone today — nothing hides it, but nothing
-# a human does collides with this name either.
-MCP_SERVICE_KEY_NAME = "MCP (auto)"
-
 
 def generate_key() -> str:
     return f"{KEY_PREFIX}{secrets.token_urlsafe(KEY_BYTES)}"
@@ -86,32 +80,6 @@ class ApiKeyService:
             # Shown once. Never retrievable again.
             "key": plaintext,
         }
-
-    def get_or_create_service_key(self, user_id: str) -> str:
-        """
-        A plaintext API key for the mcp-server to call v1 on this user's
-        behalf, minted fresh on every call.
-
-        Can't be a real "get or create": plaintext is never stored (only the
-        hash), so an existing MCP-issued key can't be returned a second time.
-        Instead this rotates — revoke whatever MCP-issued key exists, mint a
-        new one — which is safe because the caller (the gateway's identity
-        layer, agentic-pivot.md §5.3) is expected to cache the plaintext after
-        this call rather than ask again per-request. Net effect: at most one
-        live MCP-issued key per user at a time.
-        """
-        existing = (
-            self.client.table("api_keys")
-            .select("id")
-            .eq("user_id", user_id)
-            .eq("name", MCP_SERVICE_KEY_NAME)
-            .is_("revoked_at", "null")
-            .execute()
-        )
-        for row in existing.data or []:
-            self.revoke(user_id, row["id"])
-
-        return self.create(user_id, name=MCP_SERVICE_KEY_NAME)["key"]
 
     def list_for_user(self, user_id: str) -> list[dict[str, Any]]:
         result = (

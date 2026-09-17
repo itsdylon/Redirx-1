@@ -25,6 +25,7 @@ from flask import Blueprint, Response, jsonify, request
 
 from backend.extensions import limiter
 from backend.services.api_key_service import ApiKeyService, looks_like_api_key
+from backend.services.mcp_delegation_service import MCPDelegationService
 from backend.services import entitlement_service, redirect_export, results_formatter
 from backend.services.ingestion_service import IngestionService
 from backend.services.job_limits import (
@@ -81,16 +82,17 @@ def require_api_key(f):
             )
 
         token = header[len("Bearer "):].strip()
-        if not looks_like_api_key(token):
-            return _error(
-                "invalid_api_key",
-                "This endpoint takes an API key (rdx_...), not a session token.",
-                401,
-            )
-
-        user_id = ApiKeyService().resolve(token)
+        # Normal user-managed rdx_ keys retain their database-backed
+        # revocation behavior.  The only alternative is our signed internal
+        # delegation type; arbitrary provider/session JWTs fail its strict
+        # issuer, audience, signature and type checks.
+        user_id = (
+            ApiKeyService().resolve(token)
+            if looks_like_api_key(token)
+            else MCPDelegationService().resolve(token)
+        )
         if not user_id:
-            return _error("invalid_api_key", "Unknown or revoked API key.", 401)
+            return _error("invalid_api_key", "Unknown API key or delegation.", 401)
 
         request.api_user_id = user_id
         return f(*args, **kwargs)

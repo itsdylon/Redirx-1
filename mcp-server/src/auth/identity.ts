@@ -13,13 +13,9 @@ interface CacheEntry {
   expiresAt: number;
 }
 
-// Keyed by subject, not by token: the backend rotates the MCP-issued API key
-// on every /resolve call (api_key_service.get_or_create_service_key), so
-// caching by subject is what makes that rotation invisible to a client
-// calling tools many times in a session instead of minting a fresh key (and
-// revoking the last one) on every single tool call.
 const cache = new Map<string, CacheEntry>();
-const CACHE_TTL_MS = 15 * 60 * 1000;
+const inflight = new Map<string, Promise<ResolvedIdentity>>();
+const EXPIRY_SKEW_MS = 5_000;
 
 /**
  * Turn a verified identity into `{userId, apiKey, plan}` — the thing every
@@ -28,8 +24,8 @@ const CACHE_TTL_MS = 15 * 60 * 1000;
  * Two paths, matching config.authMode:
  *  - 'oauth': calls the backend's /api/internal/mcp/resolve (the seam
  *    described in agentic-pivot.md §5, Task 5) with the subject the
- *    AuthorizationServerAdapter verified. That endpoint mints/rotates a
- *    service-owned API key.
+ *    AuthorizationServerAdapter verified. That endpoint mints a short-lived
+ *    signed delegation accepted only by backend v1.
  *  - 'dev': the presented bearer token already IS a Redirx API key
  *    (DevApiKeyAdapter only accepts rdx_... tokens) — reusing it directly
  *    avoids silently revoking a developer's own key via /resolve's rotation,
@@ -39,21 +35,42 @@ export async function resolveIdentity(
   identity: VerifiedIdentity,
   rawToken: string,
 ): Promise<ResolvedIdentity> {
-  const cached = cache.get(identity.subject);
+  // In dev mode the verified subject is not enough: two different valid
+  // developer keys may represent the same user, and caching by subject would
+  // send one caller's key on another caller's request.
+  const cacheKey = config.authMode === 'dev'
+    ? `dev:${identity.subject}:${rawToken}`
+    : `oauth:${identity.subject}`;
+  const cached = cache.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) {
     return cached.value;
   }
+  cache.delete(cacheKey);
 
-  const resolved =
-    config.authMode === 'dev'
+  const pending = inflight.get(cacheKey);
+  if (pending) return pending;
+
+  const resolution = (async () => {
+    const result = config.authMode === 'dev'
       ? await resolveViaDevToken(identity.subject, rawToken)
       : await resolveViaBackend(identity);
-
-  cache.set(identity.subject, { value: resolved, expiresAt: Date.now() + CACHE_TTL_MS });
-  return resolved;
+    cache.set(cacheKey, result.entry);
+    return result.value;
+  })();
+  inflight.set(cacheKey, resolution);
+  try {
+    return await resolution;
+  } finally {
+    inflight.delete(cacheKey);
+  }
 }
 
-async function resolveViaBackend(identity: VerifiedIdentity): Promise<ResolvedIdentity> {
+interface ResolutionWithCache {
+  value: ResolvedIdentity;
+  entry: CacheEntry;
+}
+
+async function resolveViaBackend(identity: VerifiedIdentity): Promise<ResolutionWithCache> {
   const response = await fetch(`${config.backendBaseUrl}/api/internal/mcp/resolve`, {
     method: 'POST',
     headers: {
@@ -71,19 +88,23 @@ async function resolveViaBackend(identity: VerifiedIdentity): Promise<ResolvedId
   const body = (await response.json()) as {
     user_id: string;
     api_key: string;
+    expires_at: number;
     plan: string;
     gsc_connected: boolean;
   };
 
-  return {
-    userId: body.user_id,
-    apiKey: body.api_key,
-    plan: body.plan,
-    gscConnected: body.gsc_connected,
-  };
+  const expiresAt = Number(body.expires_at) * 1000 - EXPIRY_SKEW_MS;
+  if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) {
+    throw new Error('Identity resolution returned an expired delegation');
+  }
+  return { value: {
+    userId: body.user_id, apiKey: body.api_key, plan: body.plan, gscConnected: body.gsc_connected,
+  }, entry: { value: {
+    userId: body.user_id, apiKey: body.api_key, plan: body.plan, gscConnected: body.gsc_connected,
+  }, expiresAt } };
 }
 
-async function resolveViaDevToken(subject: string, rawToken: string): Promise<ResolvedIdentity> {
+async function resolveViaDevToken(subject: string, rawToken: string): Promise<ResolutionWithCache> {
   const response = await fetch(`${config.backendBaseUrl}/api/v1/me`, {
     headers: { Authorization: `Bearer ${rawToken}` },
   });
@@ -91,10 +112,14 @@ async function resolveViaDevToken(subject: string, rawToken: string): Promise<Re
     throw new Error(`Dev token no longer resolves (${response.status})`);
   }
   const body = (await response.json()) as { plan: string };
-  return { userId: subject, apiKey: rawToken, plan: body.plan, gscConnected: false };
+  const value = { userId: subject, apiKey: rawToken, plan: body.plan, gscConnected: false };
+  // Dev keys do not carry an expiry. Cache only briefly, and never share a
+  // cache entry between distinct caller-provided keys.
+  return { value, entry: { value, expiresAt: Date.now() + 60_000 } };
 }
 
 /** Test-only: clears the module-level identity cache between test cases. */
 export function _resetIdentityCacheForTests(): void {
   cache.clear();
+  inflight.clear();
 }

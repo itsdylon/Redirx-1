@@ -102,6 +102,48 @@ class TestUrlCleaning(unittest.TestCase):
         self.assertEqual(v1_routes._clean_urls(None), [])
 
 
+class TestV1DelegationAuth(unittest.TestCase):
+    def _client(self):
+        app = Flask(__name__)
+        app.register_blueprint(v1_routes.v1_blueprint, url_prefix="/api/v1")
+        return app.test_client()
+
+    def test_signed_delegation_authenticates_without_api_key_lookup(self):
+        from backend.services.mcp_delegation_service import MCPDelegationService
+
+        secret = "v1-delegation-secret"
+        token, _ = MCPDelegationService(secret).mint("user-1")
+        session_db = Mock()
+        session_db.create_session.return_value = "session-1"
+        with patch.object(v1_routes.Config, "MCP_INTERNAL_SECRET", secret), patch.object(
+            v1_routes, "MigrationSessionDB", return_value=session_db
+        ), patch.object(v1_routes, "ApiKeyService") as key_cls:
+            response = self._client().post(
+                "/api/v1/migrations",
+                json={"old_urls": ["https://old.example/a"], "new_urls": ["https://new.example/a"], "pipeline": "url_only"},
+                headers={"Authorization": f"Bearer {token}"},
+            )
+        self.assertEqual(response.status_code, 201)
+        key_cls.return_value.resolve.assert_not_called()
+        self.assertEqual(session_db.create_session.call_args.kwargs["user_id"], "user-1")
+
+    def test_user_managed_rdx_key_still_uses_existing_lookup(self):
+        session_db = Mock()
+        session_db.create_session.return_value = "session-1"
+        with patch.object(v1_routes, "MigrationSessionDB", return_value=session_db), patch.object(
+            v1_routes, "ApiKeyService"
+        ) as key_cls:
+            key_cls.return_value.resolve.return_value = "manual-user"
+            response = self._client().post(
+                "/api/v1/migrations",
+                json={"old_urls": ["https://old.example/a"], "new_urls": ["https://new.example/a"], "pipeline": "url_only"},
+                headers={"Authorization": "Bearer rdx_manual"},
+            )
+        self.assertEqual(response.status_code, 201)
+        key_cls.return_value.resolve.assert_called_once_with("rdx_manual")
+        self.assertEqual(session_db.create_session.call_args.kwargs["user_id"], "manual-user")
+
+
 class TestDeepMatchAccess(unittest.TestCase):
     """
     Deep Match is free at full quality for every plan (Pricing V3) — a key

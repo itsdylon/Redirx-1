@@ -10,6 +10,7 @@ agentic-pivot.md §3.3 describes.
 import os
 import sys
 import unittest
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
@@ -67,12 +68,12 @@ class TestResolveIdentity(InternalRouteCase):
 
         with patch.object(internal_routes.Config, "MCP_INTERNAL_SECRET", SECRET), patch.object(
             internal_routes.SupabaseClient, "get_admin_client", return_value=client_mock
-        ), patch.object(internal_routes, "ApiKeyService") as key_cls, patch.object(
+        ), patch.object(internal_routes, "MCPDelegationService") as delegation_cls, patch.object(
             internal_routes, "UserQuotaDB"
         ) as quota_cls, patch.object(
             internal_routes, "GSCService"
         ) as gsc_cls:
-            key_cls.return_value.get_or_create_service_key.return_value = "rdx_minted"
+            delegation_cls.return_value.mint.return_value = ("delegation-token", 2_000_000_000)
             quota_cls.return_value.get_plan.return_value = "free"
             gsc_cls.return_value.get_status.return_value = {"connected": False}
             response = self._client().post(
@@ -80,7 +81,7 @@ class TestResolveIdentity(InternalRouteCase):
                 json={"subject": subject, "email": "a@example.com"},
                 headers={"X-Internal-Secret": SECRET},
             )
-        return response, client_mock, key_cls
+        return response, client_mock, delegation_cls
 
     def test_missing_subject_is_400(self):
         with patch.object(internal_routes.Config, "MCP_INTERNAL_SECRET", SECRET):
@@ -92,25 +93,54 @@ class TestResolveIdentity(InternalRouteCase):
         self.assertEqual(response.status_code, 400)
 
     def test_existing_profile_is_not_recreated(self):
-        response, client_mock, key_cls = self._post(
+        response, client_mock, delegation_cls = self._post(
             "user-1", {"id": "user-1", "plan": "free"}
         )
         self.assertEqual(response.status_code, 200)
         body = response.get_json()
         self.assertEqual(body["user_id"], "user-1")
-        self.assertEqual(body["api_key"], "rdx_minted")
+        self.assertEqual(body["api_key"], "delegation-token")
+        self.assertEqual(body["expires_at"], 2_000_000_000)
         client_mock.table.return_value.insert.assert_not_called()
 
     def test_mcp_first_signup_bootstraps_a_profile(self):
         # No user_profiles row yet: the OAuth token was verified, but this
         # identity never went through handle_new_user() because it never
         # touched the browser flow that trigger fires on.
-        response, client_mock, key_cls = self._post("user-new", None)
+        response, client_mock, delegation_cls = self._post("user-new", None)
         self.assertEqual(response.status_code, 200)
         client_mock.table.return_value.insert.assert_called_once()
         inserted = client_mock.table.return_value.insert.call_args[0][0]
         self.assertEqual(inserted["id"], "user-new")
         self.assertEqual(inserted["plan"], "free")
+
+    def test_concurrent_profile_bootstrap_is_rechecked_after_insert_conflict(self):
+        client_mock = Mock()
+        table = client_mock.table.return_value
+        profile_query = table.select.return_value.eq.return_value.maybe_single.return_value
+        profile_query.execute.side_effect = [
+            SimpleNamespace(data=None),
+            SimpleNamespace(data={"id": "user-race", "plan": "free"}),
+        ]
+        table.insert.return_value.execute.side_effect = RuntimeError("duplicate key")
+
+        with patch.object(internal_routes.Config, "MCP_INTERNAL_SECRET", SECRET), patch.object(
+            internal_routes.SupabaseClient, "get_admin_client", return_value=client_mock
+        ), patch.object(internal_routes, "MCPDelegationService") as delegation_cls, patch.object(
+            internal_routes, "UserQuotaDB"
+        ) as quota_cls, patch.object(internal_routes, "GSCService") as gsc_cls:
+            delegation_cls.return_value.mint.return_value = ("delegation-token", 2_000_000_000)
+            quota_cls.return_value.get_plan.return_value = "free"
+            gsc_cls.return_value.get_status.return_value = {"connected": False}
+            response = self._client().post(
+                "/api/internal/mcp/resolve",
+                json={"subject": "user-race"},
+                headers={"X-Internal-Secret": SECRET},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["api_key"], "delegation-token")
+        table.insert.assert_called_once()
 
 
 if __name__ == "__main__":

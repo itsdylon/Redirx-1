@@ -22,11 +22,12 @@ nothing left for this file to reimplement (see the mcp-server's
 from __future__ import annotations
 
 import logging
+import hmac
 from functools import wraps
 
 from flask import Blueprint, jsonify, request
 
-from backend.services.api_key_service import ApiKeyService
+from backend.services.mcp_delegation_service import MCPDelegationService
 from backend.services.gsc_service import GSCService
 from src.redirx.config import Config
 from src.redirx.database import SupabaseClient, UserQuotaDB
@@ -47,7 +48,7 @@ def require_internal_secret(f):
             logger.error("MCP_INTERNAL_SECRET is not configured; refusing internal call")
             return _error("not_configured", "Internal routes are not enabled.", 503)
         provided = request.headers.get("X-Internal-Secret", "")
-        if not provided or provided != Config.MCP_INTERNAL_SECRET:
+        if not provided or not hmac.compare_digest(provided, Config.MCP_INTERNAL_SECRET):
             return _error("unauthorized", "Invalid or missing internal secret.", 401)
         return f(*args, **kwargs)
 
@@ -58,7 +59,7 @@ def require_internal_secret(f):
 @require_internal_secret
 def resolve_identity():
     """
-    Turn a verified identity into `{user_id, api_key, plan, gsc_connected}`.
+    Turn a verified identity into a short-lived v1 delegation.
 
     `subject` is whatever the gateway's AuthorizationServerAdapter verified
     the access token's subject to be. Betting on Supabase Auth as the
@@ -98,14 +99,24 @@ def resolve_identity():
                 "plan": "free",
             }).execute()
         except Exception:
-            logger.exception("mcp resolve: could not bootstrap user_profiles for %s", subject)
-            return _error("bootstrap_failed", "Could not provision this account.", 502)
+            # A concurrent first resolution can win the insert.  Re-read once
+            # instead of turning a harmless unique-key race into a 502.
+            try:
+                profile = (
+                    client.table("user_profiles").select("id, plan")
+                    .eq("id", subject).maybe_single().execute()
+                )
+            except Exception:
+                profile = None
+            if not profile or not profile.data:
+                logger.exception("mcp resolve: could not bootstrap user_profiles for %s", subject)
+                return _error("bootstrap_failed", "Could not provision this account.", 502)
 
     try:
-        api_key = ApiKeyService(client=client).get_or_create_service_key(subject)
+        delegation, expires_at = MCPDelegationService().mint(subject)
     except Exception:
-        logger.exception("mcp resolve: could not issue service key for %s", subject)
-        return _error("key_issue_failed", "Could not issue an API key.", 502)
+        logger.exception("mcp resolve: could not mint delegation for %s", subject)
+        return _error("delegation_issue_failed", "Could not resolve this identity.", 503)
 
     plan = UserQuotaDB(client=client).get_plan(subject)
 
@@ -116,7 +127,10 @@ def resolve_identity():
 
     return jsonify({
         "user_id": subject,
-        "api_key": api_key,
+        # Compatibility name: MCP clients pass this value as the Bearer value
+        # to v1.  It is an expiring signed delegation, never an rdx_ key.
+        "api_key": delegation,
+        "expires_at": expires_at,
         "plan": plan,
         "gsc_connected": gsc_connected,
     }), 200

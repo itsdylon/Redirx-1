@@ -3,6 +3,7 @@ import { useAuth } from './contexts/AuthContext';
 import { LoginPage } from './components/LoginPage';
 import { SignupPage } from './components/SignupPage';
 import { AuthCallback } from './components/AuthCallback';
+import { OAuthConsentPage } from './components/OAuthConsentPage';
 import { Dashboard } from './components/Dashboard';
 import { AllProjects } from './components/AllProjects';
 import { UploadPage } from './components/UploadPage';
@@ -57,6 +58,7 @@ export default function App() {
         path={ROUTES.authCallback}
         element={<AuthCallback />}
       />
+      <Route path={ROUTES.oauthConsent} element={<OAuthConsentPage />} />
       <Route
         path={ROUTES.quickMatch}
         element={

@@ -15,6 +15,7 @@ vi.mock('./contexts/AuthContext', () => ({
 vi.mock('./components/LoginPage', () => ({ LoginPage: () => <div>Login Page</div> }));
 vi.mock('./components/SignupPage', () => ({ SignupPage: () => <div>Signup Page</div> }));
 vi.mock('./components/AuthCallback', () => ({ AuthCallback: () => <div>Auth Callback</div> }));
+vi.mock('./components/OAuthConsentPage', () => ({ OAuthConsentPage: () => <div>OAuth Consent Page</div> }));
 vi.mock('./components/Dashboard', () => ({ Dashboard: () => <div>Dashboard Page</div> }));
 vi.mock('./components/AllProjects', () => ({ AllProjects: () => <div>Projects Page</div> }));
 vi.mock('./components/UploadPage', () => ({ UploadPage: () => <div>Upload Page</div> }));
@@ -70,6 +71,12 @@ describe('App routing', () => {
     mockUseAuth.mockReturnValue({ user: null, loading: false });
     renderAt('/quick-match');
     expect(await screen.findByText('Quick Match Route')).toBeInTheDocument();
+  });
+
+  it('routes OAuth consent without sending it through the normal home redirect', async () => {
+    mockUseAuth.mockReturnValue({ user: null, loading: false });
+    renderAt('/oauth/consent?authorization_id=request-1');
+    expect(await screen.findByText('OAuth Consent Page')).toBeInTheDocument();
   });
 
   it('routes /quick-match for authenticated tool users', async () => {

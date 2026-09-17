@@ -2,7 +2,25 @@ const AUTH_REDIRECT_KEY = 'auth_redirect';
 
 function sanitizeRedirectPath(path: string | null | undefined): string | null {
   if (!path) return null;
-  if (!path.startsWith('/') || path.startsWith('//')) return null;
+  // Auth redirects must stay on this SPA. Backslashes are rejected because
+  // browsers normalize them as URL separators in several redirect contexts.
+  if (!path.startsWith('/') || path.startsWith('//') || path.includes('\\')) return null;
+  let decodedPath = path;
+  try {
+    decodedPath = decodeURIComponent(path);
+  } catch {
+    return null;
+  }
+  if (decodedPath.includes('\\') || decodedPath.startsWith('//')) return null;
+  if (/^[\u0000-\u001f\u007f]/.test(path) || /[\u0000-\u001f\u007f]/.test(path)) return null;
+
+  try {
+    const target = new URL(path, window.location.origin);
+    if (target.origin !== window.location.origin || !target.pathname.startsWith('/')) return null;
+  } catch {
+    return null;
+  }
+
   return path;
 }
 

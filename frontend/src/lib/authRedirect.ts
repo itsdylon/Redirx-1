@@ -1,6 +1,6 @@
 const AUTH_REDIRECT_KEY = 'auth_redirect';
 
-function sanitizeRedirectPath(path: string | null | undefined): string | null {
+export function sanitizeRedirectPath(path: string | null | undefined): string | null {
   if (!path) return null;
   // Auth redirects must stay on this SPA. Backslashes are rejected because
   // browsers normalize them as URL separators in several redirect contexts.
@@ -12,7 +12,7 @@ function sanitizeRedirectPath(path: string | null | undefined): string | null {
     return null;
   }
   if (decodedPath.includes('\\') || decodedPath.startsWith('//')) return null;
-  if (/^[\u0000-\u001f\u007f]/.test(path) || /[\u0000-\u001f\u007f]/.test(path)) return null;
+  if (/[\u0000-\u001f\u007f]/.test(path) || /[\u0000-\u001f\u007f]/.test(decodedPath)) return null;
 
   try {
     const target = new URL(path, window.location.origin);

@@ -4,6 +4,7 @@ import { LoginPage } from './components/LoginPage';
 import { SignupPage } from './components/SignupPage';
 import { AuthCallback } from './components/AuthCallback';
 import { OAuthConsentPage } from './components/OAuthConsentPage';
+import { getAuthRedirect, sanitizeRedirectPath } from './lib/authRedirect';
 import { Dashboard } from './components/Dashboard';
 import { AllProjects } from './components/AllProjects';
 import { UploadPage } from './components/UploadPage';
@@ -31,6 +32,11 @@ export default function App() {
   const { user, loading } = useAuth();
   const location = useLocation();
   const authedHome = getAuthedHomeRoute(user?.plan);
+  const pendingReturn = sanitizeRedirectPath(new URLSearchParams(location.search).get('redirect')) || getAuthRedirect();
+  // A session may already exist when an MCP client opens the login URL.
+  // Preserve its consent target without allowing login/signup redirect loops.
+  const authReturn = pendingReturn && !['/login', '/signup'].includes(pendingReturn.split(/[?#]/)[0])
+    ? pendingReturn : authedHome;
   const pricingSourceSessionId = new URLSearchParams(location.search).get('source_session_id');
   const reviewLayoutVariant = isEnterprisePlan(user?.plan) ? 'dashboard' : 'tool';
 
@@ -48,11 +54,11 @@ export default function App() {
       {/* Public routes */}
       <Route
         path={ROUTES.login}
-        element={user ? <Navigate to={authedHome} replace /> : <LoginPage />}
+        element={user ? <Navigate to={authReturn} replace /> : <LoginPage />}
       />
       <Route
         path={ROUTES.signup}
-        element={user ? <Navigate to={authedHome} replace /> : <SignupPage />}
+        element={user ? <Navigate to={authReturn} replace /> : <SignupPage />}
       />
       <Route
         path={ROUTES.authCallback}

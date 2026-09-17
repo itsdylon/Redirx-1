@@ -48,7 +48,9 @@ def require_internal_secret(f):
             logger.error("MCP_INTERNAL_SECRET is not configured; refusing internal call")
             return _error("not_configured", "Internal routes are not enabled.", 503)
         provided = request.headers.get("X-Internal-Secret", "")
-        if not provided or not hmac.compare_digest(provided, Config.MCP_INTERNAL_SECRET):
+        if not provided or not hmac.compare_digest(
+            provided.encode('utf-8'), Config.MCP_INTERNAL_SECRET.encode('utf-8')
+        ):
             return _error("unauthorized", "Invalid or missing internal secret.", 401)
         return f(*args, **kwargs)
 

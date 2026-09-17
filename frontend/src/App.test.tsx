@@ -79,6 +79,12 @@ describe('App routing', () => {
     expect(await screen.findByText('OAuth Consent Page')).toBeInTheDocument();
   });
 
+  it.each(['/login', '/signup'])('preserves consent for a signed-in visitor to %s', async (path) => {
+    mockUseAuth.mockReturnValue({ user: { id: 'user-1', plan: 'free' }, loading: false });
+    renderAt(`${path}?redirect=${encodeURIComponent('/oauth/consent?authorization_id=request-1')}`);
+    expect(await screen.findByText('OAuth Consent Page')).toBeInTheDocument();
+  });
+
   it('routes /quick-match for authenticated tool users', async () => {
     mockUseAuth.mockReturnValue({
       loading: false,

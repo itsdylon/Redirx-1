@@ -111,7 +111,7 @@ class TestV1DelegationAuth(unittest.TestCase):
     def test_signed_delegation_authenticates_without_api_key_lookup(self):
         from backend.services.mcp_delegation_service import MCPDelegationService
 
-        secret = "v1-delegation-secret"
+        secret = "v1-delegation-test-secret-at-least-32-bytes"
         token, _ = MCPDelegationService(secret).mint("user-1")
         session_db = Mock()
         session_db.create_session.return_value = "session-1"

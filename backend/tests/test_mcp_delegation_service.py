@@ -13,7 +13,7 @@ from backend.services.mcp_delegation_service import MCPDelegationService
 
 
 class TestMCPDelegationService(unittest.TestCase):
-    SECRET = "delegation-test-secret"
+    SECRET = "delegation-test-secret-at-least-32-bytes"
 
     def setUp(self):
         self.service = MCPDelegationService(self.SECRET)
@@ -42,3 +42,9 @@ class TestMCPDelegationService(unittest.TestCase):
         with self.assertRaises(ValueError):
             service.mint("user-1")
         self.assertIsNone(service.resolve("anything"))
+
+    def test_short_secret_cannot_mint_or_validate(self):
+        service = MCPDelegationService('too-short')
+        with self.assertRaises(ValueError):
+            service.mint('user-1')
+        self.assertIsNone(service.resolve('anything'))

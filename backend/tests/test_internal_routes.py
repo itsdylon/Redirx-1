@@ -59,6 +59,12 @@ class TestRequireInternalSecret(InternalRouteCase):
             )
         self.assertEqual(response.status_code, 401)
 
+    def test_non_ascii_wrong_secret_is_401_not_server_error(self):
+        with patch.object(internal_routes.Config, 'MCP_INTERNAL_SECRET', SECRET):
+            response = self._client().post('/api/internal/mcp/resolve',
+                json={'subject': 'user-1'}, headers={'X-Internal-Secret': 'wrong-é'})
+        self.assertEqual(response.status_code, 401)
+
 
 class TestResolveIdentity(InternalRouteCase):
     def _post(self, subject, profile_row):

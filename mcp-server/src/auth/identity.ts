@@ -97,11 +97,10 @@ async function resolveViaBackend(identity: VerifiedIdentity): Promise<Resolution
   if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) {
     throw new Error('Identity resolution returned an expired delegation');
   }
-  return { value: {
+  const value = {
     userId: body.user_id, apiKey: body.api_key, plan: body.plan, gscConnected: body.gsc_connected,
-  }, entry: { value: {
-    userId: body.user_id, apiKey: body.api_key, plan: body.plan, gscConnected: body.gsc_connected,
-  }, expiresAt } };
+  };
+  return { value, entry: { value, expiresAt } };
 }
 
 async function resolveViaDevToken(subject: string, rawToken: string): Promise<ResolutionWithCache> {

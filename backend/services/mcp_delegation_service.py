@@ -31,8 +31,8 @@ class MCPDelegationService:
         self._secret = Config.MCP_INTERNAL_SECRET if secret is None else secret
 
     def mint(self, user_id: str) -> tuple[str, int]:
-        if not self._secret:
-            raise ValueError("MCP delegation signing is not configured")
+        if not self._secret or len(self._secret.encode('utf-8')) < 32:
+            raise ValueError("MCP delegation signing requires a secret of at least 32 bytes")
         now = int(time.time())
         expires_at = now + self.TTL_SECONDS
         token = jwt.encode(
@@ -52,7 +52,7 @@ class MCPDelegationService:
 
     def resolve(self, token: str) -> Optional[str]:
         """Return the delegated user id, or ``None`` for any invalid token."""
-        if not self._secret or not token:
+        if not self._secret or len(self._secret.encode('utf-8')) < 32 or not token:
             return None
         try:
             payload = jwt.decode(

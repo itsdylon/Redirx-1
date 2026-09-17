@@ -7,6 +7,25 @@ from datetime import datetime, timezone, timedelta
 from .config import Config
 
 
+def _session_rows(client, table: str, session_id: UUID, **filters) -> List[Dict[str, Any]]:
+    """Read all rows, not just PostgREST's first capped response.
+
+    A stable primary-key ordering and advancing by the *received* count also
+    handle a server cap smaller than our requested page. Errors propagate;
+    callers must never treat a partially fetched migration as complete.
+    This is not snapshot isolation: callers should read completed datasets.
+    """
+    rows = []
+    while True:
+        query = client.table(table).select('*').eq('session_id', str(session_id))
+        for field, value in filters.items():
+            query = query.eq(field, value)
+        batch = query.order('id').range(len(rows), len(rows) + 499).execute().data
+        if not batch:
+            return rows
+        rows.extend(batch)
+
+
 class SupabaseClient:
     """
     Singleton wrapper for Supabase client.
@@ -299,22 +318,18 @@ class WebPageEmbeddingDB:
         Returns:
             List of embedding records with parsed embedding vectors.
         """
-        query = self.client.table('webpage_embeddings').select('*').eq(
-            'session_id', str(session_id)
+        records = _session_rows(
+            self.client, 'webpage_embeddings', session_id,
+            **({'site_type': site_type} if site_type else {})
         )
-
-        if site_type:
-            query = query.eq('site_type', site_type)
-
-        result = query.execute()
 
         # Parse embedding vectors if they're returned as strings
         import json
-        for record in result.data:
+        for record in records:
             if 'embedding' in record and isinstance(record['embedding'], str):
                 record['embedding'] = json.loads(record['embedding'])
 
-        return result.data
+        return records
 
 
 class UserQuotaDB:
@@ -608,15 +623,10 @@ class URLMappingDB:
         Returns:
             List of mapping records.
         """
-        query = self.client.table('url_mappings').select('*').eq(
-            'session_id', str(session_id)
+        return _session_rows(
+            self.client, 'url_mappings', session_id,
+            **({'needs_review': needs_review} if needs_review is not None else {})
         )
-
-        if needs_review is not None:
-            query = query.eq('needs_review', needs_review)
-
-        result = query.execute()
-        return result.data
 
     def get_mapping_by_id(self, mapping_id: UUID) -> Optional[Dict[str, Any]]:
         """

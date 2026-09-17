@@ -1,0 +1,80 @@
+{
+  "contract_version": "1.0.0",
+  "status": "implementation_target",
+  "api_prefix": "/api/v2",
+  "policy": {
+    "version": "mcp_2026_09_v1",
+    "activation": "test_only",
+    "currency": "usd",
+    "billable_unit": "unique_eligible_old_pages",
+    "bands": [
+      { "max_pages": 500, "amount_cents": 0 },
+      { "max_pages": 1500, "amount_cents": 4900 },
+      { "max_pages": 5000, "amount_cents": 9900 },
+      { "max_pages": 15000, "amount_cents": 19900 }
+    ],
+    "custom_quote_above": 15000,
+    "paid_rerun_days": 30,
+    "rerun_anchor": "first_successful_paid_run_at",
+    "included_verifications": 1,
+    "paid_monitoring_days": 30,
+    "monitoring_anchor": "deployment_confirmed_at",
+    "monitoring_monthly_cents": 2900,
+    "automatic_monitoring_renewal": false,
+    "studio": {
+      "monthly_cents": 9900,
+      "migrations_per_billing_period": 5,
+      "concurrent_monitored_sites": 5,
+      "self_serve_max_old_pages": 15000,
+      "automatic_overages": false
+    },
+    "agency": { "pricing": "custom_grant" },
+    "unresolved_launch_choices": [
+      "Confirm the provisional 500-page free ceiling",
+      "Confirm Studio self-serve coverage through 15000 old pages",
+      "Set validated new-site technical capacity independently of price",
+      "Set maximum delay before included monitoring activation",
+      "Set transparent free-use abuse limits and verification retry policy"
+    ]
+  },
+  "identity": {
+    "migration_id": "durable account-owned old-site/new-site pair",
+    "inventory_id": "immutable discovery snapshot for one migration side",
+    "run_id": "individual execution; legacy migration_sessions.id remains a run ID",
+    "artifact_id": "immutable export and mapping revision",
+    "operation_id": "durable asynchronous operation",
+    "quote_id": "immutable inventory-and-policy-bound price",
+    "monitoring_id": "site grant and deployed-artifact coverage"
+  },
+  "inventory_statuses": ["pending", "discovering", "complete", "partial", "blocked", "failed"],
+  "operation_statuses": ["queued", "running", "needs_input", "payment_required", "needs_review", "succeeded", "partial", "failed", "cancelled"],
+  "terminal_operation_statuses": ["succeeded", "partial", "failed", "cancelled"],
+  "monitoring_statuses": ["awaiting_deployment", "active", "paused", "expired", "cancelled"],
+  "next_actions": ["poll", "provide_inventory", "connect_search_console", "complete_payment", "request_custom_quote", "run_migration", "resolve_matches", "export_redirects", "install_artifact", "verify_redirects", "manage_monitoring", "reconnect", "retry", "none"],
+  "limits": { "default_page_size": 100, "max_page_size": 500, "max_decisions_per_call": 100 },
+  "tools": {
+    "plan_migration": { "method": "POST", "path": "/migrations", "required": ["old_site", "new_site", "idempotency_key"], "read_only": false },
+    "run_migration": { "method": "POST", "path": "/migrations/{migration_id}/runs", "required": ["migration_id", "inventory_ids", "idempotency_key"], "read_only": false },
+    "get_migration": { "method": "GET", "path": "/migrations/{migration_id}", "required": ["migration_id"], "read_only": true },
+    "list_matches": { "method": "GET", "path": "/migrations/{migration_id}/runs/{run_id}/matches", "required": ["migration_id", "run_id"], "read_only": true },
+    "resolve_matches": { "method": "PATCH", "path": "/migrations/{migration_id}/runs/{run_id}/matches", "required": ["migration_id", "run_id", "decisions", "idempotency_key"], "read_only": false },
+    "export_redirects": { "method": "POST", "path": "/migrations/{migration_id}/artifacts", "required": ["migration_id", "run_id", "format", "revision", "idempotency_key"], "read_only": false },
+    "verify_redirects": { "method": "POST", "path": "/migrations/{migration_id}/verifications", "required": ["migration_id", "artifact_id", "idempotency_key"], "read_only": false },
+    "manage_monitoring": { "method": "POST", "path": "/migrations/{migration_id}/monitoring", "required": ["migration_id", "action", "idempotency_key"], "read_only": false },
+    "get_monitoring_status": { "method": "GET", "path": "/migrations/{migration_id}/monitoring", "required": ["migration_id"], "read_only": true },
+    "get_monitoring_fixes": { "method": "GET", "path": "/migrations/{migration_id}/monitoring/fixes", "required": ["migration_id"], "read_only": true },
+    "connect_search_console": { "method": "POST", "path": "/connections/search-console/actions", "required": ["action"], "read_only": false }
+  },
+  "formats": ["apache", "nginx", "wordpress", "vercel", "cloudflare", "shopify", "csv", "json"],
+  "pricing_fixtures": [
+    { "old_pages": 1, "amount_cents": 0, "kind": "free" },
+    { "old_pages": 500, "amount_cents": 0, "kind": "free" },
+    { "old_pages": 501, "amount_cents": 4900, "kind": "fixed" },
+    { "old_pages": 1500, "amount_cents": 4900, "kind": "fixed" },
+    { "old_pages": 1501, "amount_cents": 9900, "kind": "fixed" },
+    { "old_pages": 5000, "amount_cents": 9900, "kind": "fixed" },
+    { "old_pages": 5001, "amount_cents": 19900, "kind": "fixed" },
+    { "old_pages": 15000, "amount_cents": 19900, "kind": "fixed" },
+    { "old_pages": 15001, "amount_cents": null, "kind": "custom" }
+  ]
+}

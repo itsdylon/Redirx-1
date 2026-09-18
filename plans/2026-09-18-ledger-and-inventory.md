@@ -39,6 +39,26 @@ for the audience gate; a narrowly scoped consent prerequisite may be necessary.
 Registration cleanup may need a dashboard action (no registration access token).
 Check Claude's live output before any further deployment action.
 
+## Deployment handoff reported by Claude, September 18 14:31 EDT
+
+- Hardened 031 applied; RLS enabled, owner-select policy present, authenticated
+  SELECT only, service-role DML, no anon/PUBLIC grants, zero events. 032 absent.
+- No merge, push or service deployment. Resource-bound token issuance remains
+  unproven; the authorize redirect alone is not a passing test.
+- Required next action: disable auto-deploy on API, worker and frontend, then
+  deploy the consent frontend separately before testing actual token issuance.
+  Claude's Render connector cannot change auto-deploy; user dashboard action needed.
+- Consent requires the user's signed-in browser. Prefer a local callback listener
+  over copying a short-lived authorization code into chat. Regenerate stale PKCE
+  state rather than reusing an expired authorization request.
+- Claude's advisor check also reports pre-existing missing RLS on
+  project_pricing_quotes, agency_usage_events, stripe_webhook_events, and
+  deep_match_previews. Assess grants, access paths and billing compatibility in
+  a separate security packet before launch; this turn did not alter these tables.
+
+Production observations above are from Claude's output, not independent Codex
+database inspection. See its current handoff before acting on mutable state.
+
 ## Next packet
 
 Persist explicit inventories with ownership checks and operation reservations;

@@ -108,8 +108,10 @@ including Claude's analytics, entitlement and worker usage tests. These are loca
 results, not evidence that SQL was applied or production OAuth works. Claude's last
 observed result initially was a handoff document. Codex then prompted Claude to own
 the production OAuth gate and rollout; Claude found the missing deployed consent
-page and started applying hardened 031. This is not evidence of a completed rollout
-or a successful resource-audience test. Consult the live deployment handoff for status.
+page and applied hardened 031, reporting successful RLS/grant verification. No service
+deploys or successful resource-audience test were reported. Auto-deploy must be disabled
+on API/worker/frontend before a consent-only frontend rollout. See
+`plans/2026-09-18-ledger-and-inventory.md` and Claude's live handoff for current status.
 
 P04 now has a **pure explicit-import policy foundation**, not a public endpoint:
 `backend/services/inventory_policy.py`. It preserves original URL variants,

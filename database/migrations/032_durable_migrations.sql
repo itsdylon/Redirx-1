@@ -34,6 +34,8 @@ CREATE TABLE IF NOT EXISTS migration_records (
 
 CREATE INDEX IF NOT EXISTS idx_migration_records_user_created
   ON migration_records (user_id, created_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_migration_records_user_cursor
+  ON migration_records (user_id, id);
 
 CREATE TABLE IF NOT EXISTS inventory_snapshots (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -49,6 +51,7 @@ CREATE TABLE IF NOT EXISTS inventory_snapshots (
   exclusions JSONB NOT NULL DEFAULT '[]'::jsonb CHECK (jsonb_typeof(exclusions) = 'array'),
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   completed_at TIMESTAMPTZ,
+  CHECK (status <> 'complete' OR (content_hash IS NOT NULL AND length(content_hash) > 0)),
   UNIQUE (id, migration_id, user_id),
   FOREIGN KEY (migration_id, user_id)
     REFERENCES migration_records (id, user_id) ON DELETE CASCADE,
@@ -77,6 +80,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_session_discovered_urls_inventory_url
   WHERE inventory_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_session_discovered_urls_inventory_count_key
   ON session_discovered_urls (inventory_id, count_key)
+  WHERE inventory_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_session_discovered_urls_inventory_cursor
+  ON session_discovered_urls (inventory_id, id)
   WHERE inventory_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS migration_runs (
@@ -168,7 +174,8 @@ DECLARE
   v_migration_found BOOLEAN;
 BEGIN
   IF TG_OP = 'UPDATE' AND (
-    NEW.migration_id IS DISTINCT FROM OLD.migration_id
+    NEW.id IS DISTINCT FROM OLD.id
+    OR NEW.migration_id IS DISTINCT FROM OLD.migration_id
     OR NEW.user_id IS DISTINCT FROM OLD.user_id
     OR NEW.old_inventory_id IS DISTINCT FROM OLD.old_inventory_id
     OR NEW.new_inventory_id IS DISTINCT FROM OLD.new_inventory_id
@@ -178,7 +185,7 @@ BEGIN
     -- The FK's ON DELETE SET NULL action is the only supported way to detach
     -- a legacy bridge.  Keep the durable run for audit; no caller can use an
     -- ordinary UPDATE to erase the binding.
-    IF NEW.migration_id = OLD.migration_id
+    IF NEW.id = OLD.id AND NEW.migration_id = OLD.migration_id
        AND NEW.user_id = OLD.user_id
        AND NEW.old_inventory_id IS NOT DISTINCT FROM OLD.old_inventory_id
        AND NEW.new_inventory_id IS NOT DISTINCT FROM OLD.new_inventory_id
@@ -256,6 +263,13 @@ BEGIN
   IF OLD.status IN ('partial', 'complete', 'failed') THEN
     RAISE EXCEPTION 'published inventory snapshots are immutable';
   END IF;
+  IF TG_OP = 'UPDATE' AND (
+    NEW.id IS DISTINCT FROM OLD.id OR NEW.user_id IS DISTINCT FROM OLD.user_id
+    OR NEW.migration_id IS DISTINCT FROM OLD.migration_id OR NEW.side IS DISTINCT FROM OLD.side
+  ) THEN
+    RAISE EXCEPTION 'inventory identity is immutable';
+  END IF;
+  IF TG_OP = 'DELETE' THEN RETURN OLD; END IF;
   RETURN NEW;
 END;
 $$;
@@ -362,8 +376,8 @@ CREATE TRIGGER migration_artifacts_immutable
 
 -- ---------------------------------------------------------------------------
 -- Transactional operation reservation.  The unique key serializes concurrent
--- calls.  A changed request or migration deliberately returns a safe conflict
--- object rather than replaying another operation's result.
+-- calls. A changed request or migration raises a safe conflict rather than
+-- replaying another operation's result.
 -- ---------------------------------------------------------------------------
 
 CREATE OR REPLACE FUNCTION reserve_migration_operation(
@@ -427,6 +441,30 @@ $$;
 REVOKE ALL ON FUNCTION reserve_migration_operation(UUID, UUID, TEXT, TEXT, TEXT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION reserve_migration_operation(UUID, UUID, TEXT, TEXT, TEXT) FROM anon, authenticated;
 GRANT EXECUTE ON FUNCTION reserve_migration_operation(UUID, UUID, TEXT, TEXT, TEXT) TO service_role;
+
+-- Retries are safe only if a reservation cannot be retargeted or deleted and
+-- recreated. Workers may update status/result, never its request identity.
+CREATE OR REPLACE FUNCTION preserve_migration_operation_identity()
+RETURNS TRIGGER LANGUAGE plpgsql SET search_path = public, pg_temp AS $$
+BEGIN
+  IF TG_OP = 'DELETE' THEN
+    IF NOT EXISTS (SELECT 1 FROM migration_records WHERE id = OLD.migration_id) THEN
+      RETURN OLD;
+    END IF;
+    RAISE EXCEPTION 'operation reservation identity is immutable';
+  END IF;
+  IF NEW.id IS DISTINCT FROM OLD.id OR NEW.user_id IS DISTINCT FROM OLD.user_id
+    OR NEW.migration_id IS DISTINCT FROM OLD.migration_id OR NEW.kind IS DISTINCT FROM OLD.kind
+    OR NEW.idempotency_key IS DISTINCT FROM OLD.idempotency_key
+    OR NEW.request_hash IS DISTINCT FROM OLD.request_hash OR NEW.created_at IS DISTINCT FROM OLD.created_at THEN
+    RAISE EXCEPTION 'operation reservation identity is immutable';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+DROP TRIGGER IF EXISTS migration_operations_preserve_identity ON migration_operations;
+CREATE TRIGGER migration_operations_preserve_identity BEFORE UPDATE OR DELETE ON migration_operations
+  FOR EACH ROW EXECUTE FUNCTION preserve_migration_operation_identity();
 
 -- ---------------------------------------------------------------------------
 -- RLS: authenticated callers may read their own durable records, but only the
@@ -536,5 +574,20 @@ COMMENT ON TABLE migration_artifacts IS
   'Immutable exported artifact metadata tied to one durable run and decision revision.';
 COMMENT ON TABLE migration_operations IS
   'Idempotent durable operation reservations. Usage/grant consumption is not implemented here.';
+
+-- 019 deletes legacy sessions in a BEFORE auth.users delete trigger, before
+-- user_profiles cascades. Remove durable parents first so frozen URL evidence
+-- doesn't block that cleanup. PostgreSQL runs same-event triggers by name;
+-- this deliberately precedes 019's on_auth_user_deleted trigger.
+CREATE OR REPLACE FUNCTION public.delete_durable_migrations_before_auth_user()
+RETURNS TRIGGER LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
+BEGIN
+  DELETE FROM public.migration_records WHERE user_id = OLD.id;
+  RETURN OLD;
+END;
+$$;
+DROP TRIGGER IF EXISTS aa_delete_durable_migrations ON auth.users;
+CREATE TRIGGER aa_delete_durable_migrations BEFORE DELETE ON auth.users
+  FOR EACH ROW EXECUTE FUNCTION public.delete_durable_migrations_before_auth_user();
 
 COMMIT;

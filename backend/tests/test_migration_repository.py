@@ -5,6 +5,7 @@ import json
 import unittest
 from types import SimpleNamespace
 from uuid import UUID, uuid4
+from unittest.mock import patch
 
 from backend.services.migration_repository import (
     InvalidInputError,
@@ -67,7 +68,7 @@ class Query:
         if self.order_column:
             rows.sort(key=lambda row: row[self.order_column])
         # Simulate a PostgREST server cap smaller than the requested range.
-        rows = rows[self.start:self.start + self.client.server_cap]
+        rows = rows[self.start:self.start + min(self.client.server_cap, self.end - self.start + 1)]
         return Result(rows)
 
 
@@ -185,6 +186,34 @@ class TestMigrationRepository(unittest.TestCase):
         ):
             with self.assertRaises(InvalidInputError):
                 canonical_request_hash(invalid)
+
+    def test_cycles_and_invalid_unicode_fail_as_safe_input_errors(self):
+        cyclic = []
+        cyclic.append(cyclic)
+        for invalid in (cyclic, {'value': '\ud800'}):
+            with self.assertRaises(InvalidInputError):
+                canonical_request_hash(invalid)
+
+    def test_bigint_cursor_overflow_is_rejected_before_database_query(self):
+        with self.assertRaises(InvalidInputError):
+            self.repo.list_inventory_urls(OWNER, MIGRATION, INVENTORY, after_id=2 ** 63)
+
+    def test_run_and_artifact_reads_reject_wrong_migration_and_owner_identically(self):
+        for table, method in (('migration_runs', self.repo.get_run), ('migration_artifacts', self.repo.get_artifact)):
+            child = uuid4()
+            self.client.tables[table] = [row(child, migration_id=str(MIGRATION))]
+            self.assertEqual(method(OWNER,MIGRATION,child)['id'],str(child))
+            errors = []
+            for owner, migration, item in ((OTHER,MIGRATION,child),(OWNER,uuid4(),child),(OWNER,MIGRATION,uuid4())):
+                with self.assertRaises(MigrationNotFoundError) as error:
+                    method(owner,migration,item)
+                errors.append(str(error.exception))
+            self.assertEqual(len(set(errors)),1)
+
+    def test_default_constructor_gets_fresh_admin_client(self):
+        with patch('backend.services.migration_repository.SupabaseClient.get_admin_client', return_value=self.client) as factory:
+            self.assertIs(MigrationRepository().client,self.client)
+            factory.assert_called_once_with()
 
     def test_reservation_uses_exact_rpc_and_retries_return_rpc_result(self):
         self.client.rpc_data = {

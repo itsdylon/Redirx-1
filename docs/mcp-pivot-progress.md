@@ -39,6 +39,32 @@ or a production-readiness declaration.
 No production configuration, databases, Stripe prices, subscriptions, or
 deployments were changed. No legacy UI or data was removed.
 
+## Third checkpoint — durable records (September 18)
+
+P01's core schema/repository subpacket is implemented. Migration 032 adds
+durable migration, inventory, run, artifact and operation records. Existing
+discovery-provenance storage is reused; legacy session/review/paid-quote IDs
+and links remain untouched. Backfill skips invalid/unowned legacy identities
+and records unknown origins honestly. It does not merge guessed reruns.
+
+Owner-only reads, service-only writes/reservation, composite ownership FKs,
+frozen inventories/artifacts/run bindings, immutable reservation keys and
+account cleanup have executable SQL regression coverage. The Python repository
+uses fresh admin clients, owner-scoped reads and bounded keyset pagination;
+1,000+ row fixtures test responses capped below the requested page size.
+
+Current validation: **73 targeted backend tests passed** (13 repository plus
+the previous 60); **21 SQL tests passed** against in-memory PostgreSQL/PGlite.
+No application runtime dependency was added; PGlite is isolated in the database
+test package. See `database/tests/README.md` and
+`database/migrations/032-durable-migrations-notes.md` for exact commands and
+limits. In particular, one-connection tests do not prove concurrent transactions.
+
+**Not applied to Supabase.** P01 remains partial: grant/quote workflow links,
+atomic usage/grant consumption and run dispatch are still to be implemented
+with P04–P07. No public v2 API or new MCP tools were exposed by this checkpoint.
+The shared ownership/acceptance plan is `plans/2026-09-17-durable-migrations.md`.
+
 ## Validation at integration
 
 - Backend targeted unittest suite: **60 passed** (policy, pagination,
@@ -74,8 +100,8 @@ deployments were changed. No legacy UI or data was removed.
 
 ## Next execution order
 
-1. P01 durable migration/inventory/run/artifact schema and ownership-safe
-   repository layer; include idempotency and upgrade/backfill tests.
+1. P04 durable discovery/preflight and P05 quote/grant workflows against the
+   P01 records; complete transactional run/grant/usage links with P06–P07.
 2. Finish P03 provider resource-bound issuance and live acceptance; exercise
    the real client flow for P02. These are security gates, not optional polish.
 3. P04 durable discovery and P05 authoritative quote/entitlement logic; keep
@@ -100,3 +126,8 @@ warning appeared in both sessions.
 Second pass used no subagents and added no dependencies. It focused solely
 on the OAuth boundary under the user's remaining-usage constraint; no database
 schema work or live provider configuration was attempted.
+
+Third pass reused the same two Herdr helpers for separate schema/repository
+work, with parent review and SQL acceptance tests. No additional agents were
+created. Unrelated edits in the original app and landing repositories were
+left untouched; implementation and tests ran in isolated worktrees.

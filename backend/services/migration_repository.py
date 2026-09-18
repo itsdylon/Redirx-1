@@ -60,8 +60,8 @@ class RepositoryUnavailableError(MigrationRepositoryError):
 
 def canonical_request_hash(request_payload: Any) -> str:
     """Hash JSON deterministically, rejecting values JSON cannot represent."""
-    _validate_json_value(request_payload)
     try:
+        _validate_json_value(request_payload)
         encoded = json.dumps(
             request_payload,
             ensure_ascii=False,
@@ -69,7 +69,7 @@ def canonical_request_hash(request_payload: Any) -> str:
             separators=(",", ":"),
             sort_keys=True,
         ).encode("utf-8")
-    except (TypeError, ValueError) as exc:
+    except (TypeError, ValueError, RecursionError) as exc:
         raise InvalidInputError("request_payload must be valid JSON.") from exc
     return hashlib.sha256(encoded).hexdigest()
 
@@ -129,11 +129,11 @@ def _numeric_cursor(value: Any) -> int:
         raise InvalidInputError("after_id must be a numeric cursor.")
     if isinstance(value, int):
         parsed = value
-    elif isinstance(value, str) and value.isdecimal():
+    elif isinstance(value, str) and len(value) <= 19 and value.isdecimal():
         parsed = int(value)
     else:
         raise InvalidInputError("after_id must be a numeric cursor.")
-    if parsed < 0:
+    if parsed < 0 or parsed > 9_223_372_036_854_775_807:
         raise InvalidInputError("after_id must be a numeric cursor.")
     return parsed
 

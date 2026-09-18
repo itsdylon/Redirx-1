@@ -11,7 +11,11 @@ The pinned dev-only dependency runs PostgreSQL 18.3 in WebAssembly, in memory.
 No Docker daemon, credentials, network requests, or existing databases are used
 by the test command. See [PGlite's API](https://pglite.dev/docs/api).
 
-The harness seeds a minimal legacy schema and applies the real 019, 026, 031,
+The standalone ledger suite applies 031 without 032 and checks owner-only reads,
+anonymous denial, browser write/truncate denial, service-role DML, and safe reapplication
+under permissive default grants. This covers the direct-production deployment boundary.
+
+The durable harness seeds a minimal legacy schema and applies the real 019, 026, 031,
 and 032 migrations. It checks backfill, repeat application, paid-quote/session
 preservation, owner isolation, browser-write denial, reservation replay/conflict,
 immutable inputs/artifacts, safe reruns and account cleanup. Repository paging

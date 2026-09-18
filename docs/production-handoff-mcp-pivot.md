@@ -67,15 +67,15 @@ requests, then base64url-decode the returned access token's payload and read `au
 **Pass:** `aud` contains `https://redirx-mcp-server.onrender.com/` and `client_id` is
 present. Continue to section 2.
 
-**Fail:** stop. Do not merge. You have three options and all of them are decisions, not
-fixes: get resource indicators working on the Supabase side, put a token-minting step in
-your own backend that issues resource-bound tokens, or relax
-`verifyAccessToken`. The third weakens the resource-binding the commit
-`c347c17 "enforce resource-bound OAuth token claims"` deliberately added, so it is a
-security decision made on purpose and written down — never a quiet loosening to make a
-test go green.
+**Fail:** stop. Do not merge or relax `verifyAccessToken`. Resolve resource-bound
+issuance with the provider, or design and review a standards-compliant authorization
+layer that issues resource-bound tokens. Either needs its own implementation and
+acceptance tests; accepting ordinary browser session tokens is not a rollout shortcut.
 
-Nothing in this step touches production. It is free to run and it can save you a merge.
+This step does not deploy app code or apply schema changes, but registering an OAuth
+client and granting consent changes the production provider's state. Use a dedicated
+test account/client, keep tokens out of logs, and remove the test registration and
+grant afterward. Do not weaken the gateway's audience checks to make this gate pass.
 
 ---
 
@@ -145,16 +145,24 @@ dashboard step.** There is no way around it from here.
 
 Apply `database/migrations/031_add_account_usage_events.sql` to `bzpkrjnaatvohsipmupk`.
 
-It is `CREATE TABLE IF NOT EXISTS account_usage_events` plus
-`CREATE INDEX IF NOT EXISTS` and nothing else. Purely additive, idempotent, no lock on
-any existing table, invisible to the code currently running.
+Use the hardened version: it creates the table/index, enables row-level security,
+revokes public/anonymous/browser write privileges, grants authenticated owner-only
+reads, and retains backend service-role writes, all in one transaction. These controls
+must ship in **031 itself**: relying on 032 would leave the standalone ledger exposed.
+It is reapplicable and preserves existing events, but reapplication takes table locks
+while tightening privileges. If 031 was already applied from an older revision, execute
+the hardened SQL explicitly; a migration runner may otherwise skip its recorded name.
 
 This must precede Stage C. `entitlement_service.UsageLedger` reads and writes this table
 on the live path — `check_deep_match_run` and `record_export` both hit it — so backend
 code deployed against a missing table turns every Deep Match run and every export into a
 500.
 
-*Verify:* the migration list shows `031` as newest. `032` absent.
+*Verify:* the migration list shows `031` as newest. `032` absent. Confirm RLS is enabled,
+anonymous reads and authenticated writes fail, two test accounts cannot read each
+other's events, and the backend service role can still record/read usage. Run
+`npm test --prefix database/tests` before rollout; its standalone ledger suite applies
+031 **without 032**, including permissive hosted default grants and reapplication.
 
 *Rollback:* none needed. Old code ignores the table. If you want it gone after a full
 abort, `DROP TABLE account_usage_events` once no pivot code is running — but leaving it

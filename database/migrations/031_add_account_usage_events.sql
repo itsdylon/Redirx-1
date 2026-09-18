@@ -29,6 +29,8 @@
 -- entitlements ship, they scope on this column instead of adding a parallel
 -- table.
 
+BEGIN;
+
 CREATE TABLE IF NOT EXISTS account_usage_events (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID NOT NULL REFERENCES user_profiles(id) ON DELETE CASCADE,
@@ -51,3 +53,16 @@ COMMENT ON COLUMN account_usage_events.domain IS
 -- The hot path: "how much of `kind` has this user drawn since `cutoff`."
 CREATE INDEX IF NOT EXISTS idx_account_usage_events_user_kind_created
   ON account_usage_events (user_id, kind, created_at DESC);
+
+-- This migration can ship without 032. Secure the ledger here, including
+-- projects whose public-schema default grants expose newly created tables.
+ALTER TABLE account_usage_events ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON TABLE account_usage_events FROM PUBLIC, anon, authenticated;
+GRANT SELECT ON TABLE account_usage_events TO authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE account_usage_events TO service_role;
+
+DROP POLICY IF EXISTS account_usage_events_select_own ON account_usage_events;
+CREATE POLICY account_usage_events_select_own ON account_usage_events
+  FOR SELECT TO authenticated USING (user_id = auth.uid());
+
+COMMIT;

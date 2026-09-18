@@ -21,6 +21,12 @@ and previews, including column grants, browser-write denial, service-role DML,
 reapplication and cleanup. The service role in this fixture deliberately lacks
 BYPASSRLS to exercise the explicit service-only policy.
 
+The inventory-import suite applies 034 after 032 and verifies atomic publication,
+retry/conflict behavior, role/owner isolation, rollback and 15,001 stored URL rows.
+One interoperability case invokes `python3` (or the `PYTHON` executable override)
+with only the standard library to pass actual Python policy output into SQL.
+It needs no Python application dependencies or credentials.
+
 The durable harness seeds a minimal legacy schema and applies the real 019, 026, 031,
 and 032 migrations. It checks backfill, repeat application, paid-quote/session
 preservation, owner isolation, browser-write denial, reservation replay/conflict,

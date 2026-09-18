@@ -141,6 +141,17 @@ activation or new MCP tool was introduced. Legacy discovery remains unchanged.
 
 ## Next execution order
 
+P04 persistence follow-up: local migration 034 and `InventoryImportService` now
+publish explicit imports atomically against 032's durable records. Ownership is
+checked before preflight and again by SQL; retries reuse operation/snapshot IDs,
+changed payloads conflict, failed writes roll back, and partial snapshots remain
+incomplete/immutable. All original URL variants and provenance are persisted;
+counting uses distinct canonical keys. A 15,001-row fixture is stored completely.
+Validation is now **153 backend tests and 44 SQL tests passed**, including actual
+Python policy output passed into SQL. No route or worker imports this service;
+032/034 remain unapplied. P04 still lacks migration creation, import endpoints,
+async network discovery and real multi-connection release acceptance.
+
 September 18 security follow-up: migration 033 now has a separately tested local
 remediation for the four internal tables reported without RLS. It denies direct
 browser reads/writes while preserving backend DML. `DeepMatchPreviewDB` now defaults

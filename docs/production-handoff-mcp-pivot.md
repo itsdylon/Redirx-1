@@ -155,25 +155,27 @@ activates the new pricing, this fails. Wire it into CI if you have one.
 **Gate 2 — nothing on a production path imports the dormant modules.**
 
 ```bash
-grep -rn "pivot_policy\|preview_migration_price\|migration_repository\|MigrationRepository" \
-  --include="*.py" backend src \
-  | grep -v __pycache__ \
-  | grep -v "^backend/tests/" \
-  | grep -v "^backend/services/pivot_policy.py:" \
-  | grep -v "^backend/services/migration_repository.py:"
+rg -n 'pivot_policy|preview_migration_price|migration_repository|MigrationRepository|inventory_policy|preflight_inventory|inventory_import_service|InventoryImportService|publish_inventory_import' \
+  --glob '*.py' --glob '!**/tests/**' \
+  --glob '!**/services/pivot_policy.py' \
+  --glob '!**/services/migration_repository.py' \
+  --glob '!**/services/inventory_policy.py' \
+  --glob '!**/services/inventory_import_service.py' backend src
 ```
 
-Expected output: **nothing at all.** The excluded paths are the two dormant modules
-referring to themselves and their own tests. Any surviving line — a hit in
-`backend/routes/`, another service, or `src/redirx/` — means the dormant work has become
-live and this handoff no longer describes what you are shipping.
+Expected output: **nothing at all** (rg exits 1 for no matches). The four excluded
+modules form the dormant implementation boundary: the unwired import service now
+uses the repository and pure policy, but no route/worker may import that service.
+Any surviving hit needs review before shipping. This static reference check does
+not prove absence of dynamic imports or live configuration changes.
 
-**Gate 3 — migration 032 is not applied.**
+**Gate 3 — migrations 032 and 034 are not applied.**
 
 Listing Supabase migrations must show `031_add_account_usage_events`
-(`20260918183005`) as the newest. `032` must never appear. `migration_repository.py` is
-the only consumer of 032's tables and Gate 2 proves nothing calls it, so the tables being
-absent is invisible to the running system.
+(`20260918183005`) as the newest for this rollout. `032` and dependent import RPC
+migration `034` must remain absent. Their repository/import service has no production
+caller. Security migration `033` is a separate release with its own API/worker
+prerequisite; do not apply it opportunistically with the consent rollout either.
 
 Why 032 is excluded rather than deferred: it contains 35 `CREATE` statements plus
 `ALTER TABLE session_discovered_urls ALTER COLUMN session_id DROP NOT NULL` and triggers

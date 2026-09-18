@@ -24,15 +24,24 @@ migration/inventory/run/artifact model it creates, and the fixed-band pivot pric
 `contracts/pivot-v1.json`. These merge as code and stay inert. Section 2 is how you
 prove that, not a promise.
 
-**Current production state.** All three live services run `main` at `23fff0b7`.
-Supabase `bzpkrjnaatvohsipmupk` is migrated through `030_add_match_repair`
-(`20260820215143`). The gateway `redirx-mcp-server` already runs `pivot/mcp-primary` at
-`c2690d6` and answers `/health`, but cannot resolve an identity because `main` has no
-`internal_routes.py`.
+**Current production state (2026-09-18, after Stage A).** All three live services still
+run `main` at `23fff0b7` — no application code has been deployed. Supabase
+`bzpkrjnaatvohsipmupk` is migrated through **`031_add_account_usage_events`**
+(`20260918183005`); `032` is absent. The gateway `redirx-mcp-server` runs
+`pivot/mcp-primary` at `c2690d6` and answers `/health`, but has never served an
+authenticated tool call and cannot resolve an identity, because `main` has no
+`internal_routes.py`. **A `/health` 200 is not authenticated acceptance.**
+
+**Sequencing deviation, recorded honestly.** This document originally placed Step 0 before
+everything. Stage A (migration 031) was in fact applied *before* Step 0 ran, because Step 0
+turned out to depend on a deployment (section 1a). Stage A was allowed to proceed ahead of
+the gate on the grounds that it is additive, idempotent, RLS-hardened, verified after the
+fact, and has no dependency on OAuth — the ledger serves the entitlement layer, not
+authentication. Nothing else moved ahead of the gate.
 
 ---
 
-## 1. Step 0 — the blocking gate, before anything is merged
+## 1. Step 0 — the blocking gate (runs after Stage E; see 1a)
 
 `mcp-server/src/auth/supabaseAuthAdapter.ts` requires every access token to carry
 
@@ -59,13 +68,27 @@ authorization_endpoint: https://bzpkrjnaatvohsipmupk.supabase.co/auth/v1/oauth/a
 token_endpoint:         https://bzpkrjnaatvohsipmupk.supabase.co/auth/v1/oauth/token
 ```
 
-**Do this:** register a throwaway client via DCR, run an authorization-code + PKCE flow
-with `resource=https://redirx-mcp-server.onrender.com/` on both the authorize and token
-requests, then base64url-decode the returned access token's payload and read `aud` and
-`client_id`.
+**Do this:**
+
+1. Register a dedicated throwaway client via DCR. Verified working 2026-09-18: returns a
+   public client (`token_endpoint_auth_method: none`, no secret),
+   `registration_type: dynamic`. Give it one loopback redirect URI,
+   `http://127.0.0.1:8765/callback`, so a leaked `client_id` cannot route codes anywhere
+   useful.
+2. Mint a **fresh** PKCE verifier/challenge (S256) and a fresh `state` at the moment of
+   use. Never reuse a pair that has been written down, logged, or shown in a transcript.
+3. Start a local one-shot listener on `127.0.0.1:8765` **before** opening the browser.
+4. Have the operator complete consent in their own browser (1a has the exact action).
+   **Never ask anyone to copy an authorization code, token, or `authorization_id` into a
+   chat, ticket, or commit message.** An auth code is a live single-use credential; the
+   loopback listener exists so no human ever handles it.
+5. Exchange the captured code at the token endpoint with the verifier and the same
+   `resource` value.
+6. Base64url-decode the access token payload and read `aud`, `client_id`, `iss`, `sub`.
+   Report those fields only. Never print the raw token.
 
 **Pass:** `aud` contains `https://redirx-mcp-server.onrender.com/` and `client_id` is
-present. Continue to section 2.
+present and non-empty. Continue to section 2.
 
 **Fail:** stop. Do not merge or relax `verifyAccessToken`. Resolve resource-bound
 issuance with the provider, or design and review a standards-compliant authorization
@@ -76,6 +99,37 @@ This step does not deploy app code or apply schema changes, but registering an O
 client and granting consent changes the production provider's state. Use a dedicated
 test account/client, keep tokens out of logs, and remove the test registration and
 grant afterward. Do not weaken the gateway's audience checks to make this gate pass.
+
+---
+
+## 1a. The consent prerequisite — why the frontend now ships first
+
+Measured 2026-09-18. The authorize endpoint accepts the `resource` parameter and returns
+302 — **and returns 302 without it too**, so acceptance proves nothing about binding. Only
+the token exchange answers the `aud` question.
+
+That 302 goes to `https://app.redirx.dev/oauth/consent?authorization_id=…`, and **that page
+does not exist in production**: the served bundle contains zero occurrences of
+`oauth/consent`. The 200 the URL returns today is only the SPA `/*` → `/index.html` rewrite
+falling through to the router's catch-all.
+
+So Supabase hands the user to *your own* consent page, and the gate cannot complete until
+that page is live. Step 0 therefore cannot precede all deployment, as section 1 originally
+assumed. This is a correction to this document, not a change of plan.
+
+What makes reordering safe rather than merely necessary: `OAuthConsentPage.tsx` calls only
+`supabase.auth.oauth.getAuthorizationDetails` / `approveAuthorization` /
+`denyAuthorization`. It makes **no RedirX backend calls** and needs no dependency bump
+(`@supabase/supabase-js ^2.87.1` on both branches). It does require a signed-in session.
+The consent page is independent of the API and worker and can ship alone.
+
+**Corrected order:** Stage A → Stage B → **Stage E (frontend) → Step 0 gate** → Stage C
+(API) → Stage D (worker) → Stage F (gateway) → Stage H.
+
+Keep that frontend change narrowly scoped. Do **not** merge the whole pivot branch to get
+it — the branch is under active development and a merge sweeps in whatever landed since it
+was last reviewed. Ship an explicitly reviewed SHA carrying the consent files only, and
+record that SHA here when it exists.
 
 ---
 
@@ -116,10 +170,10 @@ live and this handoff no longer describes what you are shipping.
 
 **Gate 3 — migration 032 is not applied.**
 
-Listing Supabase migrations must show `030_add_match_repair` as the newest before you
-start, and `031` as the newest after. `032` must never appear. `migration_repository.py`
-is the only consumer of 032's tables and Gate 2 proves nothing calls it, so the tables
-being absent is invisible to the running system.
+Listing Supabase migrations must show `031_add_account_usage_events`
+(`20260918183005`) as the newest. `032` must never appear. `migration_repository.py` is
+the only consumer of 032's tables and Gate 2 proves nothing calls it, so the tables being
+absent is invisible to the running system.
 
 Why 032 is excluded rather than deferred: it contains 35 `CREATE` statements plus
 `ALTER TABLE session_discovered_urls ALTER COLUMN session_id DROP NOT NULL` and triggers
@@ -132,6 +186,13 @@ would be the one genuinely unsafe act available.
 
 ## 3. Ordered deployment
 
+> **Execution order (corrected — read this, not the stage letters).**
+> Stage letters are kept stable so earlier references stay valid, but they no longer run
+> alphabetically. Actual order:
+> **A (done) → B → E → Step 0 gate → C → D → F → H.**
+> Stage E moved ahead of the gate because the gate needs the consent page (section 1a).
+> Nothing else may precede the gate.
+
 ### Why the order needs forcing
 
 All three production services auto-deploy from `main` on commit. Merging the pivot fires
@@ -141,7 +202,7 @@ ordered deployment and gives you three things to diagnose at once if it goes wro
 The Render MCP tooling has no tool for changing `autoDeploy`, so **Stage B is a manual
 dashboard step.** There is no way around it from here.
 
-### Stage A — migration 031
+### Stage A — migration 031 — ✅ DONE 2026-09-18
 
 Apply `database/migrations/031_add_account_usage_events.sql` to `bzpkrjnaatvohsipmupk`.
 
@@ -158,7 +219,14 @@ on the live path — `check_deep_match_run` and `record_export` both hit it — 
 code deployed against a missing table turns every Deep Match run and every export into a
 500.
 
-*Verify:* the migration list shows `031` as newest. `032` absent. Confirm RLS is enabled,
+*Verify:* the migration list shows `031` as newest. `032` absent.
+
+*Result, read back from production after applying:* migration `20260918183005`;
+`rls_enabled: true`; one policy `account_usage_events_select_own : SELECT :
+(user_id = auth.uid())`; grants `authenticated=SELECT` (RLS-gated) and `service_role` DML;
+**`anon` and `PUBLIC` absent**; 0 rows. Supabase's security advisor reports no finding
+against `account_usage_events`. The hardened SQL (commit `6298005`) was applied — the
+earlier unsecured revision never reached production. Confirm RLS is enabled,
 anonymous reads and authenticated writes fail, two test accounts cannot read each
 other's events, and the backend service role can still record/read usage. Run
 `npm test --prefix database/tests` before rollout; its standalone ledger suite applies
@@ -170,14 +238,20 @@ is harmless and preserves whatever usage was recorded.
 
 ### Stage B — stop the fan-out
 
-In the Render dashboard, set **Auto-Deploy to No** on `redirx-worker` and
-`redirx-frontend`. Leave `redirx-api` on Yes.
+In the Render dashboard, set **Auto-Deploy to No** on **all three**: `redirx-api`,
+`redirx-worker` and `redirx-frontend`.
+
+All three, not two. Under the corrected order the frontend ships first, so the API must
+*not* fire on the merge that carries it. There is no Render MCP tool for `autoDeploy`, so
+this is a human dashboard action and the rollout is blocked until it is done.
 
 *Verify:* both services show auto-deploy disabled.
 
 *Rollback:* turn them back on. Nothing has deployed yet.
 
 ### Stage C — merge, and let the API deploy alone
+
+> Runs **after** the Step 0 gate passes, not before. See the order banner above.
 
 Merge `pivot/mcp-primary` into `main` and push. Only `redirx-api` picks it up.
 
@@ -208,7 +282,7 @@ would show up.
 
 *Rollback:* roll back to `dep-dambgejijnfac73e6om30` (commit `23fff0b7`).
 
-### Stage E — frontend
+### Stage E — frontend — runs BEFORE the gate (see 1a)
 
 Manually deploy `redirx-frontend` from `main`.
 
@@ -387,5 +461,22 @@ PostHog as data rather than as silence — but it is far cheaper to fix the docs
   Virginia and Render defaults new ones to Oregon, and its private network is regional.
 - **`PYTHON_VERSION` is unpinned.** Render reports "3.13.4 (default)"; `posthog>=7.0.0`
   needs 3.10+, so a default bump is fine today and worth pinning anyway.
+- **Four public tables have no RLS at all.** Supabase's security advisor reports
+  `rls_disabled_in_public` at **ERROR** level, facing EXTERNAL, for
+  `project_pricing_quotes`, `agency_usage_events`, `stripe_webhook_events` and
+  `deep_match_previews`. These predate this work — nothing in this handoff created or
+  worsened them, and `account_usage_events` is not among them.
+
+  **Do not remediate them mid-rollout.** Enabling RLS on live billing and quote tables
+  changes read paths that the running application depends on, and doing it while a
+  staged deployment is in flight means any breakage is impossible to attribute. Schedule
+  it as its own change, with its own verification, once the pivot has landed or been
+  abandoned. It is worth doing: unprotected quote and Stripe webhook rows behind
+  PostgREST is a real exposure, and pricing work is exactly what will draw attention to
+  those tables.
+
+  A further 9 tables have RLS enabled with no policies. That combination fails closed, so
+  it is much less urgent than the four above.
+
 - **Migration 032 and the durable-migrations model** remain unshipped. When they are
   taken up, they need the staging copy their own notes ask for.

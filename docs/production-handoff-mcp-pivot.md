@@ -316,6 +316,49 @@ deploy".
 
 ---
 
+## 3a. Migration 033 — the ordering is the OPPOSITE of 031
+
+Prepared on `pivot/mcp-primary` (`eaa8b4a`), **not applied**, and deliberately independent
+of 032. It closes the four ERROR-level advisor findings in section 8: RLS plus revoked
+table *and column* privileges for PUBLIC/anon/authenticated, backend DML, and a
+service-role-only policy on `project_pricing_quotes`, `agency_usage_events`,
+`stripe_webhook_events` and `deep_match_previews`.
+
+**Do not apply it by analogy with Stage A.** Stage A ran the migration *before* the code
+because 031 only adds a table — nothing existing could break. 033 *revokes privileges on
+tables production is already using*, so the live code has to be compatible before the
+grants change, not after. Migration-first here is an outage.
+
+The specific prerequisite: `DeepMatchPreviewDB` previously used a shared, auth-mutable
+client that can pick up a user's JWT during sign-in and lose service privileges for later
+jobs. `eaa8b4a` gives it a fresh admin client. That fix must be **deployed to API and
+worker first**, and it is a code-only change that is safe while the old grants are still
+in place.
+
+Independently verified for this handoff, rather than taken from the source audit (whose
+own notes caution that it "does not prove no external scripts use these tables"):
+
+- The frontend never names any of the four tables. Stronger than that — `frontend/src`
+  contains **no direct PostgREST table calls at all** (`.from('…')` appears nowhere
+  outside tests). The browser has no direct dependency to break.
+- `PricingService`, `StripeService` and `DeepMatchPreviewDB` all construct
+  `SupabaseClient.get_admin_client()`, so every backend reader already holds service_role.
+
+That closes the source-side question. It does **not** close the external-script question —
+anything outside this repo using an anon or user key against those tables would break, and
+only production observation can rule that out.
+
+**Where it sits in the order:** after Stage D, in its own release window, never
+interleaved with the OAuth rollout. Stage C and D already deploy the preview fix as part
+of the branch, so by the time the OAuth rollout finishes the code prerequisite is
+satisfied — then 033 is applied alone, and the grants read back and verified.
+
+`033` must be tracked explicitly in the migration log. Do not "run all pending
+migrations": `032` sorts first and must not be applied. See
+`database/migrations/033-internal-billing-rls-notes.md`.
+
+---
+
 ## 4. The real authenticated MCP test
 
 Two halves. The negative half proves the guards are intact; the positive half proves a

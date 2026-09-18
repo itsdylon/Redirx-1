@@ -48,6 +48,7 @@ from redirx.redirect_probe import (
 )
 from redirx.safe_fetch import create_safe_connector
 from src.redirx.database import SupabaseClient
+from backend.services.analytics_service import AppEvent, capture
 
 logger = logging.getLogger(__name__)
 
@@ -208,7 +209,16 @@ class WatchService:
         existing = self.get_watch_for_session(session_id)
         if existing:
             if existing.get("status") != "active":
-                return self.set_status(existing["id"], "active")
+                reactivated = self.set_status(existing["id"], "active")
+                capture(
+                    AppEvent.MONITORING_ACTIVATED,
+                    user_id=user_id,
+                    migration_id=session_id,
+                    properties={"activation": "reactivated"},
+                )
+                return reactivated
+            # Already active: idempotent no-op, and not an activation. Counting
+            # it would make "watch this" clicked twice look like two customers.
             return existing
 
         session = (
@@ -245,7 +255,18 @@ class WatchService:
             payload["intensive_until"] = (_now() + timedelta(days=INTENSIVE_DAYS)).isoformat()
 
         result = self.client.table("redirect_watches").insert(payload).execute()
-        return result.data[0]
+        watch = result.data[0]
+        capture(
+            AppEvent.MONITORING_ACTIVATED,
+            user_id=user_id,
+            migration_id=session_id,
+            properties={
+                "activation": "created",
+                "check_interval_minutes": check_interval_minutes,
+                "intensive": bool(start_intensive),
+            },
+        )
+        return watch
 
     def _infer_old_domain(self, session_id: str) -> str:
         """
@@ -556,6 +577,26 @@ class WatchService:
                 ).eq("id", check_id).execute()
 
             outcome.alerted = self.send_alert_if_needed(watch)
+
+            capture(
+                AppEvent.MIGRATION_VERIFICATION_COMPLETED,
+                user_id=watch.get("user_id"),
+                migration_id=watch.get("session_id"),
+                properties={
+                    "urls_checked": outcome.urls_checked,
+                    "urls_ok": outcome.urls_ok,
+                    "issues_open": outcome.issues_open,
+                    "issues_new": outcome.issues_new,
+                    "issues_resolved": outcome.issues_resolved,
+                    "clicks_at_risk": outcome.clicks_at_risk,
+                    "alerted": outcome.alerted,
+                    # _select_urls caps a sweep at MAX_URLS_PER_SWEEP, so a
+                    # clean sweep is not the same claim as a clean migration.
+                    # Without this flag every "0 issues" row reads as total
+                    # coverage, including the ones that never looked at the tail.
+                    "coverage_capped": outcome.urls_checked >= MAX_URLS_PER_SWEEP,
+                },
+            )
             return outcome
 
         except Exception as exc:
@@ -567,6 +608,15 @@ class WatchService:
                         "error": str(exc)[:500],
                     }
                 ).eq("id", check_id).execute()
+            # A monitoring outage is invisible to the customer and to every
+            # metric built on sweep results — those just stop producing rows.
+            # This is the only place it becomes a number.
+            capture(
+                AppEvent.MONITORING_CHECK_FAILED,
+                user_id=watch.get("user_id"),
+                migration_id=watch.get("session_id"),
+                properties={"error_type": type(exc).__name__},
+            )
             raise
 
     def _reconcile(

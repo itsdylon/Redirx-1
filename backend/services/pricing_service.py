@@ -10,6 +10,7 @@ from typing import Any
 from uuid import UUID
 
 from redirx.database import SupabaseClient
+from backend.services.analytics_service import AppEvent, capture
 
 
 PRICING_VERSION = "v1_2026_03"
@@ -189,11 +190,35 @@ class PricingService:
             result = self.client.table("project_pricing_quotes").update(payload).eq(
                 "source_session_id", source_session_id
             ).execute()
-            return result.data[0] if (result and result.data) else {**payload, "id": existing_data["id"]}
+            quote = result.data[0] if (result and result.data) else {**payload, "id": existing_data["id"]}
+        else:
+            payload["created_at"] = _now_iso()
+            result = self.client.table("project_pricing_quotes").insert(payload).execute()
+            quote = result.data[0] if (result and result.data) else payload
 
-        payload["created_at"] = _now_iso()
-        result = self.client.table("project_pricing_quotes").insert(payload).execute()
-        return result.data[0] if (result and result.data) else payload
+        # The moment a price is put in front of someone — the denominator for
+        # every conversion question about the pricing bands. Captured after
+        # persistence so a quote that failed to store is not counted as shown.
+        capture(
+            AppEvent.MIGRATION_QUOTE_PRESENTED,
+            user_id=user_id,
+            migration_id=source_session_id,
+            properties={
+                "billable_pages": billable_pages,
+                "old_url_count": old_count,
+                "new_url_count": new_count,
+                "subtotal_cents": estimate["subtotal_cents"],
+                "currency": estimate["currency"],
+                "pricing_version": estimate["pricing_version"],
+                "contact_required": bool(estimate["contact_required"]),
+                "pipeline_type": pipeline_type,
+                # A re-quote is not a new prospect. Without this the same
+                # migration inflates the top of the funnel every refresh.
+                "is_requote": existing_data is not None,
+                "quote_status": quote.get("status"),
+            },
+        )
+        return quote
 
     def get_quote_for_source(self, source_session_id: UUID | str, user_id: str) -> dict[str, Any] | None:
         result = self.client.table("project_pricing_quotes").select("*").eq(
@@ -244,7 +269,19 @@ class PricingService:
                 "updated_at": _now_iso(),
             }
         ).eq("id", quote_id).execute()
-        return result.data[0] if (result and result.data) else None
+        quote = result.data[0] if (result and result.data) else None
+        if quote:
+            capture(
+                AppEvent.MIGRATION_QUOTE_CHECKOUT_STARTED,
+                user_id=quote.get("user_id"),
+                migration_id=quote.get("source_session_id"),
+                properties={
+                    "billable_pages": quote.get("billable_pages"),
+                    "subtotal_cents": quote.get("subtotal_cents"),
+                    "currency": quote.get("currency"),
+                },
+            )
+        return quote
 
     def mark_paid(self, quote_id: str, stripe_payment_intent_id: str | None = None) -> dict[str, Any] | None:
         updates: dict[str, Any] = {
@@ -258,7 +295,23 @@ class PricingService:
         result = self.client.table("project_pricing_quotes").update(updates).eq(
             "id", quote_id
         ).execute()
-        return result.data[0] if (result and result.data) else None
+        quote = result.data[0] if (result and result.data) else None
+        if quote:
+            # Revenue. Deliberately the quote row's own figure rather than
+            # anything read back from Stripe — this is the number the customer
+            # was shown, which is what a pricing-band question is actually about.
+            capture(
+                AppEvent.MIGRATION_PAYMENT_COMPLETED,
+                user_id=quote.get("user_id"),
+                migration_id=quote.get("source_session_id"),
+                properties={
+                    "billable_pages": quote.get("billable_pages"),
+                    "subtotal_cents": quote.get("subtotal_cents"),
+                    "currency": quote.get("currency"),
+                    "pricing_version": quote.get("pricing_version"),
+                },
+            )
+        return quote
 
     def attach_deep_session(self, quote_id: str, deep_session_id: UUID | str) -> dict[str, Any] | None:
         result = self.client.table("project_pricing_quotes").update(

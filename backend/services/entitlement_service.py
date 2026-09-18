@@ -41,6 +41,7 @@ from uuid import UUID
 
 from src.redirx.config import Config
 from src.redirx.database import SupabaseClient
+from backend.services.analytics_service import AppEvent, capture
 from backend.services.pricing_service import PricingService
 
 # Plans that pay on a schedule rather than per-project. Same three-way split
@@ -192,6 +193,19 @@ def check_deep_match_run(
     )
 
     if used >= FREE_RUN_HARD_CAP:
+        # An abuse ceiling that starts firing on real accounts is either an
+        # attack or a cap set too low for how agents actually work. The two
+        # look identical in aggregate run counts and different here.
+        capture(
+            AppEvent.RUN_ENTITLEMENT_DENIED,
+            user_id=user_id,
+            properties={
+                "plan": plan,
+                "reason": "free_run_ceiling_exceeded",
+                "runs_used": used,
+                "window_hours": FREE_RUN_WINDOW_HOURS,
+            },
+        )
         return Decision(
             allowed=False,
             code="free_run_ceiling_exceeded",
@@ -233,6 +247,14 @@ def record_deep_match_run(
     request must never consume the ceiling — only real worker draw does.
     """
     plan = (plan or "free").lower()
+    # Captured before the paid-plan early return below, or the run count would
+    # silently exclude exactly the accounts that pay us.
+    capture(
+        AppEvent.MIGRATION_RUN_STARTED,
+        user_id=user_id,
+        migration_id=session_id,
+        properties={"plan": plan, "metered": plan not in PAID_PLANS},
+    )
     if plan in PAID_PLANS:
         return
     (ledger or UsageLedger()).record(
@@ -259,13 +281,43 @@ def check_export(
     """
     plan = (plan or "free").lower()
     if plan in PAID_PLANS:
+        capture(
+            AppEvent.EXPORT_ENTITLEMENT_GRANTED,
+            user_id=user_id,
+            migration_id=session_id,
+            properties={"plan": plan, "grant_reason": "paid_plan"},
+        )
         return Decision(allowed=True)
 
     pricing_service = pricing_service or PricingService()
     quote = pricing_service.get_quote_for_export(session_id, user_id)
     if quote and (quote.get("status") or "").lower() == "paid":
+        capture(
+            AppEvent.EXPORT_ENTITLEMENT_GRANTED,
+            user_id=user_id,
+            migration_id=session_id,
+            properties={
+                "plan": plan,
+                "grant_reason": "quote_paid",
+                "billable_pages": quote.get("billable_pages"),
+            },
+        )
         return Decision(allowed=True)
 
+    # The paywall firing. Worth an event of its own: a denial rate that moves
+    # without the quote rate moving is the signature of someone who paid being
+    # blocked anyway — which reads as "nobody wants it" in every other metric.
+    capture(
+        AppEvent.EXPORT_ENTITLEMENT_DENIED,
+        user_id=user_id,
+        migration_id=session_id,
+        properties={
+            "plan": plan,
+            "reason": "export_requires_payment",
+            "has_quote": quote is not None,
+            "quote_status": (quote or {}).get("status"),
+        },
+    )
     return Decision(
         allowed=False,
         code="export_requires_payment",
@@ -293,4 +345,14 @@ def record_export(
         kind=USAGE_KIND_EXPORT,
         session_id=session_id,
         quantity=quantity,
+    )
+    # The deliverable actually leaving the building. This is the success event
+    # the whole funnel points at, and the one an MCP tool call cannot report on
+    # its own — the gateway knows `export` was called, not that it produced
+    # something the customer was entitled to receive.
+    capture(
+        AppEvent.REDIRECT_ARTIFACT_EXPORTED,
+        user_id=user_id,
+        migration_id=session_id,
+        properties={"quantity": quantity},
     )

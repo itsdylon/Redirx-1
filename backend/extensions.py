@@ -8,10 +8,12 @@ import hashlib
 import logging
 import os
 
-from flask import jsonify, request
+from flask import got_request_exception, jsonify, request
 from flask_limiter import Limiter
 from flask_limiter.errors import RateLimitExceeded
 from werkzeug.exceptions import RequestEntityTooLarge
+
+from backend.services.analytics_service import capture_exception
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +59,46 @@ if _RATE_LIMIT_STORAGE_URI.startswith("memory://"):
     )
 
 
+def _request_user_id() -> str | None:
+    """The authenticated user, when one got as far as being attached."""
+    user = getattr(request, "user", None)
+    if user is None:
+        return None
+    user_id = getattr(user, "id", None) or (user.get("id") if isinstance(user, dict) else None)
+    return str(user_id) if user_id else None
+
+
+def _capture_request_exception(_sender, exception, **_extra):
+    """
+    Report a 500 to PostHog Error Tracking.
+
+    Deliberately hooked to Flask's `got_request_exception` signal rather than
+    an `@app.errorhandler(Exception)`. A catch-all error handler would also
+    swallow every `HTTPException` — 404s, 405s, the 401 the auth decorator
+    returns — and turn them into 500s. The signal only fires for genuinely
+    unhandled exceptions and does not participate in building the response, so
+    this is observability with no behavioural change.
+    """
+    try:
+        capture_exception(
+            exception,
+            user_id=_request_user_id(),
+            properties={
+                "path": request.path,
+                "method": request.method,
+                "endpoint": request.endpoint,
+            },
+        )
+    except Exception:
+        # The exception reporter must never be the reason a request fails.
+        logger.exception("Failed to report request exception")
+
+
 def register_error_handlers(app) -> None:
+    # Weak references are the default and would let this handler be garbage
+    # collected immediately, since nothing else holds a reference to it.
+    got_request_exception.connect(_capture_request_exception, app, weak=False)
+
     @app.errorhandler(RequestEntityTooLarge)
     def _handle_request_too_large(_error):
         max_bytes = int(app.config.get("MAX_CONTENT_LENGTH", 0) or 0)

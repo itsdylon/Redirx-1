@@ -27,6 +27,7 @@ from functools import wraps
 
 from flask import Blueprint, jsonify, request
 
+from backend.services.analytics_service import AppEvent, capture
 from backend.services.mcp_delegation_service import MCPDelegationService
 from backend.services.gsc_service import GSCService
 from src.redirx.config import Config
@@ -87,7 +88,9 @@ def resolve_identity():
         .execute()
     )
 
+    provisioned_here = False
     if not profile or not profile.data:
+        provisioned_here = True
         # Supabase Auth's own handle_new_user() trigger creates this row for
         # every real signup; reaching here means either a race (resolve
         # called before the trigger committed) or a non-Supabase
@@ -126,6 +129,22 @@ def resolve_identity():
         gsc_connected = bool(GSCService().get_status(subject).get("connected"))
     except Exception:
         gsc_connected = False
+
+    # The handshake succeeding. The gateway's own $mcp_* events cover tool
+    # traffic, but they are captured against an identity this call is what
+    # establishes — so a failure here shows up there as silence, not as a
+    # failed connection. `provisioned_here` separates an agent-first signup
+    # (no browser account ever existed) from an existing customer connecting
+    # a client, which are different products working.
+    capture(
+        AppEvent.MCP_IDENTITY_RESOLVED,
+        user_id=subject,
+        properties={
+            "plan": plan,
+            "gsc_connected": gsc_connected,
+            "provisioned_here": provisioned_here,
+        },
+    )
 
     return jsonify({
         "user_id": subject,

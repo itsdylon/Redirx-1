@@ -98,6 +98,45 @@ The shared ownership/acceptance plan is `plans/2026-09-17-durable-migrations.md`
    resource-bound issuance before deploying this gateway. See the MCP README
    for exact audience matching and negative/positive live acceptance cases.
 
+## Fourth checkpoint — ledger safety and explicit import policy (September 18)
+
+September 18 follow-up: migration 031 is now independently secured with RLS,
+owner-only browser reads and service-only writes. The direct-production handoff
+must use this revision even when 032 is excluded. Standalone-031 plus durable SQL
+coverage passes **25 tests**; targeted backend regression coverage passes **101**
+including Claude's analytics, entitlement and worker usage tests. These are local
+results, not evidence that SQL was applied or production OAuth works. Claude's last
+observed result initially was a handoff document. Codex then prompted Claude to own
+the production OAuth gate and rollout; Claude found the missing deployed consent
+page and started applying hardened 031. This is not evidence of a completed rollout
+or a successful resource-audience test. Consult the live deployment handoff for status.
+
+P04 now has a **pure explicit-import policy foundation**, not a public endpoint:
+`backend/services/inventory_policy.py`. It preserves original URL variants,
+query spelling/order, path case, escaping, slash variants and explicit default ports.
+Fragments do not affect counting identity. Only declared origins/aliases are accepted;
+www equivalence is never guessed. Counting keys are stored separately but currently
+equal canonical identity; no asset or tracking-query exclusion policy is invented.
+
+Version `explicit_inventory_v1` binds origins, side, items, provenance, exclusions
+and import coverage to a deterministic SHA-256 fingerprint. Invalid rows are reported
+as exclusions; empty/all-invalid imports are partial. Complete means only that all
+provided rows were accepted, never that the site was fully crawled. Bounded iterators
+fail on overflow rather than truncating; the 50,000-row offline defensive bound is
+not a validated production processing limit or a commercial allowance.
+
+Private staging imports are syntactically allowed without any network request or
+claim of fetch safety. Reserved metadata is validated but not persisted or included
+in URL identity; clients must not use it to carry required discovery evidence yet.
+Full inventory output is internal data, not a safe public tool response. Future
+persistence must retain all original variants and provenance, not just one URL.
+
+Parent-reviewed policy tests: **18 passed**, including 15,000/15,001-row inventories,
+bounded infinite iterators, hostile URL spellings, Unicode, cyclic/deep metadata,
+scope checks, deterministic fingerprints and diagnostic credential redaction.
+No network discovery, persisted inventory writer, async worker, quote/grant
+activation or new MCP tool was introduced. Legacy discovery remains unchanged.
+
 ## Next execution order
 
 1. P04 durable discovery/preflight and P05 quote/grant workflows against the

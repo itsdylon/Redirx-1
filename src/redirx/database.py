@@ -442,7 +442,10 @@ class DeepMatchPreviewDB:
     """
 
     def __init__(self, client: Optional[Client] = None):
-        self.client = client or SupabaseClient.get_client()
+        # Internal-only storage (migration 033). A shared client can acquire a
+        # user's JWT during sign-in, losing service privileges for later jobs.
+        # Public callers must still pass the route's source-session owner check.
+        self.client = client if client is not None else SupabaseClient.get_admin_client()
 
     @staticmethod
     def _now_iso() -> str:

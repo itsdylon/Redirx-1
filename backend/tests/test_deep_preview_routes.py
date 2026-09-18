@@ -18,6 +18,11 @@ from src.redirx.config import Config
 
 class DeepPreviewRouteTests(unittest.TestCase):
     def setUp(self):
+        # Token verification is mocked below; the auth constructor must not
+        # initialize a real Supabase client or require production credentials.
+        auth_client = patch('backend.services.auth_service.SupabaseClient.get_client', return_value=Mock())
+        auth_client.start()
+        self.addCleanup(auth_client.stop)
         self.app = Flask(__name__)
         self.app.register_blueprint(pipeline_blueprint, url_prefix="/api")
         self.client = self.app.test_client()

@@ -141,6 +141,15 @@ activation or new MCP tool was introduced. Legacy discovery remains unchanged.
 
 ## Next execution order
 
+September 18 security follow-up: migration 033 now has a separately tested local
+remediation for the four internal tables reported without RLS. It denies direct
+browser reads/writes while preserving backend DML. `DeepMatchPreviewDB` now defaults
+to a fresh admin client; that code must reach API and worker **before** applying 033.
+No production schema or service was changed by this packet. See
+`plans/2026-09-18-internal-billing-security.md` and the 033 migration notes.
+Validation: **143 backend tests, 33 SQL tests passed**; pricing remains test_only.
+Render auto-deploy is still On Commit per user and Claude's read-only verification.
+
 1. P04 durable discovery/preflight and P05 quote/grant workflows against the
    P01 records; complete transactional run/grant/usage links with P06–P07.
 2. Finish P03 provider resource-bound issuance and live acceptance; exercise

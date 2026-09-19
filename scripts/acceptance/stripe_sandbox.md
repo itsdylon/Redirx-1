@@ -29,3 +29,9 @@ Forward Stripe CLI events to `http://127.0.0.1:55441/webhooks/stripe`. Include `
 7. POST JSON `{}` to `/control/shutdown`, or stop the runner. It drops the temporary database and stops its cluster. Sandbox subscriptions/customer/session objects remain in Stripe for operator review and explicit cancellation; this runner never changes account-level settings or silently cancels billing objects.
 
 Local validation performed without reading any supplied secret or making provider calls: real SQL fixture startup; all five paid-authority counts zero; both forged return routes inert; missing recurring consent rejected; output permissions0600. Actual provider checkout/webhook acceptance remains pending the operator's browser run.
+
+## First provider attempt and parser correction
+
+The first real one-off sandbox Checkout completed externally, but the local receiver returned503 before invoking the shipped payment service. Installed Stripe SDK15.4 returns an `Event` without `.get()`. The receiver now uses the shipped `_dict` adapter immediately after SDK signature verification, normalizing the nested object before choosing the service. Four local parser diagnostics use the actual installed SDK and a distinctly local fixture signature; these are **not** payment acceptance evidence. Receiver error state now contains basename/line/function frames only, never exception messages, source lines or locals.
+
+Archive the failed attempt's private state before restarting. A fresh hosted Checkout and genuine CLI-forwarded delivery are required for the next payment acceptance run; retrieving the old provider event and signing it locally must not be reported as genuine provider webhook delivery.

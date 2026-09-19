@@ -10,6 +10,7 @@ import signal
 import stat
 import sys
 import threading
+import traceback
 from uuid import uuid4
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -22,7 +23,7 @@ from backend.tests.helpers.pivot_native_client import NativeClient, json_value
 from backend.services.migration_repository import MigrationRepository, MigrationRepositoryError
 from backend.services.migration_quote_service import MigrationQuoteService
 from backend.services.migration_run_service import MigrationRunService
-from backend.services.migration_checkout_service import MigrationCheckoutService
+from backend.services.migration_checkout_service import MigrationCheckoutService, _dict
 from backend.services.migration_subscription_checkout_service import MigrationSubscriptionCheckoutService
 from backend.services.migration_subscription_service import MigrationSubscriptionService
 from backend.services.migration_artifact_service import MigrationArtifactService
@@ -40,6 +41,22 @@ def read_secret(variable, prefix):
     if not value.startswith(prefix) or len(value) <= len(prefix):
         raise ValueError(f'{variable} has the wrong credential type.')
     return value
+
+
+def verified_event(raw, signature, secret):
+    """Normalize actual SDK15 StripeObject before mapping operations."""
+    event = _dict(stripe.Webhook.construct_event(raw, signature, secret, tolerance=300))
+    if event.get('livemode') is not False or event.get('account') is not None:
+        raise ValueError('Only direct sandbox events are accepted.')
+    event['data'] = _dict(event.get('data'))
+    event['data']['object'] = _dict(event['data'].get('object'))
+    return event
+
+
+def safe_frames(exc):
+    """Locations only: no exception text, source snippets, locals or payloads."""
+    return [{'file': Path(frame.filename).name, 'line': frame.lineno, 'function': frame.name}
+            for frame in traceback.extract_tb(exc.__traceback__)]
 
 
 class Harness:
@@ -169,9 +186,7 @@ class Harness:
         payment, recurring = self.configure()
         # Signature is verified before inspecting routing metadata. The shipped
         # service independently repeats verification and retrieves provider facts.
-        event = stripe.Webhook.construct_event(raw, signature, payment.webhook_secret, tolerance=300)
-        if event.get('livemode') is not False or event.get('account') is not None:
-            raise ValueError('Only direct sandbox events are accepted.')
+        event = verified_event(raw, signature, payment.webhook_secret)
         obj = event['data']['object']
         if event['type'].startswith('checkout.session.'):
             service = payment if obj.get('mode') == 'payment' else recurring
@@ -289,7 +304,7 @@ def main():
     def failed(exc):
         # Never serialize SDK messages, request bodies, headers, or secrets.
         code = exc.code if isinstance(exc, MigrationRepositoryError) else type(exc).__name__
-        harness.errors.append({'path': request.path, 'code': code})
+        harness.errors.append({'path': request.path, 'code': code, 'frames': safe_frames(exc)})
         harness.write_state()
         return jsonify(error=code), 400 if isinstance(exc, (ValueError, stripe.SignatureVerificationError)) else 503
 

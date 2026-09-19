@@ -24,23 +24,22 @@ class ContentCapacityTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(values, [n*2 for n in range(15000)])
         self.assertEqual(peak, 8)
 
-    async def test_pivot_exact_routes_keep_case_query_slash_escape_and_original_fragments(self):
+    async def test_pivot_exact_fastpath_requires_full_original_identity(self):
         suffixes = ['A','a','A/','A?x=1','A?x=2','%61','A#part']
         old = ['https://old.example/'+p for p in suffixes]
-        new = ['https://new.example/'+p for p in suffixes[:-1]]
+        new = ['https://new.example/'+p for p in suffixes]
         storage = Mock(); storage.get_mappings_by_session.return_value = []
         with patch('src.redirx.stages.URLMappingDB', return_value=storage):
-            stage = ExactUrlMatchStage(uuid4(), preserve_url_identity=True)
-            remaining = await stage.execute((old, new))
-        self.assertEqual(remaining, ([], []))
-        actual = {call.args[1]: call.args[2] for call in storage.insert_mapping.call_args_list}
-        self.assertEqual(set(actual), set(old))
-        self.assertEqual(actual[old[3]], new[3]); self.assertEqual(actual[old[4]], new[4])
-        self.assertEqual(actual[old[-1]], new[0])
-        # Different prefixes are not sufficient evidence for an exact match.
+            remaining = await ExactUrlMatchStage(uuid4(), preserve_url_identity=True).execute((old,new))
+        self.assertEqual(remaining,(old,new))
+        storage.insert_mapping.assert_not_called()
+        # Every raw query/case/slash/escape/fragment identity persists separately
+        # when the exact same full URL is present in both bound inventories.
         with patch('src.redirx.stages.URLMappingDB', return_value=storage):
-            unmatched = await ExactUrlMatchStage(uuid4(), preserve_url_identity=True).execute((['https://old.example/a/item'], ['https://new.example/b/item']))
-        self.assertEqual(unmatched, (['https://old.example/a/item'], ['https://new.example/b/item']))
+            remaining = await ExactUrlMatchStage(uuid4(), preserve_url_identity=True).execute((old,old))
+        self.assertEqual(remaining,([],[]))
+        actual = {call.args[1]: call.args[2] for call in storage.insert_mapping.call_args_list}
+        self.assertEqual(actual,dict(zip(old,old)))
 
     async def test_content_ladder_never_collapses_pivot_query_or_origin_identity(self):
         urls = ['https://old.example/A?q=1','https://old.example/A?q=2','https://old.example/A/',

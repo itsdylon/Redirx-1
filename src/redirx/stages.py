@@ -316,8 +316,9 @@ class ExactUrlMatchStage(Stage):
         """Match routing identities without discarding any original URL variant."""
         old_urls, new_urls = input
         def key(url):
-            parsed = urlparse(url)
-            return (parsed.path or '/') + ('?' + parsed.query if parsed.query else '')
+            # A shared path across origins says nothing about where its content
+            # moved. Only literal full URL identity can skip content evidence.
+            return url
         targets = {}
         for url in new_urls:
             targets.setdefault(key(url), url)

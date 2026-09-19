@@ -5,6 +5,7 @@ import { Sidebar } from './Sidebar';
 import { TopBar } from './TopBar';
 import { OnboardingChecklistDock } from './OnboardingChecklistDock';
 import { isAgencyPlan } from '../lib/plans';
+import { MCP_PIVOT_ENABLED } from '../api/config';
 
 interface DashboardLayoutProps {
   title: string;
@@ -14,7 +15,7 @@ interface DashboardLayoutProps {
 export function DashboardLayout({ title, children }: DashboardLayoutProps) {
   const navigate = useNavigate();
   const { logout, user } = useAuth();
-  const createJobPath = isAgencyPlan(user?.plan) ? '/upload' : '/quick-match';
+  const createJobPath = MCP_PIVOT_ENABLED ? '/companion' : (isAgencyPlan(user?.plan) ? '/upload' : '/quick-match');
 
   const handleLogout = async () => {
     await logout();

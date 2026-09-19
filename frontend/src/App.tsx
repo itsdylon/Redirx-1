@@ -29,6 +29,7 @@ import {
   canAccessSettingsAndAccount,
   canAccessUpload,
   getAuthedHomeRoute,
+  getPivotEntryRedirect,
 } from './routes';
 
 export default function App() {
@@ -43,6 +44,7 @@ export default function App() {
   const pricingSourceSessionId = new URLSearchParams(location.search).get('source_session_id');
   const reviewLayoutVariant = isEnterprisePlan(user?.plan) ? 'dashboard' : 'tool';
   const loginWithReturn = `${ROUTES.login}?redirect=${encodeURIComponent(location.pathname + location.search)}`;
+  const pivotEntryRedirect = getPivotEntryRedirect(location.pathname, !!user, MCP_PIVOT_ENABLED);
 
   // Show loading state while checking authentication
   if (loading) {
@@ -72,7 +74,9 @@ export default function App() {
       <Route
         path={ROUTES.quickMatch}
         element={
-          user
+          pivotEntryRedirect
+            ? <Navigate to={pivotEntryRedirect} replace />
+            : user
             ? (
               canAccessQuickMatch(user?.plan)
                 ? <QuickMatchLandingPage />
@@ -98,7 +102,9 @@ export default function App() {
       <Route
         path={ROUTES.dashboard}
         element={
-          user
+          pivotEntryRedirect
+            ? <Navigate to={pivotEntryRedirect} replace />
+            : user
             ? (canAccessDashboard(user?.plan) ? <Dashboard /> : <Navigate to={ROUTES.quickMatch} replace />)
             : <Navigate to={ROUTES.login} replace />
         }
@@ -110,7 +116,9 @@ export default function App() {
       <Route
         path={ROUTES.upload}
         element={
-          user
+          pivotEntryRedirect
+            ? <Navigate to={pivotEntryRedirect} replace />
+            : user
             ? (canAccessUpload(user?.plan) ? <UploadPage /> : <Navigate to={ROUTES.quickMatch} replace />)
             : <Navigate to={ROUTES.login} replace />
         }

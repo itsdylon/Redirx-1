@@ -44,9 +44,9 @@ export function ToolLayout({ title, children }: ToolLayoutProps) {
   const agencyUser = isAgencyPlan(user?.plan);
   const hasSourceSessionId = new URLSearchParams(location.search).has('source_session_id');
   const isQuickMatchActive =
-    location.pathname === '/quick-match' ||
+    !MCP_PIVOT_ENABLED && (location.pathname === '/quick-match' ||
     location.pathname.startsWith('/review/') ||
-    location.pathname.startsWith('/pricing');
+    location.pathname.startsWith('/pricing'));
   const isCompanionActive = ['/companion', '/migrations/', '/billing/subscriptions/'].some(path => location.pathname.startsWith(path));
   const isProjectHistoryActive = location.pathname === '/projects';
   const showBreadcrumb =
@@ -94,7 +94,7 @@ export function ToolLayout({ title, children }: ToolLayoutProps) {
               {user ? (
                 <>
                   <nav aria-label="Primary" className="hidden items-center gap-1 md:flex">
-                    <Button
+                    {!MCP_PIVOT_ENABLED && <Button
                       variant="ghost"
                       size="sm"
                       className={navButtonClass(isQuickMatchActive)}
@@ -102,7 +102,7 @@ export function ToolLayout({ title, children }: ToolLayoutProps) {
                       onClick={() => handlePrimaryNavigate('/quick-match')}
                     >
                       Quick Match
-                    </Button>
+                    </Button>}
                     {MCP_PIVOT_ENABLED && <Button variant="ghost" size="sm" className={navButtonClass(isCompanionActive)} aria-current={isCompanionActive ? 'page' : undefined} onClick={() => handlePrimaryNavigate('/companion')}>
                       Migration companion
                     </Button>}
@@ -116,7 +116,7 @@ export function ToolLayout({ title, children }: ToolLayoutProps) {
                       Project History
                     </Button>
                   </nav>
-                  {agencyUser && (
+                  {agencyUser && !MCP_PIVOT_ENABLED && (
                     <Button
                       variant="ghost"
                       size="sm"
@@ -157,7 +157,9 @@ export function ToolLayout({ title, children }: ToolLayoutProps) {
                       <SheetHeader>
                         <SheetTitle>Navigation</SheetTitle>
                         <SheetDescription>
-                          Move between Quick Match and your project history.
+                          {MCP_PIVOT_ENABLED
+                            ? 'Move between your migration companion and project history.'
+                            : 'Move between Quick Match and your project history.'}
                         </SheetDescription>
                       </SheetHeader>
                       <nav aria-label="Primary mobile" className="flex flex-col gap-1 px-4">
@@ -165,14 +167,14 @@ export function ToolLayout({ title, children }: ToolLayoutProps) {
                           aria-current={isCompanionActive ? 'page' : undefined} onClick={() => handlePrimaryNavigate('/companion')}>
                           Migration companion
                         </Button>}
-                        <Button
+                        {!MCP_PIVOT_ENABLED && <Button
                           variant="ghost"
                           className={cn('justify-start', navButtonClass(isQuickMatchActive))}
                           aria-current={isQuickMatchActive ? 'page' : undefined}
                           onClick={() => handlePrimaryNavigate('/quick-match')}
                         >
                           Quick Match
-                        </Button>
+                        </Button>}
                         <Button
                           variant="ghost"
                           className={cn('justify-start', navButtonClass(isProjectHistoryActive))}
@@ -182,7 +184,7 @@ export function ToolLayout({ title, children }: ToolLayoutProps) {
                           Project History
                         </Button>
                       </nav>
-                      {agencyUser && (
+                      {agencyUser && !MCP_PIVOT_ENABLED && (
                         <div className="mt-auto px-4 pb-4">
                           <Button
                             variant="outline"
@@ -225,7 +227,9 @@ export function ToolLayout({ title, children }: ToolLayoutProps) {
                 <BreadcrumbList>
                   <BreadcrumbItem>
                     <BreadcrumbLink asChild>
-                      <Link to="/quick-match">Quick Match</Link>
+                      <Link to={MCP_PIVOT_ENABLED ? '/projects' : '/quick-match'}>
+                        {MCP_PIVOT_ENABLED ? 'Project History' : 'Quick Match'}
+                      </Link>
                     </BreadcrumbLink>
                   </BreadcrumbItem>
                   <BreadcrumbSeparator />

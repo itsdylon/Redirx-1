@@ -25,6 +25,13 @@ export function getAuthedHomeRoute(plan?: string): string {
   return isEnterprisePlan(plan) ? ROUTES.dashboard : ROUTES.quickMatch;
 }
 
+/** Retired funnel entries deliberately return to the companion after login. */
+export function getPivotEntryRedirect(pathname: string, authenticated: boolean, pivotEnabled: boolean): string | null {
+  if (!pivotEnabled || !['/quick-match', '/upload', '/dashboard'].includes(pathname)) return null;
+  if (authenticated) return ROUTES.companion;
+  return `${ROUTES.login}?redirect=${encodeURIComponent(ROUTES.companion)}`;
+}
+
 export function canAccessDashboard(plan?: string): boolean {
   return isEnterprisePlan(plan);
 }

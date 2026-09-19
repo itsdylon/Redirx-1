@@ -372,12 +372,25 @@ serves no users yet, so suspending it is free.
 
 ### Stage G — the authenticated MCP test (section 4)
 
-### Stage H — restore auto-deploy
+### Stage H — leave auto-deploy OFF
 
-Re-enable Auto-Deploy on `redirx-worker` and `redirx-frontend`. Skipping this leaves you
-with two services that silently stop tracking `main`, which is a worse failure than
-anything else in this document because it shows up weeks later as "why didn't my fix
-deploy".
+**Do not re-enable auto-deploy.** An earlier revision of this document told you to switch
+it back on at the end of the rollout and treated leaving it off as a defect. That was
+written before the operating model changed, and it is now wrong in both directions.
+
+Auto-deploy is deliberately `off` on **all four** services — `redirx-api`,
+`redirx-worker`, `redirx-frontend` and `redirx-mcp-server` — at the user's explicit
+request. That is the intended steady state, not a leftover from the rollout.
+
+The consequence is deliberate and should be understood rather than worked around: **every
+deployment is now a manual, attributable act.** A commit landing on `main` no longer ships
+anything. Releases happen when someone triggers them, against a named commit, which is
+exactly the property that made Stage E verifiable — an isolated ref, one trigger, one
+deploy ID, one SHA.
+
+Restore auto-deploy only on an explicit request from the user. If you are following this
+runbook and find a service that did not pick up a merge, that is the design working, not a
+fault to fix.
 
 ---
 
@@ -550,7 +563,7 @@ PostHog as data rather than as silence — but it is far cheaper to fix the docs
 | `v1_routes` / `pipeline_routes` regression | Medium | Existing upload→match→results breaks | Stage C verify step 4; roll back the API alone |
 | Worker breaks on `pipeline_runner` change | Medium | Jobs claimed but never complete | Stage D; roll back the worker alone |
 | Someone activates dormant pricing later | Low | Customers quoted new bands | Gate 1 in CI |
-| Auto-deploy left off after Stage H | Medium | Later fixes silently never ship | Stage H, and check the dashboard |
+| Auto-deploy silently re-enabled | Medium | A merge ships without anyone triggering it, unreviewed and unattributable | Auto-deploy is deliberately off on all four (Stage H); re-enable only on explicit user request |
 | `MCP_INTERNAL_SECRET` drift | Low | `/api/internal/*` 403s | Both sides were set together 2026-09-18; rotate both or neither |
 | Agents call tools that don't exist | **Certain, once anyone reads the docs** | Unknown-tool errors from `llms.txt`-guided agents | Section 6 — decide the vocabulary before you tell anyone the server is up |
 

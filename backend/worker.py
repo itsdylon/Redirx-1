@@ -30,6 +30,8 @@ from uuid import UUID
 from src.redirx.config import Config
 from backend.services.deep_preview_service import DeepPreviewService
 from backend.services.migration_run_service import MigrationRunService
+from backend.services.migration_subscription_service import MigrationSubscriptionService
+from backend.services.pivot_background import PivotBackgroundRunner
 from backend.services.match_repair_service import MatchRepairService
 from backend.services.job_limits import (
     ContentJobUrlCapExceeded,
@@ -738,7 +740,12 @@ class RedirxWorker:
             # Check if we should retry or permanently fail
             if attempt_count >= WORKER_MAX_ATTEMPTS:
                 print(f"[Worker] Job {session_id} exceeded max attempts, marking as permanently failed")
-                await finish('permanently_failed', error_msg)
+                if pivot_service is not None:
+                    # Only terminal failures may release reserved capacity, and
+                    # classification uses the original exception, never its text.
+                    MigrationSubscriptionService().finalize_worker_failure(job, self.worker_id, e)
+                else:
+                    await finish('permanently_failed', error_msg)
 
                 # Send failure email (fire-and-forget)
                 if not is_preview:
@@ -1142,10 +1149,12 @@ class RedirxWorker:
         print("Press Ctrl+C to stop", flush=True)
         print("=" * 60, flush=True)
 
+        pivot_runner = PivotBackgroundRunner()
         try:
             # Validate configuration
             Config.validate()
             # Note: OpenAI key is validated per-job in process_job for content pipelines only
+            pivot_runner.start()
 
             # Start LISTEN loop (will fallback to polling if needed)
             await self.listen_loop()
@@ -1159,6 +1168,7 @@ class RedirxWorker:
             print(f"[Worker] Fatal error: {e}")
             traceback.print_exc()
         finally:
+            await pivot_runner.stop()
             print(f"[Worker] Total jobs processed: {self.jobs_processed}")
 
 

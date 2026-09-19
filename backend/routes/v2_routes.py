@@ -16,6 +16,7 @@ from backend.services.migration_planning_service import validate_key
 from backend.services.migration_quote_service import MigrationQuoteService
 from backend.services.migration_run_service import MigrationRunService
 from backend.services.migration_discovery_workflow import plan_and_start_discovery, migration_discovery_summary
+from backend.services.migration_status_service import MigrationStatusService
 
 v2_blueprint = Blueprint('v2', __name__)
 
@@ -131,7 +132,9 @@ def get_migration(migration_id):
     service = MigrationPlanningService()
     if request.args.get('operation_id'):
         return jsonify(service.operation(request.api_user_id, request.args['operation_id'], migration_id))
-    return jsonify(migration_discovery_summary(request.api_user_id, migration_id, repository=service.repository))
+    summary = migration_discovery_summary(request.api_user_id, migration_id, repository=service.repository)
+    return jsonify(MigrationStatusService(service.repository).get(
+        request.api_user_id, migration_id, run_id=request.args.get('run_id'), base_summary=summary))
 
 
 @v2_blueprint.post('/migrations/<migration_id>/inventories')

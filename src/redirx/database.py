@@ -341,27 +341,36 @@ class WebPageEmbeddingDB:
             after = next_id
 
     def iter_embeddings_for_urls(self, session_id: UUID, site_type: str, urls):
-        """Keep source order with at most 128 vectors and a bounded GET filter."""
+        """Keep source order using bounded UUID filters, never URL GET filters.
+
+        Routing identities can themselves exceed a safe HTTP request-line size.
+        First scan bounded metadata pages, then fetch at most 128 vectors using
+        UUIDs. Only URL/UUID metadata scales with the input inventory size.
+        """
         import json
-        from urllib.parse import quote
-        batches = []
-        batch = []
-        encoded_size = 0
-        for url in urls:
-            size = len(quote(url, safe='')) + 8
-            if batch and (len(batch) >= 128 or encoded_size + size > 6000):
-                batches.append(batch)
-                batch = []
-                encoded_size = 0
-            batch.append(url)
-            encoded_size += size
-        if batch:
-            batches.append(batch)
-        for wanted in batches:
+        wanted_urls = dict.fromkeys(urls)
+        after = None
+        while True:
+            query = self.client.table('webpage_embeddings').select('id,url').eq('session_id', str(session_id)).eq('site_type', site_type)
+            if after:
+                query = query.gt('id', after)
+            page = query.order('id').limit(128).execute().data
+            if not page:
+                break
+            next_id = str(page[-1]['id'])
+            if after is not None and next_id <= after:
+                raise RuntimeError('Embedding cursor did not advance')
+            for row in page:
+                if row['url'] in wanted_urls:
+                    wanted_urls[row['url']] = str(row['id'])
+            after = next_id
+        ordered_ids = [row_id for row_id in wanted_urls.values() if row_id is not None]
+        for offset in range(0, len(ordered_ids), 128):
+            wanted_ids = ordered_ids[offset:offset + 128]
             records = {}
             after = None
             while True:
-                query = self.client.table('webpage_embeddings').select('id,url,embedding').eq('session_id', str(session_id)).eq('site_type', site_type).in_('url', wanted)
+                query = self.client.table('webpage_embeddings').select('id,url,embedding').eq('session_id', str(session_id)).eq('site_type', site_type).in_('id', wanted_ids)
                 if after:
                     query = query.gt('id', after)
                 page = query.order('id').limit(128).execute().data
@@ -373,11 +382,11 @@ class WebPageEmbeddingDB:
                 for row in page:
                     if isinstance(row.get('embedding'), str):
                         row['embedding'] = json.loads(row['embedding'])
-                    records[row['url']] = row
+                    records[str(row['id'])] = row
                 after = next_id
-            for url in wanted:
-                if url in records:
-                    yield records.pop(url)
+            for row_id in wanted_ids:
+                if row_id in records:
+                    yield records.pop(row_id)
 
     def get_embeddings_by_session(
         self,

@@ -95,26 +95,29 @@ class ContentCapacityTests(unittest.IsolatedAsyncioTestCase):
         stream = WebPageEmbeddingDB(client).iter_embeddings_by_session(uuid4(),'old')
         with self.assertRaises(RuntimeError): list(stream)
 
-    async def test_vector_stream_preserves_source_order_and_bounds_url_filter(self):
-        urls = ['https://old.example/' + str(n) + '?q=' + 'x'*100 for n in range(301)]
+    async def test_vector_stream_preserves_long_originals_with_bounded_uuid_filters(self):
+        urls = ['https://old.example/' + str(n) + '?q=' + 'x'*8100 for n in range(301)]
         records = [{'id': f'{n:032x}', 'url': url, 'embedding':'[1,0]'} for n,url in enumerate(reversed(urls))]
         requested = []
         class Query:
-            def __init__(self): self.after = None
-            def select(self,*args): return self
+            def __init__(self): self.after = None; self.wanted = None
+            def select(self,fields): self.fields = fields; return self
             def eq(self,*args): return self
             def gt(self,key,value): self.after = value; return self
             def order(self,*args): return self
             def limit(self,*args): return self
             def in_(self,key,wanted):
+                assert key == 'id'
                 self.wanted = set(wanted); requested.append(list(wanted)); return self
             def execute(self):
-                return SimpleNamespace(data=[r.copy() for r in records if r['url'] in self.wanted and (self.after is None or r['id']>self.after)][:17])
+                rows = [r for r in records if (self.wanted is None or r['id'] in self.wanted) and (self.after is None or r['id']>self.after)][:17]
+                return SimpleNamespace(data=[{key:r[key] for key in self.fields.split(',')} for r in rows])
         client = Mock(); client.table.side_effect = lambda _:Query()
         found = list(WebPageEmbeddingDB(client).iter_embeddings_for_urls(uuid4(),'old',urls))
         self.assertEqual([row['url'] for row in found],urls)
         from urllib.parse import quote
-        self.assertTrue(all(sum(len(quote(url,safe=''))+8 for url in batch)<=6000 for batch in requested))
+        self.assertTrue(all(sum(len(quote(row_id,safe=''))+8 for row_id in batch)<=6000 for batch in requested))
+        self.assertTrue(all(len(batch)<=128 for batch in requested))
         self.assertEqual(found[-1]['embedding'],[1,0])
 
     async def test_pipeline_context_reaches_engine_insert_rpcs(self):

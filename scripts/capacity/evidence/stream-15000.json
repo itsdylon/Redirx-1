@@ -1,0 +1,16 @@
+{
+  "rows": 15000,
+  "source_order_and_tail_verified": true,
+  "wall_seconds": 3.469,
+  "max_page_rows": 97,
+  "python_peak_rss_bytes": 140427264,
+  "database_child": {
+    "queries": 511,
+    "sampled_peak_rss_bytes": 968146944,
+    "os_peak_rss_bytes": 970752000,
+    "current_rss_bytes": 446513152
+  },
+  "limitations": [
+    "real retained PGlite/pgvector read acceptance; excludes fetching, candidate matching, and writes"
+  ]
+}

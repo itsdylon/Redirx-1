@@ -16,7 +16,8 @@ separate release decision, including actual worker memory and disk allocation.
 
 - HTTP task pools and 1536-dimensional vector reads are bounded. Vector pages
   retain source processing order and continue across server-short pages; URL
-  filters have a bounded encoded request size.
+  lookups scan bounded URL/UUID metadata pages and filter vectors by at most
+  128 UUIDs, so long original URLs never appear in GET query filters.
 - `preserve_url_identity=True` keeps original query, path case, slash, escaped,
   and fragment variants in persisted mappings. Exact matching no longer strips
   prefixes or query/case identity in the pivot path. HTML-equal originals each
@@ -200,3 +201,20 @@ is not an equivalent speedup of the complete write path. All 18 native run,
 worker, and fencing tests pass after this change, including independent-connection
 retries and expired/reclaimed-worker rejection. The native fixture uses JSONB
 embedding storage; actual pgvector capacity is verified separately.
+
+## Long-URL pagination verification
+
+The final source-order vector iterator scans bounded URL/UUID metadata pages,
+then reads vector batches using at most 128 UUIDs. Valid long original URLs
+therefore never expand a PostgREST GET filter. Short server pages still advance
+to a final empty page; source ordering and exact original identities remain
+unchanged. The regression exercises 301 originals with 8,100-character query
+values and a 17-row server response cap.
+
+A read-only verification reused the retained real 15,000-vector database: all
+originals and the tail arrived in the requested order in 3.469 seconds, with a
+maximum page of 97 rows and Python peak RSS 140,427,264 bytes. A final actual
+500-old/600-new pipeline with 64 KiB HTML completed in 11.893 seconds, all 500
+correct, Python peak RSS 134,496,256 bytes, and a closed content spool. These
+follow-up results are `stream-15000.json` and `final-500.json`; they do not
+replace or relabel the earlier full-size pipeline timings.

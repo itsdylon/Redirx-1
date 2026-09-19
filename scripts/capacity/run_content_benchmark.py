@@ -75,7 +75,9 @@ class Query:
                     values.append(value); predicates.append(f'{key}=${len(values)}')
                 if self.member_filter:
                     key, members = self.member_filter; assert re.fullmatch('[a-z_]+', key)
-                    values.append(members); predicates.append(f'{key}=ANY(${len(values)}::text[])')
+                    values.append(members)
+                    member_type = 'uuid' if key == 'id' else 'text'
+                    predicates.append(f'{key}=ANY(${len(values)}::{member_type}[])')
                 if self.after:
                     key, value = self.after; assert re.fullmatch('[a-z_]+', key)
                     values.append(value); predicates.append(f'{key}>${len(values)}')

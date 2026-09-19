@@ -18,6 +18,12 @@ function int(name: string, fallback: number): number {
   return Number.isFinite(value) ? value : fallback;
 }
 
+function bool(name: string, fallback = false): boolean {
+  const value = process.env[name];
+  if (value === undefined) return fallback;
+  return value.trim().toLowerCase() === 'true';
+}
+
 /**
  * Central config. Fails fast at import time rather than partway through a
  * request — a misconfigured production deploy should not boot at all,
@@ -53,6 +59,9 @@ export const config = {
   // Explicit release switch for the separate resource-bound authorization service.
   authProvider: process.env.MCP_OAUTH_PROVIDER ?? 'supabase',
   identityIssuer: optional('SUPABASE_AUTH_ISSUER'),
+  // Kept off through the current auth release. When enabled, the four legacy
+  // v1 tools are replaced by the contract's eleven v2 tools.
+  pivotEnabled: bool('MCP_PIVOT_ENABLED'),
 
   posthog: {
     apiKey: optional('POSTHOG_API_KEY'),

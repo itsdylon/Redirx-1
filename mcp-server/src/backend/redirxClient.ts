@@ -74,6 +74,24 @@ export interface DiscoverResult {
   discovery_method: string;
 }
 
+export interface PivotEnvelope {
+  contract_version: string;
+  migration_id?: string | null;
+  operation_id?: string | null;
+  status: string;
+  next_action: string;
+  retry_after_seconds?: number;
+  progress?: Record<string, unknown>;
+  data: Record<string, unknown>;
+  error: {
+    code: string;
+    message: string;
+    retryable: boolean;
+    next_action: string;
+    details?: Record<string, unknown>;
+  } | null;
+}
+
 /**
  * A thin, typed client for the RedirX v1 API — the "thin gateway" from
  * docs/architecture/agentic-pivot.md: every method here maps to exactly one
@@ -190,5 +208,37 @@ export class RedirxClient {
       method: 'POST',
       body: JSON.stringify({ url, side }),
     });
+  }
+
+  /**
+   * The pivot surface is deliberately transport-only: authorization remains
+   * the short-lived backend delegation resolved by context.ts and all policy,
+   * ownership, payment, consent, and artifact authority stay in /api/v2.
+   */
+  async pivot<T extends Record<string, unknown> = Record<string, unknown>>(
+    method: 'GET' | 'POST' | 'PATCH', path: string, body?: Record<string, unknown>,
+  ): Promise<{ ok: true; data: PivotEnvelope & { data: T } } | { ok: false; error: RedirxApiError }> {
+    const init: RequestInit = {
+      method,
+      headers: { Authorization: `Bearer ${this.apiKey}`, 'Content-Type': 'application/json' },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    };
+    const response = await fetch(`${config.backendBaseUrl}/api/v2${path}`, init);
+    const payload = await response.json().catch(() => null) as unknown;
+    // v2's envelope is a recoverable business-state response even when its
+    // HTTP status is 4xx (notably payment_required/reconnect_required).
+    // Preserve it so agents receive checkout/consent/deployment next steps.
+    if (payload && typeof payload === 'object' && 'contract_version' in payload
+        && 'status' in payload && 'next_action' in payload && 'data' in payload && 'error' in payload) {
+      return { ok: true, data: payload as PivotEnvelope & { data: T } };
+    }
+    const errorBody = payload && typeof payload === 'object' && 'error' in payload
+      ? (payload as { error?: Record<string, unknown> }).error ?? {}
+      : {};
+    return {
+      ok: false,
+      error: new RedirxApiError(response.status, String(errorBody.code ?? 'unknown_error'),
+        String(errorBody.message ?? `Request failed with status ${response.status}`), errorBody),
+    };
   }
 }

@@ -3,7 +3,9 @@ import { registerDeepMatchTool } from './tools/deepMatch.js';
 import { registerDiscoverTool } from './tools/discover.js';
 import { registerExportTool } from './tools/export.js';
 import { registerPreviewTool } from './tools/preview.js';
+import { registerPivotTools } from './tools/pivot.js';
 import { setupTelemetry } from './telemetry/posthog.js';
+import { config } from './config.js';
 
 /**
  * A fresh McpServer per HTTP request (stateless transport, see index.ts) —
@@ -15,10 +17,14 @@ import { setupTelemetry } from './telemetry/posthog.js';
 export function buildMcpServer(): McpServer {
   const server = new McpServer({ name: 'redirx', version: '0.1.0' }, { capabilities: {} });
 
-  registerDiscoverTool(server);
-  registerDeepMatchTool(server);
-  registerPreviewTool(server);
-  registerExportTool(server);
+  if (config.pivotEnabled) {
+    registerPivotTools(server);
+  } else {
+    registerDiscoverTool(server);
+    registerDeepMatchTool(server);
+    registerPreviewTool(server);
+    registerExportTool(server);
+  }
 
   setupTelemetry(server);
 

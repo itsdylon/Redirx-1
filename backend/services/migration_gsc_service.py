@@ -82,7 +82,13 @@ class AgentGSCProvider(GSCService):
         tokens = response.json()
         if not tokens.get('access_token'):
             raise GSCError('origin_unavailable', 'Google did not return usable access. Retry later.', 503)
-        self.connection_db.update_access_token(user_id, tokens['access_token'], self._expiry_iso(tokens.get('expires_in')))
+        updated = self.connection_db.client.rpc('refresh_migration_gsc_access_token', {
+            'p_user_id': user_id, 'p_expected_refresh_token': refresh_token,
+            'p_access_token': tokens['access_token'],
+            'p_expires_at': self._expiry_iso(tokens.get('expires_in')),
+        }).execute()
+        if getattr(updated, 'data', None) is not True:
+            raise GSCError('operation_conflict', 'Your Search Console connection changed. Retry with the current connection.', 409)
         return tokens['access_token']
 
     def list_properties(self, user_id):

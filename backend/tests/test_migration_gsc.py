@@ -113,6 +113,7 @@ class PostgreSQLTests(TestCase):
             conn.execute('CREATE FUNCTION update_updated_at_column() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN NEW.updated_at=now(); RETURN NEW; END $$')
             conn.execute((ROOT/'database/migrations/024_add_gsc_integration.sql').read_text())
             conn.execute((ROOT/'database/migrations/040_agent_search_console.sql').read_text())
+            conn.execute((ROOT/'database/migrations/047_gsc_refresh_compare_and_set.sql').read_text())
             conn.execute('GRANT SELECT ON gsc_connections TO service_role')
         cls.repository = MigrationRepository(GSCClient(cls.dsn))
 
@@ -145,6 +146,31 @@ class PostgreSQLTests(TestCase):
         self.assertEqual(first, second); self.assertEqual(state, state2)
         with self.assertRaises(OperationConflictError): self.service.execute(A, 'connect', idempotency_key='same')
         self.assertNotIn('fixture-refresh', str(first))
+
+    def test_refresh_does_not_overwrite_reconnected_or_disconnected_credentials(self):
+        _, state = self.connect()
+        self.service.callback(state, 'fixture-code')
+        provider = AgentGSCProvider.__new__(AgentGSCProvider)
+        provider.connection_db = SimpleNamespace(client=GSCClient(self.dsn))
+        import psycopg
+        def google_reply(*args, **kwargs):
+            # Reconnect wins while an earlier refresh request is in flight.
+            with psycopg.connect(self.dsn) as conn:
+                conn.execute("UPDATE gsc_connections SET refresh_token='replacement-refresh',access_token='replacement-access' WHERE user_id=%s", (A,))
+            return SimpleNamespace(ok=True, json=lambda: {'access_token': 'stale-access', 'expires_in': 3600})
+        with patch('backend.services.migration_gsc_service.requests.post', side_effect=google_reply):
+            with self.assertRaises(GSCError) as conflict:
+                provider._refresh_access_token(A, 'fixture-refresh')
+            self.assertEqual(conflict.exception.code, 'operation_conflict')
+        with psycopg.connect(self.dsn) as conn:
+            self.assertEqual(conn.execute('SELECT access_token FROM gsc_connections WHERE user_id=%s', (A,)).fetchone()[0], 'replacement-access')
+        with patch('backend.services.migration_gsc_service.requests.post', return_value=SimpleNamespace(ok=True, json=lambda: {'access_token': 'renewed-access', 'expires_in': 3600})):
+            self.assertEqual(provider._refresh_access_token(A, 'replacement-refresh'), 'renewed-access')
+            with psycopg.connect(self.dsn) as conn:
+                conn.execute('DELETE FROM gsc_connections WHERE user_id=%s', (A,))
+            with self.assertRaises(GSCError): provider._refresh_access_token(A, 'replacement-refresh')
+        with psycopg.connect(self.dsn) as conn:
+            self.assertEqual(conn.execute('SELECT count(*) FROM gsc_connections').fetchone()[0], 0)
 
     def test_callback_consumed_once_under_concurrency_and_owner_bound(self):
         result, state = self.connect()

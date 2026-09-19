@@ -166,6 +166,17 @@ describe('opt-in pivot MCP tools', () => {
     } finally { await close(); }
   });
 
+  it('forwards an optional explicit Studio subscription only on run_migration', async () => {
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(envelope({ run_id: ids.run }, { status: 'queued', next_action: 'poll' })), { headers: { 'content-type': 'application/json' } }));
+    const { client, close } = await connected();
+    try {
+      await client.callTool({ name: 'run_migration', arguments: { migration_id: ids.migration,
+        old_inventory_id: ids.run, new_inventory_id: ids.mapping, subscription_id: ids.mapping, idempotency_key: 'studio-run' } });
+      expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toMatchObject({ subscription_id: ids.mapping,
+        inventory_ids: { old: ids.run, new: ids.mapping }, idempotency_key: 'studio-run' });
+    } finally { await close(); }
+  });
+
   it('preserves recoverable payment and consent envelopes even when the backend uses 4xx', async () => {
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(envelope({
       quote_id: '55555555-5555-4555-8555-555555555555', checkout_url: 'https://backend.test/authorized/checkout',

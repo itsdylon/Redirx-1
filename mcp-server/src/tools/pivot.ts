@@ -99,7 +99,7 @@ export function registerPivotTools(server: McpServer): void {
 
   server.registerTool('run_migration', {
     title: 'Run a migration', description: 'Reserve and dispatch an entitled migration run using immutable inventories. Payment-required states are recoverable.',
-    inputSchema: { migration_id: UUID, old_inventory_id: UUID, new_inventory_id: UUID, quote_id: UUID.optional(), grant_id: UUID.optional(), rerun_of: UUID.optional(), idempotency_key: IDEMPOTENCY },
+    inputSchema: { migration_id: UUID, old_inventory_id: UUID, new_inventory_id: UUID, quote_id: UUID.optional(), grant_id: UUID.optional(), subscription_id: UUID.optional(), rerun_of: UUID.optional(), idempotency_key: IDEMPOTENCY },
     annotations: { readOnlyHint: false, idempotentHint: true, openWorldHint: true },
   }, ({ migration_id, old_inventory_id, new_inventory_id, ...args }, extra) => call(extra as ToolExtra, 'POST', `/migrations/${encodeURIComponent(migration_id)}/runs`, { inventory_ids: { old: old_inventory_id, new: new_inventory_id }, ...args }));
 

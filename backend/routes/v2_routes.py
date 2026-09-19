@@ -170,7 +170,9 @@ def operation_status(operation_id):
 @authenticated
 @limiter.limit('30 per minute', key_func=account_limit_key)
 def run_migration(migration_id):
-    value = body({'inventory_ids', 'quote_id', 'grant_id', 'rerun_of', 'idempotency_key'})
+    value = body({'inventory_ids', 'quote_id', 'grant_id', 'subscription_id', 'rerun_of', 'idempotency_key'})
+    if value.get('grant_id') is not None and value.get('subscription_id') is not None:
+        raise InvalidInputError('Choose either a purchase grant or a Studio subscription.')
     key = validate_key(value.get('idempotency_key'))
     inventories = value.get('inventory_ids')
     if not isinstance(inventories, dict) or set(inventories) != {'old', 'new'}:
@@ -187,9 +189,43 @@ def run_migration(migration_id):
     if quote['kind'] == 'custom':
         return jsonify(envelope(migration_id, quote['operation_id'], status='needs_input',
                                 next_action='request_custom_quote', data=quote))
-    result = MigrationRunService().start_run(request.api_user_id, migration_id,
-        inventories['old'], inventories['new'], quote['quote_id'], key,
-        grant_id=value.get('grant_id'), rerun_of=value.get('rerun_of'))
+    from backend.services.migration_subscription_service import (
+        MigrationSubscriptionService, SubscriptionAllowanceExhaustedError,
+        SubscriptionPaymentRequiredError,
+    )
+    selection = None
+    result = None
+    if value.get('grant_id') is None:
+        subscriptions = MigrationSubscriptionService(quotes.repository)
+        selection = subscriptions.select_run_subscription(request.api_user_id, migration_id,
+            inventories['old'], inventories['new'], quote['quote_id'], key,
+            subscription_id=value.get('subscription_id'))
+        if selection['use_studio']:
+            try:
+                result = subscriptions.start_studio_run(request.api_user_id, selection['subscription_id'],
+                    migration_id, inventories['old'], inventories['new'], quote['quote_id'], key,
+                    rerun_of=value.get('rerun_of'))
+            except (SubscriptionAllowanceExhaustedError, SubscriptionPaymentRequiredError) as exc:
+                # Another request may consume the last slot or revoke entitlement
+                # after selection. The atomic reservation remains authoritative.
+                selection = {**selection, 'use_studio': False, 'reason': exc.code,
+                             'next_action': 'complete_payment'}
+        if (result is None and value.get('subscription_id') is not None
+                and selection['reason'] not in {'free_quote', 'purchased_quote'}):
+            code = 'allowance_exhausted' if selection['reason'] == 'allowance_exhausted' else 'payment_required'
+            return jsonify(envelope(migration_id, status='payment_required', next_action='complete_payment',
+                data={**quote, 'quote_operation_id': quote['operation_id'], 'operation_id': None,
+                      'run_id': None, 'session_id': None, 'subscription_selection': selection},
+                error={'code': code, 'message': 'The selected Studio subscription cannot start this migration. Choose an available subscription or use the migration quote.',
+                       'retryable': False, 'next_action': 'complete_payment'})), 402
+    if result is None:
+        # No subscription purchase or overage occurs here. Missing quote rights
+        # reserve the same durable payment-required operation for later retry.
+        result = MigrationRunService().start_run(request.api_user_id, migration_id,
+            inventories['old'], inventories['new'], quote['quote_id'], key,
+            grant_id=value.get('grant_id'), rerun_of=value.get('rerun_of'))
+    if selection is not None:
+        result['subscription_selection'] = selection
     next_action = {'payment_required': 'complete_payment', 'queued': 'poll', 'running': 'poll',
                    'succeeded': 'resolve_matches', 'failed': 'retry'}[result['status']]
     return jsonify(envelope(migration_id, result['operation_id'], status=result['status'],

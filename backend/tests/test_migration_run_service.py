@@ -162,7 +162,12 @@ class RunDatabaseAcceptance(unittest.TestCase):
         body = {'inventory_ids': {'old': f['old'], 'new': f['new']}, 'idempotency_key': uuid4().hex}
         with patch('backend.routes.v2_routes.resolve_authorization', return_value=None):
             self.assertEqual(http.post(path, json=body).status_code, 401)
-        with patch('backend.routes.v2_routes.resolve_authorization', side_effect=authenticated_owner), \
+        # This 037-only database isolates purchase runs; the real 049 selector is
+        # exercised against the complete schema by test_studio_run_http.
+        with patch('backend.services.migration_subscription_service.MigrationSubscriptionService.select_run_subscription',
+                   return_value={'use_studio': False, 'subscription_id': None,
+                                 'reason': 'no_subscription', 'next_action': 'complete_payment'}), \
+             patch('backend.routes.v2_routes.resolve_authorization', side_effect=authenticated_owner), \
              patch('backend.routes.v2_routes.MigrationQuoteService', return_value=self.quotes), \
              patch('backend.routes.v2_routes.MigrationRunService', return_value=self.runs):
             for invalid in ({**body, 'paid': True}, {**body, 'inventory_ids': {'old': f['old']}},

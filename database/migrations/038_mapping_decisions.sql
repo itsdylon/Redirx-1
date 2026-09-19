@@ -157,7 +157,8 @@ BEGIN
     ) END
     INTO v_rows, v_next
     FROM visible;
-  RETURN jsonb_build_object('items',v_rows,'next_cursor',v_next);
+  RETURN jsonb_build_object('items',v_rows,'next_cursor',v_next,
+    'selection_revision',coalesce((to_jsonb(v_run)->>'selection_revision')::bigint,0));
 END;
 $$;
 
@@ -205,7 +206,8 @@ BEGIN
     encode(sha256(convert_to(jsonb_build_object('run_id',p_run_id,'actor',p_actor,'decisions',p_decisions)::text,'UTF8')),'hex'));
   IF (v_operation->>'replayed')::boolean THEN
     IF v_operation->>'status'='succeeded' AND jsonb_typeof(v_operation->'result')='object' THEN
-      RETURN (v_operation->'result') || jsonb_build_object('replayed',true);
+      RETURN (v_operation->'result') || jsonb_build_object('replayed',true,
+        'selection_revision',coalesce((to_jsonb(v_run)->>'selection_revision')::bigint,0));
     END IF;
     RAISE EXCEPTION 'operation_conflict' USING ERRCODE='P0001';
   END IF;
@@ -272,8 +274,12 @@ BEGIN
       ELSE RAISE; END IF;
     END;
   END LOOP;
+  SELECT * INTO v_run FROM migration_runs
+    WHERE id=p_run_id AND migration_id=p_migration_id AND user_id=p_user_id;
   v_result := jsonb_build_object('migration_id',p_migration_id,'run_id',p_run_id,
     'operation_id',v_operation_id,'outcomes',v_outcomes,'replayed',false);
+  v_result := v_result || jsonb_build_object(
+    'selection_revision',coalesce((to_jsonb(v_run)->>'selection_revision')::bigint,0));
   UPDATE migration_operations SET status='succeeded',result=v_result WHERE id=v_operation_id;
   RETURN v_result;
 END;

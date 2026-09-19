@@ -30,12 +30,14 @@ class TestMappingDecisionService(unittest.TestCase):
 
     def test_resolve_is_bounded_owner_actor_and_idempotent_request_shaped(self):
         self.client.response = Result({"migration_id": self.migration, "run_id": self.run,
-            "operation_id": str(uuid4()), "outcomes": [{"mapping_id": self.mapping, "code": "ok"}], "replayed": False})
+            "operation_id": str(uuid4()), "outcomes": [{"mapping_id": self.mapping, "code": "ok"}],
+            "replayed": False, "selection_revision": 1})
         result = self.service.resolve_matches(self.user, self.migration, self.run, [{
             "mapping_id": self.mapping, "expected_revision": 0, "action": "set_target",
             "target_url": "https://new.example/a", "rationale": "Reviewed source evidence.",
         }], "decision-1")
         self.assertFalse(result["replayed"])
+        self.assertEqual(result["selection_revision"], 1)
         name, params = self.client.calls[0]
         self.assertEqual(name, "resolve_migration_match_decisions")
         self.assertEqual(params["p_actor"], self.user)
@@ -52,12 +54,13 @@ class TestMappingDecisionService(unittest.TestCase):
                 {"mapping_id": self.mapping, "expected_revision": 0, "action": "approve", "target_url": "x"}], "key")
 
     def test_list_uses_rpc_and_refuses_malformed_reply(self):
-        self.client.response = Result({"items": [], "next_cursor": None})
-        self.assertEqual(self.service.list_matches(self.user, self.migration, self.run), {"items": [], "next_cursor": None})
+        self.client.response = Result({"items": [], "next_cursor": None, "selection_revision": 0})
+        self.assertEqual(self.service.list_matches(self.user, self.migration, self.run),
+                         {"items": [], "next_cursor": None, "selection_revision": 0})
         self.assertEqual(self.client.calls[0][0], "list_migration_matches")
-        self.client.response = Result({"items": "not-a-list", "next_cursor": None})
+        self.client.response = Result({"items": "not-a-list", "next_cursor": None, "selection_revision": 0})
         with self.assertRaises(RepositoryUnavailableError):
             self.service.list_matches(self.user, self.migration, self.run)
-        self.client.response = Result({"items": ["not-an-item"], "next_cursor": None})
+        self.client.response = Result({"items": ["not-an-item"], "next_cursor": None, "selection_revision": 0})
         with self.assertRaises(RepositoryUnavailableError):
             self.service.list_matches(self.user, self.migration, self.run)

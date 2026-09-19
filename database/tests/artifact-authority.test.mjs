@@ -111,6 +111,7 @@ after(async () => pg.close());
 test('PGlite compatibility fixture: authority and artifact retry are bound atomically (not native PostgreSQL)', async () => {
   const selection = (await row(`SELECT list_migration_matches($1,$2,$3,'all',NULL,500) AS value`, [user, migration, run])).value;
   assert.equal(selection.items.length, 1);
+  assert.equal(selection.selection_revision, 1);
   const content = 'RedirectMatch 301 "^/a$" "https://new.example/a"';
   const hash = (await row(`SELECT encode(sha256(convert_to($1,'UTF8')),'hex') AS value`, [content])).value;
   const artifact = { migration_id: migration, user_id: user, run_id: run, decision_revision: '1', format: 'apache', content_hash: hash,
@@ -124,6 +125,9 @@ test('PGlite compatibility fixture: authority and artifact retry are bound atomi
   assert.equal((await row('SELECT content FROM migration_artifact_contents WHERE artifact_id=$1', [first.id])).content, content);
   await assert.rejects(call('native-artifact', { ...artifact, decision_revision: '2' }), /operation_conflict|invalid_input/);
   await pg.query(`UPDATE migration_mapping_decisions SET action='approve' WHERE run_id=$1 AND mapping_id=$2`, [run, mapping]);
+  const replayAfterEdit = await call('native-artifact');
+  assert.equal(replayAfterEdit.id, first.id);
+  assert.equal(replayAfterEdit.replayed, true);
   await assert.rejects(call('native-artifact-stale-revision'), /operation_conflict|invalid_input/);
   artifact.decision_revision = '2';
   artifact.verification_inputs.decision_revision = '2';

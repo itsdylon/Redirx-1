@@ -221,10 +221,15 @@ BEGIN
      OR jsonb_typeof(p_artifact->'exclusion_reasons') <> 'object' THEN
     RAISE EXCEPTION 'invalid_input' USING ERRCODE = 'P0001';
   END IF;
-  PERFORM 1 FROM migration_runs WHERE id = p_run_id AND migration_id = p_migration_id AND user_id = p_user_id FOR KEY SHARE;
+  -- Serialize publication with 051's selection_revision trigger.  KEY SHARE
+  -- does not conflict with that non-key UPDATE; NO KEY UPDATE does.  The
+  -- decision RPC takes the run lock before mapping locks; publication takes
+  -- only this run lock and then performs non-locking mapping reads, so it does
+  -- not create a reverse run/mapping lock order.
+  PERFORM 1 FROM migration_runs WHERE id = p_run_id AND migration_id = p_migration_id AND user_id = p_user_id FOR NO KEY UPDATE;
   IF NOT FOUND THEN RAISE EXCEPTION 'not_found' USING ERRCODE = 'P0001'; END IF;
   SELECT * INTO v_run FROM migration_runs
-    WHERE id = p_run_id AND migration_id = p_migration_id AND user_id = p_user_id FOR KEY SHARE;
+    WHERE id = p_run_id AND migration_id = p_migration_id AND user_id = p_user_id FOR NO KEY UPDATE;
   v_run_json := to_jsonb(v_run);
   IF v_run_json->>'legacy_session_id' IS NULL
      OR v_run_json->>'operation_id' IS NULL
@@ -277,6 +282,20 @@ BEGIN
       v_run_json->>'quote_id', v_run_json->>'operation_id';
     IF NOT FOUND THEN RAISE EXCEPTION 'not_found' USING ERRCODE = 'P0001'; END IF;
   END IF;
+
+  -- Idempotent replay is bound to the original artifact request hash.  Check
+  -- it after current ownership/entitlement checks but before the current
+  -- selection revision: a later decision edit must not make an immutable,
+  -- exact replay disappear.
+  SELECT * INTO v_existing FROM migration_artifact_mutations
+    WHERE user_id = p_user_id AND migration_id = p_migration_id AND kind = 'artifact'
+      AND idempotency_key = p_idempotency_key FOR UPDATE;
+  IF FOUND THEN
+    IF v_existing.request_hash <> encode(sha256(convert_to(p_artifact::text || p_content, 'UTF8')), 'hex')
+       THEN RAISE EXCEPTION 'operation_conflict' USING ERRCODE = 'P0001'; END IF;
+    RETURN v_existing.result || jsonb_build_object('replayed', true);
+  END IF;
+
   BEGIN
     v_revision := (p_artifact->>'decision_revision')::integer;
   EXCEPTION WHEN invalid_text_representation THEN
@@ -302,14 +321,6 @@ BEGIN
       RAISE EXCEPTION 'operation_conflict' USING ERRCODE = 'P0001';
     END IF;
   END LOOP;
-  SELECT * INTO v_existing FROM migration_artifact_mutations
-    WHERE user_id = p_user_id AND migration_id = p_migration_id AND kind = 'artifact'
-      AND idempotency_key = p_idempotency_key FOR UPDATE;
-  IF FOUND THEN
-    IF v_existing.request_hash <> encode(sha256(convert_to(p_artifact::text || p_content, 'UTF8')), 'hex')
-       THEN RAISE EXCEPTION 'operation_conflict' USING ERRCODE = 'P0001'; END IF;
-    RETURN v_existing.result || jsonb_build_object('replayed', true);
-  END IF;
   v_result := jsonb_build_object(
     'id', v_artifact, 'migration_id', p_migration_id, 'user_id', p_user_id,
     'run_id', p_run_id, 'decision_revision', p_artifact->>'decision_revision',

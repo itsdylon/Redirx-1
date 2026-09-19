@@ -137,6 +137,17 @@ def _exclusion_reasons(value: Any) -> dict[str, Any]:
     return {"by_reason": counts, "items": items}
 
 
+def _absolute_verification_url(value: Any, field: str) -> str:
+    """Keep verification inputs byte-comparable with the authoritative DB row."""
+    text = _nonblank(value, field, 8_192)
+    parsed = urlsplit(text)
+    if parsed.scheme.lower() not in {"http", "https"} or not parsed.netloc:
+        raise RepositoryUnavailableError(
+            "Authoritative export selection contains a non-absolute verification URL."
+        )
+    return text
+
+
 class MigrationArtifactService:
     def __init__(self, repository: MigrationRepository | None = None, *,
                  selection_reader: Callable[..., Mapping[str, Any]] | None = None,
@@ -216,8 +227,8 @@ class MigrationArtifactService:
             if not isinstance(row, Mapping):
                 raise RepositoryUnavailableError("Authoritative export selection is unavailable.")
             redirects.append({"mapping_id": _nonblank(row.get("mapping_id", row.get("id")), "mapping_id"),
-                               "source_url": _nonblank(item["old_url"], "source_url", 8_192),
-                               "expected_url": _nonblank(item["new_url"], "expected_url", 8_192)})
+                               "source_url": _absolute_verification_url(item["old_url"], "source_url"),
+                               "expected_url": _absolute_verification_url(item["new_url"], "expected_url")})
         content_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
         verification = {"redirects": redirects, "artifact_content_hash": content_hash,
                         "decision_revision": revision}

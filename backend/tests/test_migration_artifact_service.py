@@ -7,7 +7,8 @@ from backend.services.migration_artifact_service import (
     DeploymentConflictError, EntitlementRequiredError, MigrationArtifactService,
     PartialArtifactError,
 )
-from backend.services.migration_repository import InvalidInputError, MigrationNotFoundError
+from backend.services.migration_repository import (InvalidInputError, MigrationNotFoundError,
+    RepositoryUnavailableError)
 
 OWNER = str(UUID("00000000-0000-0000-0000-000000000001"))
 OTHER = str(UUID("00000000-0000-0000-0000-000000000002"))
@@ -109,6 +110,13 @@ class TestMigrationArtifactService(unittest.TestCase):
         service.selection_reader = lambda *_: {"selection_revision": "rev-1", "target_origins": ["https://new.example"],
             "mappings": [{"id": "m", "old_url": "https://old.example/a", "new_url": "https://old.example/a"}]}
         with self.assertRaises(PartialArtifactError):
+            service.create_artifact(OWNER, MIGRATION, RUN, idempotency_key="x", fmt="json", selection_revision="rev-1")
+
+    def test_relative_verification_sources_fail_closed(self):
+        service, _ = self.make()
+        service.selection_reader = lambda *_: {"selection_revision": "rev-1", "target_origins": ["https://new.example"],
+            "mappings": [{"id": "m", "old_url": "/relative", "new_url": "https://new.example/a"}]}
+        with self.assertRaises(RepositoryUnavailableError):
             service.create_artifact(OWNER, MIGRATION, RUN, idempotency_key="x", fmt="json", selection_revision="rev-1")
 
     def test_download_is_owner_scoped_and_returns_persisted_content(self):

@@ -123,11 +123,17 @@ class MappingDecisionService:
             _raise_rpc(exc)
         if isinstance(data, list):
             data = data[0] if len(data) == 1 else None
-        if not isinstance(data, Mapping) or set(data) != {"items", "next_cursor"} or not isinstance(data["items"], list):
+        if (not isinstance(data, Mapping)
+                or not {"items", "next_cursor", "selection_revision"}.issubset(data)
+                or isinstance(data["selection_revision"], bool)
+                or not isinstance(data["selection_revision"], int)
+                or data["selection_revision"] < 0
+                or not isinstance(data["items"], list)):
             raise RepositoryUnavailableError("Mapping decisions are temporarily unavailable.")
         if not all(isinstance(item, Mapping) for item in data["items"]):
             raise RepositoryUnavailableError("Mapping decisions are temporarily unavailable.")
-        return {"items": [dict(item) for item in data["items"]], "next_cursor": data["next_cursor"]}
+        return {"items": [dict(item) for item in data["items"]], "next_cursor": data["next_cursor"],
+                "selection_revision": data["selection_revision"]}
 
     def resolve_matches(
         self, user_id: UUID | str, migration_id: UUID | str, run_id: UUID | str,
@@ -157,7 +163,11 @@ class MappingDecisionService:
             _raise_rpc(exc)
         if isinstance(data, list):
             data = data[0] if len(data) == 1 else None
-        if not isinstance(data, Mapping) or set(data) != {"migration_id", "run_id", "operation_id", "outcomes", "replayed"}:
+        if (not isinstance(data, Mapping)
+                or not {"migration_id", "run_id", "operation_id", "outcomes", "replayed", "selection_revision"}.issubset(data)
+                or isinstance(data["selection_revision"], bool)
+                or not isinstance(data["selection_revision"], int)
+                or data["selection_revision"] < 0):
             raise RepositoryUnavailableError("Mapping decisions are temporarily unavailable.")
         if not isinstance(data["outcomes"], list) or not isinstance(data["replayed"], bool):
             raise RepositoryUnavailableError("Mapping decisions are temporarily unavailable.")

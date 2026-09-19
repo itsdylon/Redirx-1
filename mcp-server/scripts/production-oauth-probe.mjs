@@ -144,15 +144,6 @@ async function main() {
         console.log(JSON.stringify({ awaiting_restart: true, pid: process.pid }));
       });
     }
-    if (process.env.MCP_PROBE_NEGATIVE === '1') {
-      const metadata = discovery.authorizationServerMetadata;
-      const wrong = await fetch(metadata.token_endpoint, { method: 'POST', redirect: 'error', signal: AbortSignal.timeout(10000),
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({
-          grant_type: 'refresh_token', refresh_token: prior, client_id: clientInformation.client_id,
-          resource: 'https://wrong-resource.invalid/' }) });
-      report.wrong_resource_rejected = wrong.status === 400 && (await wrong.json()).error === 'invalid_target';
-      if (!report.wrong_resource_rejected) throw new Error('Wrong resource was not rejected');
-    }
     if (!prior || await auth(provider, { serverUrl, fetchFn: registration.fetch }) !== 'AUTHORIZED' || !tokens.refresh_token || tokens.refresh_token === prior) {
       throw new Error('Refresh did not rotate');
     }
@@ -163,6 +154,15 @@ async function main() {
     if (JSON.stringify(refreshedTools) !== JSON.stringify(report.tools)) throw new Error('Refreshed capability mismatch');
     report.refresh_reconnect = true;
     if (process.env.MCP_PROBE_RESTART === '1') report.refresh_after_restart = true;
+    if (process.env.MCP_PROBE_NEGATIVE === 'wrong-resource') {
+      const metadata = discovery.authorizationServerMetadata;
+      const wrong = await fetch(metadata.token_endpoint, { method: 'POST', redirect: 'error', signal: AbortSignal.timeout(10000),
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({
+          grant_type: 'refresh_token', refresh_token: tokens.refresh_token, client_id: clientInformation.client_id,
+          resource: 'https://wrong-resource.invalid/' }) });
+      report.wrong_resource_rejected = wrong.status === 400 && (await wrong.json()).error === 'invalid_target';
+      if (!report.wrong_resource_rejected) throw new Error('Wrong resource was not rejected');
+    }
     if (process.env.MCP_PROBE_NEGATIVE === '1') {
       const redeem = token => fetch(discovery.authorizationServerMetadata.token_endpoint, { method: 'POST', redirect: 'error',
         signal: AbortSignal.timeout(10000), headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -194,7 +194,7 @@ async function main() {
               grant_type: 'refresh_token', refresh_token: tokens.refresh_token, client_id: clientInformation.client_id,
               resource: discovery.resourceMetadata?.resource || '' }) });
           const rejected = retry.status === 400 && (await retry.json()).error === 'invalid_grant';
-          if (process.env.MCP_PROBE_NEGATIVE === '1') report.revocation_after_replay_accepted = response.ok && rejected;
+          if (process.env.MCP_PROBE_NEGATIVE) report.revocation_after_negative_check_accepted = response.ok && rejected;
           else report.refresh_revoked = rejected;
         }
       } catch { /* Safe summary below names cleanup status. */ }

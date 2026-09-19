@@ -68,6 +68,41 @@ describe('opt-in pivot MCP tools', () => {
     } finally { await close(); }
   });
 
+  it('reads artifact resources through the current account delegation without following download URLs', async () => {
+    const artifact = ids.mapping;
+    const uri = `redirx://migrations/${ids.migration}/artifacts/${artifact}`;
+    fetchMock.mockResolvedValue(new Response(JSON.stringify(envelope({
+      resource_type: 'artifact_download', artifact_id: artifact, migration_id: ids.migration,
+      format: 'nginx', content: 'location = /old { return 301 https://new.test/new; }',
+      download_url: 'http://169.254.169.254/never-follow',
+    })), { headers: { 'content-type': 'application/json' } }));
+    const { client, close } = await connected();
+    try {
+      const templates = await client.listResourceTemplates();
+      expect(templates.resourceTemplates[0].uriTemplate).toBe('redirx://migrations/{migration_id}/artifacts/{artifact_id}');
+      const result = await client.readResource({ uri });
+      expect(result.contents).toEqual([{ uri, mimeType: 'text/plain', text: 'location = /old { return 301 https://new.test/new; }' }]);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(fetchMock.mock.calls[0][0]).toBe(`https://backend.test/api/v2/migrations/${ids.migration}/artifacts/${artifact}`);
+      expect(fetchMock.mock.calls[0][1].headers.Authorization).toBe('Bearer delegation-account-a');
+    } finally { await close(); }
+  });
+
+  it('rejects malformed, foreign and mismatched artifact resources', async () => {
+    const { client, close } = await connected();
+    const uri = `redirx://migrations/${ids.migration}/artifacts/${ids.mapping}`;
+    try {
+      await expect(client.readResource({ uri: 'redirx://migrations/not-a-uuid/artifacts/../../private' })).rejects.toThrow();
+      expect(fetchMock).not.toHaveBeenCalled();
+      fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(envelope({}, {status: 'failed', error: {code:'not_found'}})),
+        {status:404,headers:{'content-type':'application/json'}}));
+      await expect(client.readResource({ uri })).rejects.toThrow('Artifact unavailable');
+      fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(envelope({resource_type:'artifact_download',
+        artifact_id:ids.run,migration_id:ids.migration,content:'wrong artifact'})), {headers:{'content-type':'application/json'}}));
+      await expect(client.readResource({ uri })).rejects.toThrow('Invalid artifact response');
+    } finally { await close(); }
+  });
+
   it('keeps the existing four tools when MCP_PIVOT_ENABLED is false', async () => {
     config.pivotEnabled = false;
     const { client, close } = await connected();

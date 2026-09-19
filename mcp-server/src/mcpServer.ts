@@ -4,6 +4,7 @@ import { registerDiscoverTool } from './tools/discover.js';
 import { registerExportTool } from './tools/export.js';
 import { registerPreviewTool } from './tools/preview.js';
 import { registerPivotTools } from './tools/pivot.js';
+import { registerArtifactResources } from './resources/artifacts.js';
 import { setupTelemetry } from './telemetry/posthog.js';
 import { config } from './config.js';
 
@@ -19,6 +20,7 @@ export function buildMcpServer(): McpServer {
 
   if (config.pivotEnabled) {
     registerPivotTools(server);
+    registerArtifactResources(server);
   } else {
     registerDiscoverTool(server);
     registerDeepMatchTool(server);

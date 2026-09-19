@@ -263,5 +263,6 @@ and is not silently removed by this packet.
   or session was touched.
 - The two **Supabase upstream** probe clients named above — `0fd9ce16-d010-47cf-bb77-f5accd88f886`
   and `7831972c-60a9-4316-8088-9926070fb2b8` — belong to the pre-production local checkpoints and
-  are **still outstanding**. They remain the owner's to remove; nothing in this release depends on
-  them, and neither is the production client.
+  were removed during the subsequent authorized cleanup on September 19. Each dashboard
+  confirmation matched its exact client ID and name before deletion. An independent page reload
+  showed both absent and production client `2a2c198b-5cad-4409-88e8-84c93e6bbea2` still present.

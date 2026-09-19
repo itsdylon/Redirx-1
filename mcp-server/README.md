@@ -134,3 +134,23 @@ No IaC existed for any of the four before this; see
 - Deployment/configuration of the new resource-aware authorization service and
   production backend acceptance — see the launch gates under "Auth" above.
   The companion app's `/oauth/consent` page is already deployed.
+
+## Production OAuth acceptance probe
+
+After the issuer and compatible backend are deployed, run from `mcp-server`:
+
+```sh
+node scripts/production-oauth-probe.mjs https://redirx-mcp-server.onrender.com/mcp https://redirx.dev
+```
+
+The native MCP SDK follows the actual 401 challenge, discovers metadata, registers a
+fresh public test client, and opens its authorization URL for Chrome. A loopback
+listener captures the code on port8766 with state/Host/replay checks. The probe
+initializes MCP, lists tools, optionally executes the existing `discover` tool for
+the supplied domain, rotates refresh credentials and reconnects. It reports safe
+booleans/counts and attempts to revoke the grant/remove its downstream test client,
+checking the effects. It does not alter upstream clients, deploy services or run paid
+jobs. Omit the second argument for authorization-only acceptance. The discovery check
+is for the existing four-tool gateway; the eleven-tool release needs its own workflow
+acceptance. Never paste callback URLs/tokens into chat. Callback verification:
+`node --test scripts/test-production-oauth-probe.mjs`.

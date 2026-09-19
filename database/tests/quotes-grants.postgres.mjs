@@ -49,18 +49,19 @@ async function role(name,user,fn) {
  await query(`SET ROLE ${name}`);
  try { return await fn(); } finally { await query('RESET ROLE'); }
 }
-before(async()=>{
+const ready=(async()=>{
  await cluster.initialise(); await cluster.start();
  db=cluster.getPgClient('postgres','127.0.0.1'); second=cluster.getPgClient('postgres','127.0.0.1'); await db.connect(); await second.connect();
  await query(await read('./legacy-fixture.sql'));
  // Equivalent pre-existing027 timing column; worker RPC bodies are outside this fixture.
  await query('ALTER TABLE migration_sessions ADD COLUMN completed_at timestamptz');
  for(const file of ['019_auth_user_delete_cleanup.sql','026_add_traffic_baseline_and_url_sources.sql',
- '031_add_account_usage_events.sql','032_durable_migrations.sql','034_atomic_inventory_import.sql','036_migration_quotes_grants.sql'])
+ '031_add_account_usage_events.sql','032_durable_migrations.sql','034_atomic_inventory_import.sql','035_atomic_migration_planning.sql','036_migration_quotes_grants.sql'])
   await query(await read(`../migrations/${file}`));
  await query('INSERT INTO auth.users(id) VALUES($1),($2)',[A,B]);
  await query('INSERT INTO user_profiles(id) VALUES($1),($2)',[A,B]);
-});
+})();
+before(()=>ready);
 after(async()=>{ await second?.end(); await db?.end(); await cluster.stop(); });
 
 test('DB persisted policy matches shared contract and old-page boundary prices',async()=>{
@@ -199,3 +200,25 @@ test('migration reapplication preserves immutable quotes, grants and legacy righ
  assert.deepEqual(await one('SELECT (SELECT count(*)::int FROM migration_price_quotes) AS quotes,(SELECT count(*)::int FROM migration_purchase_grants) AS grants'),before);
  assert.ok(await one("SELECT relname FROM pg_class WHERE relname='project_pricing_quotes'"));
 });
+
+
+test('auth account deletion cascades complete quote/grant records without bypassing immutability',async()=>{
+ const owner='10000000-0000-0000-0000-000000000003';
+ await query('INSERT INTO auth.users(id) VALUES($1)',[owner]);
+ await query('INSERT INTO user_profiles(id) VALUES($1)',[owner]);
+ const f=await fixture(501,2,owner);const q=await quote(f,'delete-account');const g=await paid(f,q,'deleteaccount');
+ const run=await one('INSERT INTO migration_runs(user_id,migration_id,old_inventory_id,new_inventory_id) VALUES($1,$2,$3,$4) RETURNING id',[owner,f.id,f.old,f.new]);
+ await query("INSERT INTO migration_artifacts(migration_id,user_id,run_id,decision_revision,format,content_hash,storage_key) VALUES($1,$2,$3,'r1','csv','fixturehash','private-fixture')",[f.id,owner,run.id]);
+ const legacy=await one("INSERT INTO migration_sessions(user_id,status) VALUES($1,'completed') RETURNING id",[owner]);
+ await query('INSERT INTO project_pricing_quotes(user_id,source_session_id) VALUES($1,$2)',[owner,legacy.id]);
+ const legacyMigration=await one("INSERT INTO migration_records(user_id,status) VALUES($1,'legacy_unverified') RETURNING id",[owner]);
+ await query('INSERT INTO migration_runs(user_id,migration_id,legacy_session_id) VALUES($1,$2,$3)',[owner,legacyMigration.id,legacy.id]);
+ await query('DELETE FROM auth.users WHERE id=$1',[owner]);
+ for(const table of ['user_profiles','migration_records','inventory_snapshots','migration_runs','migration_artifacts','migration_operations','migration_price_quotes','migration_purchase_grants','project_pricing_quotes']) {
+  const column=table==='user_profiles'?'id':'user_id';
+  assert.equal((await one(`SELECT count(*)::int AS n FROM ${table} WHERE ${column}=$1`,[owner])).n,0,table);
+ }
+ assert.equal((await one('SELECT count(*)::int AS n FROM session_discovered_urls WHERE inventory_id=$1 OR inventory_id=$2',[f.old,f.new])).n,0);
+});
+
+export { fixture,quote,paid,rpc,query,one,role,A,B,db,second,ready };

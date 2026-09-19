@@ -22,9 +22,10 @@ instance `vzmqx` at 16:25:23 UTC, with replay and the then-current family both r
 but invalidated the refresh while doing so, so it is **not** persistence evidence and is not
 cited as such.
 
-**What has NOT changed, and still governs:** no application SQL was applied — migrations
-**032–048 were not run**, and **033 remains separate and pending**, to follow a verified
-deployment rather than accompany one, because its prerequisite ships in this release. Token
+**What has NOT changed, and still governs:** migrations **032 and 034–048 were not run**.
+Migration **033 was applied separately at ~16:40 UTC**, *after* the deployment carrying its
+prerequisite, exactly as §3a requires — see the acceptance record for its before/after evidence.
+Token
 validation was not loosened. The issuer origin is **permanent**, not a placeholder for
 `auth.redirx.dev` — see the acceptance record. `AUTH_TRUST_PROXY=1` is required, and the
 forwarded-host check it enables is defence in depth a caller can satisfy by forgery, which is
@@ -212,7 +213,12 @@ not prove absence of dynamic imports or live configuration changes.
 
 Listing Supabase migrations must show `031_add_account_usage_events`
 (`20260918183005`) as the newest for this rollout. `032` and dependent import RPC
-migration `034` must remain absent. Their repository/import service has no production
+migration `034` must remain absent.
+
+> **Note added after application.** `033_internal_billing_rls` (`20260919164000`) is now the
+> newest migration, applied deliberately as its own release per §3a. This gate's "031 is newest"
+> wording predates that and should be read as "`032` and `034` must remain absent", which is
+> still exactly true. Do not treat the presence of `033` as a gate failure. Their repository/import service has no production
 caller. Security migration `033` is a separate release with its own API/worker
 prerequisite; do not apply it opportunistically with the consent rollout either.
 
@@ -467,6 +473,14 @@ fault to fix.
 ---
 
 ## 3a. Migration 033 — the ordering is the OPPOSITE of 031
+
+> **STATUS: APPLIED 2026-09-19, ~16:40 UTC**, via the authenticated Supabase SQL Editor, one
+> transaction, once. History row `20260919164000` / `033_internal_billing_rls` / 1 statement.
+> It ran **after** the API and worker deployment carrying its prerequisite, which is what this
+> section demanded. Before/after permissions evidence, the live `service_role` and `anon` probes,
+> and a note on `service_role`'s `bypassrls` are recorded in
+> [the acceptance record](oauth-broker-acceptance-2026-09-19.md). The section below is the
+> original pre-application guidance, preserved because its ordering argument is why this worked.
 
 Prepared on `pivot/mcp-primary` (`eaa8b4a`), **not applied**, and deliberately independent
 of 032. It closes the four ERROR-level advisor findings in section 8: RLS plus revoked

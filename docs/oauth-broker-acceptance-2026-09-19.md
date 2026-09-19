@@ -63,9 +63,46 @@ persistence claim above rests solely on the separated run, which is why the two 
   its two tables only. Verified in both directions: no `CREATE` on `mcp_auth` or `public`, no
   `TRUNCATE`, no privileges on any table outside `mcp_auth`, no elevated role attributes, no role
   memberships. `pg_authid` is unreadable to it.
-- **No application SQL was applied.** Migrations **032–048 were not run**. Migration **033 remains
-  separate and pending**: its prerequisite (a dedicated admin client for `DeepMatchPreviewDB`)
-  ships in this release, so it must follow a verified deployment, never accompany one.
+- **Migration 033 applied — separately, and after the deployment it depends on.** Migrations
+  **032 and 034–048 were not run.** See "Migration 033" below.
+
+## Migration 033 — applied 2026-09-19, ~16:40 UTC
+
+Applied through the authenticated Supabase SQL Editor using the exact reviewed
+`033_internal_billing_rls.sql`, as one transaction, once. Migration history row
+`20260919164000` / `033_internal_billing_rls` / 1 statement, read back independently.
+
+This followed the verified deployment rather than accompanying it, which was the whole point of
+§3a of the handoff: 033 revokes privileges on tables production already uses, so the compatible
+code — the dedicated admin client for `DeepMatchPreviewDB` — had to be live first.
+
+**Permissions captured before the change**, at `033-preflight.json`: four tables
+(`agency_usage_events`, `deep_match_previews`, `project_pricing_quotes`, `stripe_webhook_events`),
+all owned by `postgres`, **RLS disabled on all four**, **no policies at all**, and grants recorded
+for `postgres`, `anon`, `authenticated` and `service_role`.
+
+**State after:**
+
+| Check | Result |
+|---|---|
+| RLS enabled on all four tables | yes |
+| Policies | one, `internal_service_access`, service-role only |
+| `anon` / `authenticated` table `SELECT` | false |
+| `anon` / `authenticated` `has_any_column_privilege(SELECT, INSERT, UPDATE, REFERENCES)` | false |
+| `service_role` each DML | true |
+
+**Live behaviour, before and after.** The API's Render `SUPABASE_KEY` resolves to `service_role`;
+a zero-row PostgREST `GET` against all four tables returned **HTTP 200 both before and after**, so
+the application path was never interrupted. The public frontend `anon` key returns **HTTP 401 with
+SQLSTATE 42501** on all four afterwards. No table data was modified and no charge was incurred.
+
+**One honest qualification about what is doing the work.** `service_role` carries
+**`bypassrls = true`** (captured in the preflight snapshot alongside `superuser = false`). RLS
+therefore never constrained `service_role`, which is why the API path was unaffected — and it means
+the `internal_service_access` policy documents intent rather than being what keeps the backend
+working. The effective lockout of `anon` and `authenticated` is the **revoked table and column
+privileges**; RLS default-deny is the second layer behind them, covering the case where a grant is
+ever restored by accident. Both matter; neither alone is the whole story.
 
 ## The issuer origin is permanent
 

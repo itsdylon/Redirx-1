@@ -27,12 +27,15 @@ vi.mock('./components/DemoPage', () => ({ DemoPage: () => <div>Demo Page</div> }
 vi.mock('./components/QuickMatchLandingPage', () => ({
   QuickMatchLandingPage: () => <div>Quick Match Route</div>,
 }));
+vi.mock('./components/PivotCompanionPage', () => ({
+  PivotCompanionPage: () => <div>Companion Page</div>,
+}));
 vi.mock('./components/ui/sonner', () => ({ Toaster: () => null }));
 
-function renderAt(path: string) {
+function renderAt(path: string, pivotEnabled?: boolean) {
   return render(
     <MemoryRouter initialEntries={[path]}>
-      <App />
+      <App pivotEnabled={pivotEnabled} />
     </MemoryRouter>
   );
 }
@@ -193,6 +196,41 @@ describe('unauthenticated pivot deep links', () => {
     expect(await screen.findByText('Login Page')).toBeInTheDocument();
     const current = new URL(screen.getByLabelText('Current route').textContent!, 'https://fixture.invalid');
     expect(current.pathname).toBe('/login');
+    expect(current.searchParams.get('redirect')).toBe(target);
+  });
+});
+
+describe('actual pivot retirement routes', () => {
+  it.each(['/quick-match/', '/Quick-Match', '/upload/', '/UPLOAD', '/dashboard/', '/DASHBOARD'])
+    ('sends signed-out retired entry %s to companion login', async target => {
+      mockUseAuth.mockReturnValue({ user: null, loading: false });
+      render(<MemoryRouter initialEntries={[target]}><App pivotEnabled /><CurrentRoute /></MemoryRouter>);
+      expect(await screen.findByText('Login Page')).toBeInTheDocument();
+      const current = new URL(screen.getByLabelText('Current route').textContent || '/login', 'https://fixture.invalid');
+      expect(current.pathname).toBe('/login');
+      expect(current.searchParams.get('redirect')).toBe('/companion');
+    });
+
+  it.each(['free', 'pro', 'agency'])('sends signed-in %s users from retired entries to companion', async plan => {
+    mockUseAuth.mockReturnValue({ user: { id: `user-${plan}`, plan }, loading: false });
+    for (const target of ['/quick-match/', '/Quick-Match', '/upload/', '/UPLOAD', '/dashboard/', '/DASHBOARD']) {
+      const view = render(<MemoryRouter initialEntries={[target]}><App pivotEnabled /></MemoryRouter>);
+      expect(await screen.findByText('Companion Page')).toBeInTheDocument();
+      view.unmount();
+    }
+  });
+
+  it('leaves retired entries unchanged when the flag is off', async () => {
+    mockUseAuth.mockReturnValue({ user: { id: 'legacy', plan: 'free' }, loading: false });
+    renderAt('/quick-match/', false);
+    expect(await screen.findByText('Quick Match Route')).toBeInTheDocument();
+  });
+
+  it.each(['/review/session-1', '/projects'])('preserves signed-out return paths for retained %s', async target => {
+    mockUseAuth.mockReturnValue({ user: null, loading: false });
+    render(<MemoryRouter initialEntries={[target]}><App pivotEnabled /><CurrentRoute /></MemoryRouter>);
+    expect(await screen.findByText('Login Page')).toBeInTheDocument();
+    const current = new URL(screen.getByLabelText('Current route').textContent || '/login', 'https://fixture.invalid');
     expect(current.searchParams.get('redirect')).toBe(target);
   });
 });

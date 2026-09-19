@@ -32,10 +32,10 @@ import {
   getPivotEntryRedirect,
 } from './routes';
 
-export default function App() {
+export default function App({ pivotEnabled = MCP_PIVOT_ENABLED }: { pivotEnabled?: boolean } = {}) {
   const { user, loading } = useAuth();
   const location = useLocation();
-  const authedHome = MCP_PIVOT_ENABLED ? ROUTES.companion : getAuthedHomeRoute(user?.plan);
+  const authedHome = pivotEnabled ? ROUTES.companion : getAuthedHomeRoute(user?.plan);
   const pendingReturn = sanitizeRedirectPath(new URLSearchParams(location.search).get('redirect')) || getAuthRedirect();
   // A session may already exist when an MCP client opens the login URL.
   // Preserve its consent target without allowing login/signup redirect loops.
@@ -44,7 +44,6 @@ export default function App() {
   const pricingSourceSessionId = new URLSearchParams(location.search).get('source_session_id');
   const reviewLayoutVariant = isEnterprisePlan(user?.plan) ? 'dashboard' : 'tool';
   const loginWithReturn = `${ROUTES.login}?redirect=${encodeURIComponent(location.pathname + location.search)}`;
-  const pivotEntryRedirect = getPivotEntryRedirect(location.pathname, !!user, MCP_PIVOT_ENABLED);
 
   // Show loading state while checking authentication
   if (loading) {
@@ -74,8 +73,8 @@ export default function App() {
       <Route
         path={ROUTES.quickMatch}
         element={
-          pivotEntryRedirect
-            ? <Navigate to={pivotEntryRedirect} replace />
+          getPivotEntryRedirect(ROUTES.quickMatch, !!user, pivotEnabled)
+            ? <Navigate to={getPivotEntryRedirect(ROUTES.quickMatch, !!user, pivotEnabled)!} replace />
             : user
             ? (
               canAccessQuickMatch(user?.plan)
@@ -85,10 +84,10 @@ export default function App() {
             : <QuickMatchLandingPage />
         }
       />
-      <Route path={ROUTES.companion} element={user ? (MCP_PIVOT_ENABLED ? <PivotCompanionPage /> : <Navigate to={ROUTES.quickMatch} replace />) : <Navigate to={loginWithReturn} replace />} />
-      <Route path={ROUTES.migration} element={user ? (MCP_PIVOT_ENABLED ? <PivotMigrationDetail /> : <Navigate to={ROUTES.quickMatch} replace />) : <Navigate to={loginWithReturn} replace />} />
+      <Route path={ROUTES.companion} element={user ? (pivotEnabled ? <PivotCompanionPage /> : <Navigate to={ROUTES.quickMatch} replace />) : <Navigate to={loginWithReturn} replace />} />
+      <Route path={ROUTES.migration} element={user ? (pivotEnabled ? <PivotMigrationDetail /> : <Navigate to={ROUTES.quickMatch} replace />) : <Navigate to={loginWithReturn} replace />} />
       <Route path="/billing/subscriptions/return" element={user
-        ? (MCP_PIVOT_ENABLED ? <PivotCompanionPage /> : <Navigate to={authedHome} replace />)
+        ? (pivotEnabled ? <PivotCompanionPage /> : <Navigate to={authedHome} replace />)
         : <Navigate to={loginWithReturn} replace />} />
       <Route
         path={ROUTES.demo}
@@ -102,8 +101,8 @@ export default function App() {
       <Route
         path={ROUTES.dashboard}
         element={
-          pivotEntryRedirect
-            ? <Navigate to={pivotEntryRedirect} replace />
+          getPivotEntryRedirect(ROUTES.dashboard, !!user, pivotEnabled)
+            ? <Navigate to={getPivotEntryRedirect(ROUTES.dashboard, !!user, pivotEnabled)!} replace />
             : user
             ? (canAccessDashboard(user?.plan) ? <Dashboard /> : <Navigate to={ROUTES.quickMatch} replace />)
             : <Navigate to={ROUTES.login} replace />
@@ -111,13 +110,13 @@ export default function App() {
       />
       <Route
         path={ROUTES.projects}
-        element={user ? <AllProjects /> : <Navigate to={ROUTES.login} replace />}
+        element={user ? <AllProjects /> : <Navigate to={loginWithReturn} replace />}
       />
       <Route
         path={ROUTES.upload}
         element={
-          pivotEntryRedirect
-            ? <Navigate to={pivotEntryRedirect} replace />
+          getPivotEntryRedirect(ROUTES.upload, !!user, pivotEnabled)
+            ? <Navigate to={getPivotEntryRedirect(ROUTES.upload, !!user, pivotEnabled)!} replace />
             : user
             ? (canAccessUpload(user?.plan) ? <UploadPage /> : <Navigate to={ROUTES.quickMatch} replace />)
             : <Navigate to={ROUTES.login} replace />
@@ -136,7 +135,7 @@ export default function App() {
       />
       <Route
         path={ROUTES.review}
-        element={user ? <ReviewInterface layoutVariant={reviewLayoutVariant} /> : <Navigate to={ROUTES.login} replace />}
+        element={user ? <ReviewInterface layoutVariant={reviewLayoutVariant} /> : <Navigate to={loginWithReturn} replace />}
       />
       <Route
         path={ROUTES.settings}
@@ -147,7 +146,7 @@ export default function App() {
                 ? <Settings />
                 : <Navigate to={ROUTES.quickMatch} replace />
             )
-            : <Navigate to={ROUTES.login} replace />
+                : <Navigate to={loginWithReturn} replace />
         }
       />
       <Route
@@ -171,7 +170,7 @@ export default function App() {
                 ? <AccountPage />
                 : <Navigate to={ROUTES.quickMatch} replace />
             )
-            : <Navigate to={ROUTES.login} replace />
+            : <Navigate to={loginWithReturn} replace />
         }
       />
     </Routes>

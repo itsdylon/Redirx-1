@@ -599,7 +599,14 @@ class RedirxWorker:
                 preview_service.mark_processing(session_id)
 
             # Run pipeline
-            pipeline = Pipeline(input=(old_urls, new_urls), session_id=session_id, pipeline_type=pipeline_type)
+            pipeline_options = {}
+            if pivot_service is not None:
+                pipeline_options = {'preserve_url_identity': True, 'engine_write_context': {
+                    'run_id': job['mcp_run_id'], 'worker_id': self.worker_id,
+                    'attempt_count': attempt_count,
+                }}
+            pipeline = Pipeline(input=(old_urls, new_urls), session_id=session_id,
+                                pipeline_type=pipeline_type, **pipeline_options)
             total = pipeline.total_stages
             names = pipeline.stage_names
 
@@ -642,7 +649,7 @@ class RedirxWorker:
             # rename conventions this session's own confident matches
             # demonstrate. Advisory only — new_url is untouched — so a failure
             # here costs suggestions, never the mappings themselves.
-            if not is_preview:
+            if not is_preview and pivot_service is None:
                 try:
                     repair_outcome = await asyncio.to_thread(
                         MatchRepairService().repair_session, str(session_id)

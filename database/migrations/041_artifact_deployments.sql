@@ -251,7 +251,7 @@ BEGIN
     SELECT true INTO v_grant_authority FROM migration_purchase_grants g
       WHERE g.id=(v_run_json->>'grant_id')::uuid AND g.user_id=p_user_id
         AND g.migration_id=p_migration_id AND g.quote_id=(v_run_json->>'quote_id')::uuid
-        AND g.state='active' FOR KEY SHARE;
+        AND g.state='active' FOR SHARE;
     IF v_grant_authority IS DISTINCT FROM true THEN
     RAISE EXCEPTION 'not_found' USING ERRCODE = 'P0001';
     END IF;
@@ -281,7 +281,7 @@ BEGIN
         AND w.quote_id=$4::uuid AND w.run_operation_id=$5::uuid
         AND w.state='succeeded' AND s.state='completed' AND s.first_success_at IS NOT NULL
         AND sub.status <> 'revoked'
-      FOR KEY SHARE
+      FOR SHARE OF w, s, sub
     $q$
     INTO v_studio_authority_row
     USING (v_run_json->>'studio_reservation_id'), p_user_id, p_migration_id,

@@ -26,9 +26,16 @@ class PivotWorkerTests(unittest.IsolatedAsyncioTestCase):
                 subscriptions = stack.enter_context(patch('backend.worker.MigrationSubscriptionService')).return_value
                 stack.enter_context(patch('backend.worker.DeepPreviewService'))
                 stack.enter_context(patch('backend.worker.Config.validate_embeddings'))
-                stack.enter_context(patch('backend.worker.Pipeline', side_effect=failure))
+                pipeline = stack.enter_context(patch('backend.worker.Pipeline', side_effect=failure))
                 stack.enter_context(patch('backend.worker.traceback.print_exc'))
                 self.assertFalse(await worker.process_job(job))
+                if pivot:
+                    self.assertTrue(pipeline.call_args.kwargs['preserve_url_identity'])
+                    self.assertEqual(pipeline.call_args.kwargs['engine_write_context'], {
+                        'run_id': job['mcp_run_id'], 'worker_id': worker.worker_id, 'attempt_count': attempt,
+                    })
+                else:
+                    self.assertNotIn('engine_write_context', pipeline.call_args.kwargs)
                 if pivot and attempt == WORKER_MAX_ATTEMPTS:
                     subscriptions.finalize_worker_failure.assert_called_once_with(job, worker.worker_id, failure)
                     authority.finalize_session.assert_not_called()

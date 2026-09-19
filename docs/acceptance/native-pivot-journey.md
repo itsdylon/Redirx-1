@@ -31,7 +31,7 @@ to the Node bridge.
 Use the app's existing Python virtual environment and Node 24.21.0.
 
 The fixture applies real 006/009/019/026/027/031/032 and all migration SQL from
-034 through 049 and 051, plus 024 for Search Console storage. The earlier session and
+034 through 051, plus 024 for Search Console storage. The earlier session and
 mapping table shapes are supplied as minimal fixtures; all relevant later
 constraints, security definer functions, grants, and ownership filters remain
 active. SQL uses service_role as production's trusted backend does. This is not
@@ -46,7 +46,8 @@ Node 24.21.0:
 1. Free account: plan through MCP; explicit old/new imports through the real
    HTTP inventory resource; run and idempotent replay through MCP; queued status;
    another account's denial; native claim and dispatch authorization; all six
-   actual pipeline stages; actual SQL mapping persistence; completion through
+   actual pivot pipeline stages with URL identity preservation and 050 write
+   fencing; actual SQL embedding and mapping persistence; completion through
    a newly connected MCP SDK client; paged matches; audited approve/replay;
    real immutable export and MCP resource download/hash validation; denied
    cross-account artifact/verification/monitor reads; explicit installation;
@@ -73,17 +74,23 @@ initial plan truthfully requests inventory.
 - The database client transport is adapted, not repository or SQL business logic.
   Every run, grant, operation, inventory, mapping and decision is persisted in
   native PostgreSQL. Existing account rows model a fresh free account after signup.
-- The free engine fixture has three exact paths served by two controlled
-  loopback HTTP origins. It executes the actual six-stage
-  pipeline and persists its actual outputs. The embedding client rejects any
-  unexpected embedding request, and no paid or public-origin call is made.
-  The actual redirect probe permits only those two fixture origins and uses a
-  loopback connector. It still checks every redirect hop; other origins are
-  rejected by the fixture guard. HEAD405/GET301, a wrong target and HTTP503
-  are real HTTP responses, not fabricated probe results. This
-  does **not** prove semantic matching quality across changed content or the
-  full set of URL-identity edge cases; those require separate engine quality
-  fixtures.
+- The free engine fixture has three paths served by two controlled loopback
+  HTTP origins. Distinct HTML moves from `/page/i` to `/moved/page/j` on the
+  new site, with a permuted topic order. The fixture requires content evidence
+  rather than the legacy normalization of path prefixes. It executes all six
+  actual pipeline stages with the worker's `preserve_url_identity` and
+  `engine_write_context` settings. Six deterministic embedding provider
+  responses are injected at the external client boundary; real 050 RPCs store
+  those embeddings and three exact-content mappings. Direct legacy writes and
+  writes from a finalized attempt are rejected by actual SQL authority.
+  No paid or public-origin call is made. Connectors permit only the two fixture
+  origins, including redirect hops. After generation, the origins switch to
+  installed redirect behavior. HEAD405/GET301, a wrong target and HTTP503 are
+  real HTTP responses, not fabricated probe results.
+  This does **not** prove semantic embedding quality or the full set of URL
+  identity edge cases. Native PostgreSQL here lacks pgvector, so the embedding
+  storage fixture uses JSONB; 052 vector candidate search is not invoked by
+  exact-content pairing and requires its separate pgvector acceptance suite.
 - Gateway network fetches are restricted to loopback by the fixture bridge.
   Python's database DSN is rejected unless loopback. Analytics uses a fixture sink;
   Stripe and Google are never contacted and mail delivery is disabled. A
@@ -104,8 +111,11 @@ RPC. The test proves a later mapping decision advances the selection revision,
 then the old export key returns its original artifact with unchanged resource
 bytes.
 
-Full semantic matching quality and exact URL-identity preservation still require
-separate quality fixtures. This small fixture does not replace
+Full semantic matching quality and the broader URL-identity edge cases still
+require separate quality fixtures. A same-path, changed-content variant exposed
+the remaining early exact-path shortcut in the pivot engine; that correction
+and regression are tracked with the engine owner. The passing renamed-path
+journey does not claim the same-path behavior is correct. This small fixture does not replace
 500/15000-page capacity evidence. External OAuth login, real Stripe delivery and
 signature verification, mail provider delivery, PostgREST transport, root process
 startup, and production deployment remain separate acceptance work.

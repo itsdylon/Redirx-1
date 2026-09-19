@@ -2,7 +2,9 @@
 
 Only external OAuth verification is supplied as fixture AuthInfo. Internal
 identity resolution and signed delegation validation remain real. The pipeline
-fixture uses exact paths and makes no content-quality or embedding-quality claim.
+fixture serves distinct matching HTML and uses deterministic external embedding
+responses. Actual pivot write fencing and URL identity options remain enabled;
+this does not measure semantic embedding quality.
 """
 import asyncio
 from contextlib import ExitStack, redirect_stdout
@@ -15,6 +17,7 @@ import aiohttp
 import json
 import os
 from pathlib import Path
+from types import SimpleNamespace
 import queue
 import subprocess
 import tempfile
@@ -56,20 +59,37 @@ class OriginFixture(BaseHTTPRequestHandler):
     def do_GET(self): self.respond()
     def respond(self):
         self.server.hits.append((self.command,self.path))
+        if self.server.engine_content:
+            path_index=int(self.path.rsplit('/',1)[-1]) if self.path.rstrip('/').rsplit('/',1)[-1].isdigit() else 0
+            topic=path_index if self.server.old else (path_index-1)%3
+            body=(f'<html><head><title>Fixture topic {topic}</title></head><body><main>'
+                  +f'Topic {topic} has controlled page content for the native migration acceptance. '*5
+                  +'</main></body></html>').encode()
+            self.send_response(200);self.send_header('Content-Type','text/html')
+            self.send_header('Content-Length',str(len(body)));self.end_headers()
+            if self.command!='HEAD': self.wfile.write(body)
+            return
         if self.server.old:
             mode=self.server.modes.get(self.path,'pass')
             if self.command=='HEAD' and self.path=='/page/0': self.send_response(405)
             elif mode=='unavailable': self.send_response(503)
             else:
                 self.send_response(301)
-                self.send_header('Location',self.server.destination+('/wrong' if mode=='wrong' else self.path))
+                self.send_header('Location',self.server.destination+('/wrong' if mode=='wrong' else self.server.target_prefix+str((int(self.path.rsplit('/',1)[-1])+1)%3)))
         else: self.send_response(200)
         self.send_header('Content-Length','0'); self.end_headers()
 
-class NoPaidEmbeddings:
-    """No embeddings expected in the exact-path engine fixture."""
+class FixtureEmbeddings:
+    """Deterministic external provider response; real persistence stays enabled."""
+    calls=[]
     def __init__(self, **kwargs): self.embeddings = self
-    async def create(self, **kwargs): raise AssertionError('Unexpected paid embedding call')
+    async def create(self, **kwargs):
+        text=kwargs['input']
+        topic=next((i for i in range(3) if text.startswith(f'Topic {i} ')),None)
+        if topic is None: raise AssertionError('Unexpected embedding fixture text')
+        self.calls.append(text)
+        embedding=[0.0]*1536;embedding[topic]=1.0
+        return SimpleNamespace(data=[SimpleNamespace(embedding=embedding)])
     async def close(self): pass
 
 
@@ -88,13 +108,13 @@ class NativeProductJourney(unittest.TestCase):
               id uuid PRIMARY KEY DEFAULT gen_random_uuid(), session_id uuid NOT NULL REFERENCES migration_sessions(id) ON DELETE CASCADE,
               old_url text NOT NULL,new_url text,confidence_score double precision,match_type text,needs_review boolean NOT NULL DEFAULT false,
               repaired_url text,repair_method text,repair_confidence double precision,repair_support integer,repair_evidence text);
-              CREATE TABLE webpage_embeddings (id uuid PRIMARY KEY DEFAULT gen_random_uuid(),session_id uuid NOT NULL REFERENCES migration_sessions(id),url text,site_type text,embedding jsonb);
+              CREATE TABLE webpage_embeddings (id uuid PRIMARY KEY DEFAULT gen_random_uuid(),session_id uuid NOT NULL REFERENCES migration_sessions(id),url text,site_type text,embedding jsonb,extracted_text text,title text);
               CREATE FUNCTION update_updated_at_column() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN NEW.updated_at=now(); RETURN NEW; END $$;
               ALTER TABLE auth.users ADD COLUMN email text, ADD COLUMN email_confirmed_at timestamptz;''')
             paths = [ROOT/'database/migrations/024_add_gsc_integration.sql',
                      ROOT/'database/migrations/038_mapping_decisions.sql', ROOT/'database/migrations/039_migration_test_checkout.sql',
                      ROOT/'database/migrations/040_agent_search_console.sql', artifact]
-            for pattern in ('042_*.sql','043_*.sql','044_*.sql','045_*.sql','046_*.sql','047_*.sql','048_*.sql','049_*.sql','051_*.sql'):
+            for pattern in ('042_*.sql','043_*.sql','044_*.sql','045_*.sql','046_*.sql','047_*.sql','048_*.sql','049_*.sql','050_*.sql','051_*.sql'):
                 paths.extend(sorted((ROOT/'database/migrations').glob(pattern)))
             for path in paths: conn.execute(path.read_text())
             conn.execute('GRANT SELECT,INSERT,UPDATE,DELETE ON url_mappings,webpage_embeddings,gsc_connections,gsc_url_metrics TO service_role')
@@ -115,7 +135,8 @@ class NativeProductJourney(unittest.TestCase):
         self.stack.enter_context(patch.object(Config, 'OPENAI_API_KEY', 'fixture-no-paid-embeddings'))
         self.stack.enter_context(patch.object(SupabaseClient, 'get_client', return_value=self.native))
         self.stack.enter_context(patch.object(SupabaseClient, 'get_admin_client', return_value=self.native))
-        self.stack.enter_context(patch('src.redirx.stages.AsyncOpenAI', NoPaidEmbeddings))
+        FixtureEmbeddings.calls=[]
+        self.stack.enter_context(patch('src.redirx.stages.AsyncOpenAI', FixtureEmbeddings))
         # Analytics is an external fixture sink, not a mocked business handler.
         self.events=[]
         self.stack.enter_context(patch('backend.routes.internal_routes.capture', side_effect=lambda *a, **kw: self.events.append(kw)))
@@ -134,7 +155,7 @@ class NativeProductJourney(unittest.TestCase):
         self.origin_servers={}
         for side in ('old','new'):
             server=ThreadingHTTPServer(('127.0.0.1',0),OriginFixture)
-            server.old=side=='old';server.hits=[];server.modes={'/page/1':'wrong','/page/2':'unavailable'}
+            server.old=side=='old';server.engine_content=True;server.target_prefix='/page/';server.hits=[];server.modes={'/page/1':'wrong','/page/2':'unavailable'}
             threading.Thread(target=server.serve_forever,daemon=True).start()
             self.addCleanup(server.server_close);self.addCleanup(server.shutdown)
             self.origins[side]='http://127.0.0.1:'+str(server.server_port)
@@ -144,8 +165,13 @@ class NativeProductJourney(unittest.TestCase):
             parsed=urlsplit(url)
             if f'{parsed.scheme}://{parsed.netloc}' not in self.origins.values():
                 raise SSRFBlockedError('Journey permits only its two fixture origins')
+        class FixtureConnector(aiohttp.TCPConnector):
+            async def _create_connection(self,req,traces,timeout):
+                fixture_only(str(req.url))
+                return await super()._create_connection(req,traces,timeout)
+        self.stack.enter_context(patch('src.redirx.stages.create_safe_connector',side_effect=lambda **kw:FixtureConnector(**kw)))
         self.stack.enter_context(patch('src.redirx.redirect_probe.validate_public_url',side_effect=fixture_only))
-        self.stack.enter_context(patch('backend.services.migration_verification_service.create_safe_connector',side_effect=lambda **kw:aiohttp.TCPConnector(**kw)))
+        self.stack.enter_context(patch('backend.services.migration_verification_service.create_safe_connector',side_effect=lambda **kw:FixtureConnector(**kw)))
         self.headers={'Authorization':'Bearer '+MCPDelegationService().mint(A)[0], 'Content-Type':'application/json'}
         self.log=tempfile.TemporaryFile(mode='w+t'); self.addCleanup(self.log.close)
         env={**os.environ,'REDIRX_BACKEND_URL':self.origin,'MCP_INTERNAL_SECRET':SECRET,'MCP_AUTH_MODE':'oauth',
@@ -205,13 +231,16 @@ class NativeProductJourney(unittest.TestCase):
         for side in ('old','new'):
             # Import is the canonical explicit-source HTTP resource, not an
             # invented twelfth MCP tool. The real gateway owns all business calls.
-            rows=[{'url':self.origins[side]+f'/page/{i}','provenance':['csv']} for i in range(count)]
+            prefix=getattr(self,'new_page_prefix','/page/') if side=='new' else '/page/'
+            rows=[{'url':self.origins[side]+prefix+str(i),'provenance':['csv']} for i in range(count)]
             response=self.request('POST',f'/migrations/{mid}/inventories',{'side':side,'rows':rows,'idempotency_key':side+'-'+key})
             self.assertEqual(response['status'],'succeeded',response)
             inv[side]=response['data']['inventory']['id']
         return mid,inv
 
     def test_free_native_journey_replay_engine_review_and_fresh_client_resume(self):
+        self.new_page_prefix='/moved/page/'
+        self.origin_servers['old'].target_prefix=self.new_page_prefix
         mid,inv=self.plan_import(3)
         status=self.tool('get_migration',{'migration_id':mid}); self.assertEqual(status['next_action'],'run_migration')
         args={'migration_id':mid,'old_inventory_id':inv['old'],'new_inventory_id':inv['new'],'idempotency_key':'free-'+mid}
@@ -226,15 +255,31 @@ class NativeProductJourney(unittest.TestCase):
         job=self.sql("SELECT * FROM claim_next_job('journey-worker',now()+interval '10 minutes')")[0]
         job=json_value(job); self.runs.authorize_dispatch(job,'journey-worker')
         async def execute():
-            pipeline=Pipeline((job['old_urls'],job['new_urls']),session_id=UUID(job['id']),pipeline_type='content')
+            pipeline=Pipeline((job['old_urls'],job['new_urls']),session_id=UUID(job['id']),pipeline_type='content',
+                preserve_url_identity=True,engine_write_context={'run_id':rid,'worker_id':'journey-worker','attempt_count':job['attempt_count']})
             self.assertEqual(pipeline.total_stages,6)
             async for _ in pipeline.iterate():
                 MigrationSessionDB().update_session_progress(UUID(job['id']),pipeline.current_stage_index,pipeline.stage_names[pipeline.current_stage_index-1],pipeline.total_stages)
+        # A pivot session cannot silently fall back to unrestricted legacy inserts.
+        with self.assertRaisesRegex(Exception,'operation_conflict'):
+            self.native.table('url_mappings').insert({'session_id':job['id'],'old_url':job['old_urls'][0],
+                'new_url':job['new_urls'][0],'confidence_score':1,'match_type':'exact_url'}).execute()
         with redirect_stdout(io.StringIO()): asyncio.run(execute())
+        self.assertEqual(len(FixtureEmbeddings.calls),6)
+        self.assertEqual(self.sql('SELECT count(*) AS n FROM webpage_embeddings WHERE session_id=%s',[job['id']])[0]['n'],6)
+        for server in self.origin_servers.values(): server.engine_content=False
         self.runs.finalize_session(job,'journey-worker','completed')
         # This is actual pipeline persistence, not manufactured mapping records.
         rows=self.sql('SELECT * FROM url_mappings WHERE session_id=%s',[job['id']])
-        self.assertEqual(len(rows),3); self.assertTrue(all(row['match_type']=='exact_url' for row in rows))
+        self.assertEqual(len(rows),3); self.assertTrue(all(row['match_type']=='exact_html' for row in rows))
+        self.assertEqual({row['old_url']:row['new_url'] for row in rows},
+            {self.origins['old']+f'/page/{i}':self.origins['new']+self.new_page_prefix+str((i+1)%3) for i in range(3)})
+        # Finalized attempts cannot write again, even through the privileged RPC.
+        with self.assertRaisesRegex(Exception,'operation_conflict'):
+            self.native.rpc('persist_migration_run_mapping',{'p_session_id':job['id'],'p_run_id':rid,
+                'p_worker_id':'journey-worker','p_attempt_count':job['attempt_count'],
+                'p_old_url':rows[0]['old_url'],'p_new_url':rows[0]['new_url'],'p_confidence_score':1.0,
+                'p_match_type':'exact_html','p_needs_review':False}).execute()
         self.bridge.stdin.write(json.dumps({'method':'reconnect','account':'A'})+'\n'); self.bridge.stdin.flush()
         self.assertTrue(self.read_bridge()['result']['reconnected'])
         complete=self.tool('get_migration',{'migration_id':mid})

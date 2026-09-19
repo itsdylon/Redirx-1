@@ -286,7 +286,40 @@ would show up.
 
 ### Stage E — frontend — ✅ DONE 2026-09-19 (runs BEFORE the gate, see 1a)
 
-**Deployment record.**
+**Deployment record — current: `3be8a91`, hotfix.**
+
+| | |
+| --- | --- |
+| Deploy ID | `dep-damump6gekts73f2a8q0` |
+| Deployed commit | `3be8a91093cb1d8542ec2a59ca2c5abadc311797` |
+| Status | `live`, finished 2026-09-19T01:55:06Z |
+| **Rollback target** | `dep-damuhejm8hqs739d1500`, commit `8e6ad72` |
+| Live bundle | `/assets/index-9XWgWvFa.js` |
+
+Why: the first live gate attempt failed — GitHub sign-in returned to the app home with no
+MCP consent and no valid loopback callback. `AuthCallback` completed twice when
+`AuthContext`'s function identity changed, consuming `auth_redirect` on the first pass so
+the second had no return path. The fix shares one completion promise per mounted route and
+guards state updates with an `active` flag. Frontend delta vs `8e6ad72` is exactly
+`AuthCallback.tsx` and its test; everything else in the range is docs and scripts, outside
+the service's `rootDir: frontend`.
+
+*Production cause remains a hypothesis until the browser retry* — edge caching is still a
+possible contributor, and this deploy does not by itself prove the diagnosis.
+
+Verified on the served JS, cache-busted: `Auth callback could not complete.` ×1 (new
+string), `Auth callback error:` ×0 (old string gone), and `oauth/consent` ×1 plus
+`Only approve a client you recognize` ×1 still present, so the consent route did not
+regress.
+
+> **The branch name is now a lie, deliberately.** `deploy/consent-frontend-8e6ad72` points
+> at `3be8a91`, not at `8e6ad72`. The ref was fast-forwarded (`8e6ad72..3be8a91`, no force
+> push) and keeps its original name so the baseline it started from stays legible. **Never
+> infer the deployed commit from the branch name** — read the deploy record above, or query
+> the service. Any earlier wording in this document implying the ref is pinned to `8e6ad72`
+> is superseded by this note.
+
+**Superseded — previous deployment (now the rollback target).**
 
 | | |
 | --- | --- |

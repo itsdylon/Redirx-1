@@ -1,9 +1,41 @@
+import { createPrivateKey, createPublicKey } from 'node:crypto';
+
 function url(value, name, local) {
   const parsed = new URL(value);
   if (parsed.username || parsed.password || parsed.search || parsed.hash ||
       (parsed.protocol !== 'https:' && !(local && parsed.protocol === 'http:' &&
         ['127.0.0.1', 'localhost', '[::1]'].includes(parsed.hostname)))) throw new Error(`Invalid ${name}`);
   return parsed;
+}
+
+function validateSigningJwks(jwks) {
+  if (!jwks || !Array.isArray(jwks.keys) || !jwks.keys.length) {
+    throw new Error('AUTH_SIGNING_JWKS requires one active RS256 RSA signing key');
+  }
+  const kids = new Set();
+  let activePrivateKeys = 0;
+  for (const jwk of jwks.keys) {
+    if (!jwk || typeof jwk !== 'object' || jwk.kty !== 'RSA' || jwk.alg !== 'RS256' ||
+        typeof jwk.kid !== 'string' || !jwk.kid.trim() || kids.has(jwk.kid) ||
+        (jwk.use !== undefined && jwk.use !== 'sig')) {
+      throw new Error('AUTH_SIGNING_JWKS keys require unique non-empty RSA RS256 signing kids');
+    }
+    kids.add(jwk.kid);
+    try {
+      const key = jwk.d === undefined
+        ? createPublicKey({ key: jwk, format: 'jwk' })
+        : createPrivateKey({ key: jwk, format: 'jwk' });
+      if (key.asymmetricKeyType !== 'rsa' || key.asymmetricKeyDetails?.modulusLength < 2048) {
+        throw new Error('weak or non-RSA signing key');
+      }
+    } catch {
+      throw new Error('AUTH_SIGNING_JWKS contains an invalid or weak RSA key');
+    }
+    if (jwk.d !== undefined) activePrivateKeys += 1;
+  }
+  if (activePrivateKeys !== 1) {
+    throw new Error('AUTH_SIGNING_JWKS requires exactly one active private signing key');
+  }
 }
 
 export function configuration(env = process.env) {
@@ -22,10 +54,7 @@ export function configuration(env = process.env) {
     return result;
   };
   const jwks = JSON.parse(required('AUTH_SIGNING_JWKS'));
-  if (!Array.isArray(jwks.keys) || !jwks.keys.length || !jwks.keys.some((key) =>
-    key.kty === 'RSA' && key.d && key.kid && key.alg === 'RS256') ||
-    jwks.keys.some((key) => key.kty !== 'RSA' || key.alg !== 'RS256' || !key.kid ||
-      (key.use !== undefined && key.use !== 'sig'))) throw new Error('An RS256 signing key with kid is required');
+  validateSigningJwks(jwks);
   const port = Number(env.PORT || 8790);
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('Invalid PORT');
   const databaseUrl = required('AUTH_DATABASE_URL');

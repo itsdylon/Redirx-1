@@ -322,6 +322,9 @@ class ResourceAcceptance(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.json['status'], 'partial')
         self.assertEqual([r['code'] for r in result.json['data']['outcomes']], ['revision_conflict', 'invalid_input', 'ok'])
         self.assertEqual((result.json['data']['applied'], result.json['data']['not_applied']), (1, 2))
+        polled = MigrationPlanningService(self.repo).operation(A, result.json['operation_id'], fixture['migration'])
+        self.assertEqual(polled['status'], 'partial')
+        self.assertEqual(polled['data']['outcomes'], result.json['data']['outcomes'])
         listed = self.call('GET', path).json['data']['items']
         found = next(item for item in listed if item['mapping_id'] == ids[0])
         self.assertEqual((found['revision'], found['decision_target']), (1, 'https://new.example/Page/1?q=A'))

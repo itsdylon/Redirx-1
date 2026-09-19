@@ -5,13 +5,13 @@ Every export format lived in the React export modal, which meant the rules
 could only be produced by a human with a browser open. An agent asked to "run
 the migration and install the redirects" had no way to obtain the artifact —
 the last step of the job was unreachable over HTTP. These are ports of the
-client formatters, kept byte-compatible so the API and the UI cannot drift
-into producing different files from the same matches.
+client formatters, but safety takes precedence over byte compatibility: an
+artifact that is syntactically valid but silently misroutes traffic is rejected.
 
 Path handling is the subtlety. Apache, Nginx, Cloudflare, Shopify and Vercel
-all match against the request *path*; a full URL in the source silently never
-matches. The UI warns about this and lets the user choose. An API has nobody
-to warn, so `paths` is the default here.
+all match against the request *path*. The renderer emits exact Apache/Nginx
+rules, rejects query-sensitive sources where a target cannot express them,
+and rejects platform pattern syntax that would change a literal URL.
 """
 from __future__ import annotations
 
@@ -135,7 +135,12 @@ def _nginx_literal(value: str) -> str:
 
 def _regex_path(value: str) -> str:
     parsed = urlparse(value)
-    return re.escape(parsed.path or "/") if parsed.netloc else re.escape(value)
+    if parsed.netloc:
+        path = parsed.path or "/"
+        if parsed.params:
+            path += f";{parsed.params}"
+        return re.escape(path)
+    return re.escape(value)
 
 
 def _decision_exclusion(row: Mapping[str, Any]) -> Optional[str]:
@@ -314,6 +319,8 @@ def to_path(url: str) -> str:
     if not parsed.scheme or not parsed.netloc:
         return url
     path = parsed.path or "/"
+    if parsed.params:
+        path += f";{parsed.params}"
     return f"{path}?{parsed.query}" if parsed.query else path
 
 
@@ -413,6 +420,20 @@ def build_export(
         new_domain=new_domain,
     )
     selected = selection["mappings"]
+    if fmt == APACHE and any("$" in item["new_url"] for item in selected):
+        raise UnsupportedExportInput(
+            "Apache RedirectMatch cannot safely represent a literal '$' in a destination."
+        )
+    if fmt == NGINX and any("$" in item["old_rendered"] or "$" in item["new_rendered"] for item in selected):
+        raise UnsupportedExportInput(
+            "Nginx exact location fragments do not support literal '$' safely."
+        )
+    if fmt in {VERCEL, CLOUDFLARE}:
+        pattern_chars = (":", "*", "(", ")", "[", "]", "{", "}")
+        if any(any(char in item["old_rendered"] for char in pattern_chars) for item in selected):
+            raise UnsupportedExportInput(
+                f"{fmt} treats pattern syntax in source paths as a matcher, not a literal URL."
+            )
     if fmt in PATH_ONLY_FORMATS and any(urlparse(item["effective_old"]).query for item in selected):
         raise UnsupportedExportInput(
             "This platform cannot express query-sensitive source rules safely."
@@ -485,13 +506,14 @@ def warning_for(fmt: str, url_format: str) -> Optional[str]:
     """
     Why a chosen combination will not work, if it will not.
 
-    Returned rather than raised: an agent that explicitly asked for absolute
-    URLs should still get its file, along with the reason it will not route.
+    Returned for platform requirements that are actionable without changing
+    the generated artifact. Unsupported combinations are raised by
+    ``build_export`` instead of emitting a misleading file.
     """
     if fmt == NGINX:
         return (
-            "Nginx output is an http-context map fragment; include it at http "
-            "scope and add a server/location return using $new_uri."
+            "Nginx output is a server-block fragment; merge its exact location "
+            "rules into the existing target server configuration."
         )
     if fmt == CLOUDFLARE:
         return (

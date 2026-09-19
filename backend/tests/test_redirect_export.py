@@ -126,7 +126,7 @@ class TestUrlFormat(unittest.TestCase):
 class TestWarnings(unittest.TestCase):
     def test_absolute_urls_on_a_path_matcher_warn(self):
         self.assertIsNotNone(rx.warning_for(rx.APACHE, "full"))
-        self.assertIn("http-context", rx.warning_for(rx.NGINX, "paths"))
+        self.assertIn("server-block", rx.warning_for(rx.NGINX, "paths"))
         self.assertIn("Pages", rx.warning_for(rx.CLOUDFLARE, "paths"))
 
     def test_paths_never_warn(self):
@@ -242,14 +242,28 @@ class TestSafeSelection(unittest.TestCase):
             ], rx.NGINX)
 
     def test_config_escaping_is_not_raw_interpolation(self):
-        apache = rx.build_export([
-            {"old_url": "/a;\"$", "new_url": "https://new.example/b;\"$"},
+        with self.assertRaises(rx.UnsupportedExportInput):
+            rx.build_export([
+                {"old_url": "/a;\"$", "new_url": "https://new.example/b;\"$"},
+            ], rx.APACHE)
+        with self.assertRaises(rx.UnsupportedExportInput):
+            rx.build_export([
+                {"old_url": "/a$", "new_url": "https://new.example/b$"},
+            ], rx.NGINX)
+
+    def test_path_parameters_are_preserved(self):
+        self.assertEqual(rx.to_path("https://old.example/a;view?x=1"), "/a;view?x=1")
+        out = rx.build_export([
+            {"old_url": "https://old.example/a;view", "new_url": "https://new.example/b;view"},
         ], rx.APACHE)
-        self.assertIn('\\"', apache)
-        nginx = rx.build_export([
-            {"old_url": "/a$", "new_url": "https://new.example/b$"},
-        ], rx.NGINX)
-        self.assertIn("\\$", nginx)
+        self.assertIn("a;view", out)
+
+    def test_pattern_syntax_is_rejected_for_pattern_platforms(self):
+        for fmt, source in ((rx.VERCEL, "/:id"), (rx.CLOUDFLARE, "/a*")):
+            with self.subTest(fmt=fmt), self.assertRaises(rx.UnsupportedExportInput):
+                rx.build_export([
+                    {"old_url": source, "new_url": "/destination"},
+                ], fmt)
 
 
 class TestRobustness(unittest.TestCase):

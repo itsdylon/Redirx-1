@@ -50,7 +50,7 @@ class TestFormats(unittest.TestCase):
     def test_apache(self):
         out = rx.build_export(ROWS, rx.APACHE)
         self.assertEqual(
-            out.splitlines()[0], "Redirect 301 /about-us /company/about"
+            out.splitlines()[0], "Redirect 301 /about-us https://new.example.com/company/about"
         )
 
     def test_nginx_is_a_closed_map_block(self):
@@ -58,7 +58,7 @@ class TestFormats(unittest.TestCase):
         lines = out.splitlines()
         self.assertEqual(lines[0], "map $uri $new_uri {")
         self.assertEqual(lines[-1], "}")
-        self.assertIn("    /pricing /plans;", lines)
+        self.assertIn("    /pricing https://new.example.com/plans;", lines)
 
     def test_nginx_with_no_rows_still_closes_the_block(self):
         # An unclosed map block is a config file nginx refuses to start with.
@@ -67,7 +67,7 @@ class TestFormats(unittest.TestCase):
 
     def test_wordpress_rows_carry_the_status(self):
         out = rx.build_export(ROWS, rx.WORDPRESS)
-        self.assertEqual(out.splitlines()[0], "/about-us,/company/about,301")
+        self.assertEqual(out.splitlines()[0], "/about-us,https://new.example.com/company/about,301")
 
     def test_vercel_is_valid_json_with_permanent_true(self):
         parsed = json.loads(rx.build_export(ROWS, rx.VERCEL))
@@ -78,7 +78,7 @@ class TestFormats(unittest.TestCase):
     def test_cloudflare(self):
         self.assertEqual(
             rx.build_export(ROWS, rx.CLOUDFLARE).splitlines()[0],
-            "/about-us /company/about 301",
+            "/about-us https://new.example.com/company/about 301",
         )
 
     def test_shopify_has_its_required_header(self):
@@ -108,7 +108,8 @@ class TestUrlFormat(unittest.TestCase):
         # Most targets match on the request path, and an agent has nobody to
         # warn it that absolute URLs silently never match.
         out = rx.build_export(ROWS, rx.APACHE)
-        self.assertNotIn("https://", out)
+        self.assertNotIn("https://old.example.com", out)
+        self.assertIn("https://new.example.com", out)
 
     def test_custom_domain_rehosts_each_side(self):
         out = rx.build_export(
@@ -123,17 +124,68 @@ class TestUrlFormat(unittest.TestCase):
 
 class TestWarnings(unittest.TestCase):
     def test_absolute_urls_on_a_path_matcher_warn(self):
-        self.assertIsNotNone(rx.warning_for(rx.NGINX, "full"))
         self.assertIsNotNone(rx.warning_for(rx.APACHE, "full"))
+        self.assertIn("http-context", rx.warning_for(rx.NGINX, "paths"))
+        self.assertIn("Pages", rx.warning_for(rx.CLOUDFLARE, "paths"))
 
     def test_paths_never_warn(self):
         for fmt in rx.FORMATS:
-            self.assertIsNone(rx.warning_for(fmt, "paths"))
+            if fmt not in (rx.NGINX, rx.CLOUDFLARE):
+                self.assertIsNone(rx.warning_for(fmt, "paths"))
 
     def test_formats_carrying_full_urls_do_not_warn(self):
         # CSV and JSON are consumed by tooling, not by a path matcher.
         self.assertIsNone(rx.warning_for(rx.CSV_FORMAT, "full"))
         self.assertIsNone(rx.warning_for(rx.JSON_FORMAT, "full"))
+
+
+class TestSafeSelection(unittest.TestCase):
+    def test_cross_domain_same_path_preserves_destination_origin(self):
+        out = rx.build_export([
+            {"old_url": "https://old.example/a", "new_url": "https://new.example/a"},
+        ], rx.APACHE)
+        self.assertEqual(out, "Redirect 301 /a https://new.example/a")
+
+    def test_noops_and_held_or_rejected_rows_are_excluded(self):
+        selection = rx.select_export_mappings([
+            {"old_url": "https://old.example/a", "new_url": "https://old.example/a"},
+            {"old_url": "https://old.example/b", "new_url": "https://new.example/b", "approved": False},
+            {"old_url": "https://old.example/c", "new_url": "https://new.example/c", "status": "held"},
+            {"old_url": "https://old.example/d", "new_url": "https://new.example/d", "needs_review": True},
+        ])
+        self.assertEqual(selection["mappings"], [])
+        self.assertEqual(selection["excluded_count"], 4)
+
+    def test_conflicts_and_loops_are_excluded(self):
+        selection = rx.select_export_mappings([
+            {"old_url": "/conflict", "new_url": "/one"},
+            {"old_url": "/conflict", "new_url": "/two"},
+            {"old_url": "/a", "new_url": "/b"},
+            {"old_url": "/b", "new_url": "/a"},
+        ])
+        self.assertEqual(selection["mappings"], [])
+        self.assertEqual({item["reason"] for item in selection["excluded"]}, {
+            "conflicting_source", "redirect_loop",
+        })
+
+    def test_invalid_destination_and_config_injection_are_excluded(self):
+        selection = rx.select_export_mappings([
+            {"old_url": "/safe", "new_url": "javascript:alert(1)"},
+            {"old_url": "/newline", "new_url": "/bad\nlocation"},
+            {"old_url": "/credential", "new_url": "https://user:pass@new.example/x"},
+        ])
+        self.assertEqual(selection["included_count"], 0)
+        self.assertEqual(selection["excluded_count"], 3)
+
+    def test_csv_and_json_continue_to_escape_values(self):
+        csv_out = rx.build_export([
+            {"old_url": "https://old.example/a,b", "new_url": "https://new.example/c"},
+        ], rx.CSV_FORMAT)
+        self.assertIn('"/a,b",https://new.example/c', csv_out)
+        parsed = json.loads(rx.build_export([
+            {"old_url": "https://old.example/\"q", "new_url": "https://new.example/q"},
+        ], rx.JSON_FORMAT))
+        self.assertEqual(parsed[0]["from"], "/\"q")
 
 
 class TestRobustness(unittest.TestCase):
@@ -146,7 +198,7 @@ class TestRobustness(unittest.TestCase):
         out = rx.build_export(
             [{"oldUrl": "https://o.com/a", "newUrl": "https://n.com/b"}], rx.APACHE
         )
-        self.assertEqual(out, "Redirect 301 /a /b")
+        self.assertEqual(out, "Redirect 301 /a https://n.com/b")
 
     def test_commas_in_urls_are_quoted_not_corrupted(self):
         # String-joined CSV would produce an extra column here.

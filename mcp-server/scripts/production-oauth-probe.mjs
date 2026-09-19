@@ -137,6 +137,22 @@ async function main() {
       report.discovered_url_count = urls.length;
     }
     const prior = tokens.refresh_token;
+    if (process.env.MCP_PROBE_RESTART === '1') {
+      await new Promise((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('Restart checkpoint timed out')), 600000);
+        process.once('SIGUSR1', () => { clearTimeout(timer); resolve(); });
+        console.log(JSON.stringify({ awaiting_restart: true, pid: process.pid }));
+      });
+    }
+    if (process.env.MCP_PROBE_NEGATIVE === '1') {
+      const metadata = discovery.authorizationServerMetadata;
+      const wrong = await fetch(metadata.token_endpoint, { method: 'POST', redirect: 'error', signal: AbortSignal.timeout(10000),
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({
+          grant_type: 'refresh_token', refresh_token: prior, client_id: clientInformation.client_id,
+          resource: 'https://wrong-resource.invalid/' }) });
+      report.wrong_resource_rejected = wrong.status === 400 && (await wrong.json()).error === 'invalid_target';
+      if (!report.wrong_resource_rejected) throw new Error('Wrong resource was not rejected');
+    }
     if (!prior || await auth(provider, { serverUrl, fetchFn: registration.fetch }) !== 'AUTHORIZED' || !tokens.refresh_token || tokens.refresh_token === prior) {
       throw new Error('Refresh did not rotate');
     }
@@ -146,6 +162,18 @@ async function main() {
     const refreshedTools = (await client.listTools()).tools.map(tool => tool.name).sort();
     if (JSON.stringify(refreshedTools) !== JSON.stringify(report.tools)) throw new Error('Refreshed capability mismatch');
     report.refresh_reconnect = true;
+    if (process.env.MCP_PROBE_RESTART === '1') report.refresh_after_restart = true;
+    if (process.env.MCP_PROBE_NEGATIVE === '1') {
+      const redeem = token => fetch(discovery.authorizationServerMetadata.token_endpoint, { method: 'POST', redirect: 'error',
+        signal: AbortSignal.timeout(10000), headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: token,
+          client_id: clientInformation.client_id, resource: discovery.resourceMetadata.resource }) });
+      const replay = await redeem(prior);
+      report.refresh_replay_rejected = replay.status === 400 && (await replay.json()).error === 'invalid_grant';
+      const family = await redeem(tokens.refresh_token);
+      report.replayed_family_rejected = family.status === 400 && (await family.json()).error === 'invalid_grant';
+      if (!report.refresh_replay_rejected || !report.replayed_family_rejected) throw new Error('Replay family was not rejected');
+    }
   } finally {
     await client?.close().catch(() => {});
     const metadata = discovery?.authorizationServerMetadata;
@@ -165,7 +193,9 @@ async function main() {
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({
               grant_type: 'refresh_token', refresh_token: tokens.refresh_token, client_id: clientInformation.client_id,
               resource: discovery.resourceMetadata?.resource || '' }) });
-          report.refresh_revoked = retry.status === 400 && (await retry.json()).error === 'invalid_grant';
+          const rejected = retry.status === 400 && (await retry.json()).error === 'invalid_grant';
+          if (process.env.MCP_PROBE_NEGATIVE === '1') report.revocation_after_replay_accepted = response.ok && rejected;
+          else report.refresh_revoked = rejected;
         }
       } catch { /* Safe summary below names cleanup status. */ }
     }

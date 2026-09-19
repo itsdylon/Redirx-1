@@ -204,6 +204,8 @@ DECLARE
   v_current_new TEXT;
   v_current_action TEXT;
   v_studio_authority JSONB;
+  v_studio_authority_row BOOLEAN;
+  v_grant_authority BOOLEAN;
 BEGIN
   IF p_user_id IS NULL OR p_migration_id IS NULL OR p_run_id IS NULL
      OR p_idempotency_key IS NULL OR btrim(p_idempotency_key) = ''
@@ -245,12 +247,14 @@ BEGIN
   IF v_run_json->>'grant_id' IS NULL AND v_run_json->>'studio_reservation_id' IS NULL THEN
     RAISE EXCEPTION 'not_found' USING ERRCODE = 'P0001';
   END IF;
-  IF v_run_json->>'grant_id' IS NOT NULL AND NOT EXISTS (
-      SELECT 1 FROM migration_purchase_grants g
-       WHERE g.id=(v_run_json->>'grant_id')::uuid AND g.user_id=p_user_id
-         AND g.migration_id=p_migration_id AND g.quote_id=(v_run_json->>'quote_id')::uuid
-         AND g.state='active') THEN
+  IF v_run_json->>'grant_id' IS NOT NULL THEN
+    SELECT true INTO v_grant_authority FROM migration_purchase_grants g
+      WHERE g.id=(v_run_json->>'grant_id')::uuid AND g.user_id=p_user_id
+        AND g.migration_id=p_migration_id AND g.quote_id=(v_run_json->>'quote_id')::uuid
+        AND g.state='active' FOR KEY SHARE;
+    IF v_grant_authority IS DISTINCT FROM true THEN
     RAISE EXCEPTION 'not_found' USING ERRCODE = 'P0001';
+    END IF;
   END IF;
   IF v_run_json->>'studio_reservation_id' IS NOT NULL THEN
     BEGIN
@@ -270,17 +274,21 @@ BEGIN
     -- 046 is optional at migration-install time.  When its column is bound,
     -- dynamic SQL keeps 041 installable before the Studio tables exist.
     EXECUTE $q$
-      SELECT 1 FROM migration_studio_work_reservations w
+      SELECT true FROM migration_studio_work_reservations w
       JOIN migration_studio_slots s ON s.id=w.slot_id AND s.migration_id=w.migration_id AND s.user_id=w.user_id
       JOIN migration_test_subscriptions sub ON sub.id=s.subscription_id AND sub.user_id=s.user_id
       WHERE w.id=$1::uuid AND w.user_id=$2::uuid AND w.migration_id=$3::uuid
         AND w.quote_id=$4::uuid AND w.run_operation_id=$5::uuid
         AND w.state='succeeded' AND s.state='completed' AND s.first_success_at IS NOT NULL
         AND sub.status <> 'revoked'
+      FOR KEY SHARE
     $q$
+    INTO v_studio_authority_row
     USING (v_run_json->>'studio_reservation_id'), p_user_id, p_migration_id,
       v_run_json->>'quote_id', v_run_json->>'operation_id';
-    IF NOT FOUND THEN RAISE EXCEPTION 'not_found' USING ERRCODE = 'P0001'; END IF;
+    IF v_studio_authority_row IS DISTINCT FROM true THEN
+      RAISE EXCEPTION 'not_found' USING ERRCODE = 'P0001';
+    END IF;
   END IF;
 
   -- Idempotent replay is bound to the original artifact request hash.  Check

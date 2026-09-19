@@ -95,6 +95,25 @@ class TestMigrationArtifactService(unittest.TestCase):
         self.assertEqual(payload["p_artifact"]["verification_inputs"]["artifact_content_hash"], result["content_hash"])
         self.assertNotIn("selection", payload)
 
+    def test_service_replays_persisted_artifact_before_current_selection(self):
+        service, client = self.make()
+        first = service.create_artifact(OWNER, MIGRATION, RUN, idempotency_key="artifact-replay",
+                                        fmt="json", selection_revision="rev-1")
+        client.rows["migration_artifact_mutations"] = [{"user_id": OWNER, "migration_id": MIGRATION,
+            "kind": "artifact", "idempotency_key": "artifact-replay", "result": first}]
+        service.selection_reader = lambda *_: (_ for _ in ()).throw(DeploymentConflictError("stale"))
+        replay = service.create_artifact(OWNER, MIGRATION, RUN, idempotency_key="artifact-replay",
+                                         fmt="json", selection_revision="rev-1")
+        self.assertEqual(replay["id"], first["id"])
+        self.assertTrue(replay["replayed"])
+        with self.assertRaises(DeploymentConflictError):
+            service.create_artifact(OWNER, MIGRATION, RUN, idempotency_key="artifact-replay",
+                                    fmt="apache", selection_revision="rev-1")
+        service.grant_reader = lambda *_: {"authority": "quote_grant", "state": "revoked"}
+        with self.assertRaises(EntitlementRequiredError):
+            service.create_artifact(OWNER, MIGRATION, RUN, idempotency_key="artifact-replay",
+                                    fmt="json", selection_revision="rev-1")
+
     def test_missing_grant_is_fail_closed_and_wrong_revision_is_rejected(self):
         service, client = self.make()
         service.grant_reader = lambda *_: {"authority": "quote_grant", "state": "revoked"}

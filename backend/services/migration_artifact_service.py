@@ -191,6 +191,40 @@ class MigrationArtifactService:
         if state not in {"active", "succeeded"} or authority not in {"quote_grant", "studio"}:
             raise EntitlementRequiredError("An owned export grant is required before creating an artifact.")
 
+    def _replay_artifact(self, owner: str, migration: str, run: str, key: str,
+                         fmt: str, revision: str, partial_policy: str) -> dict[str, Any] | None:
+        """Return an exact persisted artifact replay without rereading selection."""
+        try:
+            result = (self.client.table("migration_artifact_mutations").select("*")
+                      .eq("user_id", owner).eq("migration_id", migration)
+                      .eq("kind", "artifact").eq("idempotency_key", key).execute())
+        except Exception:
+            raise RepositoryUnavailableError("Artifact operation is temporarily unavailable.") from None
+        if getattr(result, "error", None):
+            raise RepositoryUnavailableError("Artifact operation is temporarily unavailable.")
+        data = getattr(result, "data", None)
+        if isinstance(data, list):
+            if not data:
+                return None
+            if len(data) != 1:
+                raise RepositoryUnavailableError("Artifact operation is temporarily unavailable.")
+            data = data[0]
+        if not isinstance(data, Mapping):
+            raise RepositoryUnavailableError("Artifact operation is temporarily unavailable.")
+        stored = data.get("result")
+        if not isinstance(stored, Mapping):
+            raise RepositoryUnavailableError("Artifact operation is temporarily unavailable.")
+        if (str(stored.get("user_id")) != owner
+                or str(stored.get("migration_id")) != migration
+                or str(stored.get("run_id")) != run
+                or stored.get("format") != fmt
+                or stored.get("decision_revision") != revision
+                or stored.get("partial_policy") != partial_policy):
+            raise DeploymentConflictError("The idempotency key conflicts with an existing artifact request.")
+        replay = dict(stored)
+        replay["replayed"] = True
+        return self._artifact_summary(replay)
+
     def create_artifact(self, user_id: UUID | str, migration_id: UUID | str, run_id: UUID | str,
                         *, idempotency_key: str, fmt: str, selection_revision: str,
                         partial_policy: str = "deny") -> dict[str, Any]:
@@ -205,6 +239,9 @@ class MigrationArtifactService:
             raise InvalidInputError("partial_policy must be 'deny' or 'allow'.")
         self.repository.get_run(owner, migration, run)
         self._require_grant(owner, migration, run)
+        replay = self._replay_artifact(owner, migration, run, key, fmt, revision, partial_policy)
+        if replay is not None:
+            return replay
         snapshot = self._selection(owner, migration, run, revision)
         rows = snapshot.get("mappings")
         if not isinstance(rows, list):

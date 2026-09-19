@@ -44,6 +44,7 @@ export default function App({ pivotEnabled = MCP_PIVOT_ENABLED }: { pivotEnabled
   const pricingSourceSessionId = new URLSearchParams(location.search).get('source_session_id');
   const reviewLayoutVariant = isEnterprisePlan(user?.plan) ? 'dashboard' : 'tool';
   const loginWithReturn = `${ROUTES.login}?redirect=${encodeURIComponent(location.pathname + location.search)}`;
+  const retainedLogin = pivotEnabled ? loginWithReturn : ROUTES.login;
 
   // Show loading state while checking authentication
   if (loading) {
@@ -110,7 +111,7 @@ export default function App({ pivotEnabled = MCP_PIVOT_ENABLED }: { pivotEnabled
       />
       <Route
         path={ROUTES.projects}
-        element={user ? <AllProjects /> : <Navigate to={loginWithReturn} replace />}
+        element={user ? <AllProjects /> : <Navigate to={retainedLogin} replace />}
       />
       <Route
         path={ROUTES.upload}
@@ -135,18 +136,18 @@ export default function App({ pivotEnabled = MCP_PIVOT_ENABLED }: { pivotEnabled
       />
       <Route
         path={ROUTES.review}
-        element={user ? <ReviewInterface layoutVariant={reviewLayoutVariant} /> : <Navigate to={loginWithReturn} replace />}
+        element={user ? <ReviewInterface layoutVariant={reviewLayoutVariant} /> : <Navigate to={retainedLogin} replace />}
       />
       <Route
         path={ROUTES.settings}
         element={
           user
             ? (
-              canAccessSettingsAndAccount(user?.plan)
+              (pivotEnabled || canAccessSettingsAndAccount(user?.plan))
                 ? <Settings />
                 : <Navigate to={ROUTES.quickMatch} replace />
             )
-                : <Navigate to={loginWithReturn} replace />
+            : <Navigate to={retainedLogin} replace />
         }
       />
       <Route
@@ -166,11 +167,11 @@ export default function App({ pivotEnabled = MCP_PIVOT_ENABLED }: { pivotEnabled
         element={
           user
             ? (
-              canAccessSettingsAndAccount(user?.plan)
+              (pivotEnabled || canAccessSettingsAndAccount(user?.plan))
                 ? <AccountPage />
                 : <Navigate to={ROUTES.quickMatch} replace />
             )
-            : <Navigate to={loginWithReturn} replace />
+            : <Navigate to={retainedLogin} replace />
         }
       />
     </Routes>

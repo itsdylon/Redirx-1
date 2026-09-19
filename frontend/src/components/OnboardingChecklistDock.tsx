@@ -6,6 +6,7 @@ import { Card } from './ui/card';
 import { useIsMobile } from './ui/use-mobile';
 import { useOnboarding } from '../contexts/OnboardingContext';
 import { OnboardingStep } from '../api/onboarding';
+import { MCP_PIVOT_ENABLED } from '../api/config';
 
 const STEP_CONFIG: Array<{ id: OnboardingStep; label: string }> = [
   { id: 'choose_path', label: 'Choose a path' },
@@ -35,7 +36,7 @@ export function OnboardingChecklistDock() {
 
   const canMarkDone = isStepCompleted('open_review') && !isStepCompleted('export_redirects');
 
-  if (!showDock || !isCoreRoute) {
+  if (MCP_PIVOT_ENABLED || !showDock || !isCoreRoute) {
     return null;
   }
 

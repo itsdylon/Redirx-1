@@ -4,6 +4,7 @@ import { LayoutDashboard, FolderOpen, Settings, ChevronLeft, ChevronRight, LogOu
 import faviconImg from '@/assets/favicon.png';
 import { useAuth } from '../contexts/AuthContext';
 import { isAgencyPlan } from '../lib/plans';
+import { MCP_PIVOT_ENABLED } from '../api/config';
 
 interface SidebarProps {
   onLogout: () => void;
@@ -31,7 +32,14 @@ export function Sidebar({ onLogout }: SidebarProps) {
     localStorage.setItem('sidebar-collapsed', String(newState));
   };
 
-  const navItems = agencyUser
+  const navItems = MCP_PIVOT_ENABLED
+    ? [
+        { icon: LayoutDashboard, label: 'Migration companion', path: '/companion' },
+        { icon: FolderOpen, label: 'Project History', path: '/projects' },
+        { icon: CreditCard, label: 'Account', path: '/account' },
+        { icon: Settings, label: 'Settings', path: '/settings' },
+      ]
+    : agencyUser
     ? [
         { icon: LayoutDashboard, label: 'Dashboard', path: '/dashboard' },
         { icon: FolderOpen, label: 'All Projects', path: '/projects' },

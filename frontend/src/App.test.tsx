@@ -201,6 +201,15 @@ describe('unauthenticated pivot deep links', () => {
 });
 
 describe('actual pivot retirement routes', () => {
+  it.each(['free', 'pro', 'agency'])('keeps account and settings accessible to %s in pivot mode', async plan => {
+    mockUseAuth.mockReturnValue({ user: { id: `user-${plan}`, plan }, loading: false });
+    for (const [path, title] of [['/account', 'Account Page'], ['/settings?tab=billing', 'Settings Page']]) {
+      const view = render(<MemoryRouter initialEntries={[path]}><App pivotEnabled /></MemoryRouter>);
+      expect(await screen.findByText(title)).toBeInTheDocument();
+      view.unmount();
+    }
+  });
+
   it.each(['/quick-match/', '/Quick-Match', '/upload/', '/UPLOAD', '/dashboard/', '/DASHBOARD'])
     ('sends signed-out retired entry %s to companion login', async target => {
       mockUseAuth.mockReturnValue({ user: null, loading: false });
@@ -226,7 +235,7 @@ describe('actual pivot retirement routes', () => {
     expect(await screen.findByText('Quick Match Route')).toBeInTheDocument();
   });
 
-  it.each(['/review/session-1', '/projects'])('preserves signed-out return paths for retained %s', async target => {
+  it.each(['/review/session-1', '/projects', '/account', '/settings?tab=billing'])('preserves signed-out return paths for retained %s', async target => {
     mockUseAuth.mockReturnValue({ user: null, loading: false });
     render(<MemoryRouter initialEntries={[target]}><App pivotEnabled /><CurrentRoute /></MemoryRouter>);
     expect(await screen.findByText('Login Page')).toBeInTheDocument();

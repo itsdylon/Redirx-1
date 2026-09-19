@@ -1,0 +1,10 @@
+{% extends "_base.html" %}
+{% block content %}
+<h1>Redirect monitoring findings</h1>
+<p>A scheduled check of {{ live_origin }} found {{ total_issues }} new or changed issues.</p>
+<p>These findings describe the deployed artifact. Unavailable URLs remain unchecked; generating a fix does not mark it installed.</p>
+<ul>{% for issue in issues %}<li>{{ issue.source_url }}: {{ issue.issue|replace('_',' ') }}. Expected destination: {{ issue.expected_url }}.</li>{% endfor %}</ul>
+<p><a href="{{ app_url }}/migrations/{{ migration_id }}?monitoring_id={{ monitoring_id }}">Review this migration and its monitoring results</a></p>
+<p>Migration {{ migration_id }} · Monitoring {{ monitoring_id }} · Sweep {{ sweep_id }}</p>
+<p>Checks follow the displayed schedule. We send another alert for a new or changed issue, rather than each repeated observation.</p>
+{% endblock %}

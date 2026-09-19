@@ -135,4 +135,173 @@ REVOKE ALL ON artifact_deployments FROM PUBLIC, anon, authenticated;
 GRANT SELECT ON artifact_deployments TO authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON artifact_deployments TO service_role;
 
+-- Content is kept in the private database for this bounded artifact size.  A
+-- download is therefore a real owner-scoped read, not a pointer to an
+-- unprovisioned object-storage key.
+CREATE TABLE IF NOT EXISTS migration_artifact_contents (
+  artifact_id UUID PRIMARY KEY,
+  migration_id UUID NOT NULL,
+  user_id UUID NOT NULL,
+  content TEXT NOT NULL CHECK (octet_length(content) <= 16777216),
+  content_hash TEXT NOT NULL CHECK (content_hash ~ '^[0-9a-f]{64}$'),
+  format TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  FOREIGN KEY (artifact_id, migration_id, user_id)
+    REFERENCES migration_artifacts(id, migration_id, user_id) ON DELETE CASCADE
+);
+ALTER TABLE migration_artifact_contents ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON migration_artifact_contents FROM PUBLIC, anon, authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON migration_artifact_contents TO service_role;
+
+CREATE OR REPLACE FUNCTION prevent_migration_artifact_content_mutation()
+RETURNS TRIGGER LANGUAGE plpgsql SET search_path = public, pg_temp AS $$
+BEGIN
+  IF TG_OP = 'DELETE' AND NOT EXISTS (
+    SELECT 1 FROM migration_records WHERE id = OLD.migration_id AND user_id = OLD.user_id
+  ) THEN RETURN OLD; END IF;
+  RAISE EXCEPTION 'migration artifact content is immutable';
+END;
+$$;
+DROP TRIGGER IF EXISTS migration_artifact_contents_immutable ON migration_artifact_contents;
+CREATE TRIGGER migration_artifact_contents_immutable
+  BEFORE UPDATE OR DELETE ON migration_artifact_contents
+  FOR EACH ROW EXECUTE FUNCTION prevent_migration_artifact_content_mutation();
+
+CREATE TABLE IF NOT EXISTS migration_artifact_mutations (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL,
+  migration_id UUID NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('artifact', 'deployment')),
+  idempotency_key TEXT NOT NULL CHECK (length(btrim(idempotency_key)) > 0),
+  request_hash TEXT NOT NULL CHECK (request_hash ~ '^[0-9a-f]{64}$'),
+  artifact_id UUID,
+  deployment_id UUID,
+  result JSONB NOT NULL CHECK (jsonb_typeof(result) = 'object'),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (user_id, migration_id, kind, idempotency_key)
+);
+ALTER TABLE migration_artifact_mutations ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON migration_artifact_mutations FROM PUBLIC, anon, authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON migration_artifact_mutations TO service_role;
+
+CREATE OR REPLACE FUNCTION publish_migration_artifact(
+  p_user_id UUID, p_migration_id UUID, p_run_id UUID,
+  p_idempotency_key TEXT, p_artifact JSONB, p_content TEXT
+) RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER
+SET search_path = public, pg_temp AS $$
+DECLARE
+  v_existing migration_artifact_mutations%ROWTYPE;
+  v_hash TEXT;
+  v_artifact UUID := gen_random_uuid();
+  v_result JSONB;
+BEGIN
+  IF p_user_id IS NULL OR p_migration_id IS NULL OR p_run_id IS NULL
+     OR p_idempotency_key IS NULL OR btrim(p_idempotency_key) = ''
+     OR jsonb_typeof(p_artifact) <> 'object' OR p_content IS NULL THEN
+    RAISE EXCEPTION 'invalid_input' USING ERRCODE = 'P0001';
+  END IF;
+  v_hash := encode(sha256(convert_to(p_content, 'UTF8')), 'hex');
+  IF p_artifact->>'content_hash' IS DISTINCT FROM v_hash
+     OR jsonb_typeof(p_artifact->'verification_inputs') <> 'object'
+     OR jsonb_typeof(p_artifact->'verification_inputs'->'redirects') <> 'array'
+     OR p_artifact->'verification_inputs'->>'artifact_content_hash' IS DISTINCT FROM v_hash
+     OR p_artifact->>'included_count' IS NULL OR p_artifact->>'excluded_count' IS NULL
+     OR (p_artifact->>'included_count')::integer <> jsonb_array_length(p_artifact->'verification_inputs'->'redirects')
+     OR jsonb_typeof(p_artifact->'target_origins') <> 'array'
+     OR jsonb_typeof(p_artifact->'exclusion_reasons') <> 'object' THEN
+    RAISE EXCEPTION 'invalid_input' USING ERRCODE = 'P0001';
+  END IF;
+  PERFORM 1 FROM migration_runs WHERE id = p_run_id AND migration_id = p_migration_id AND user_id = p_user_id FOR KEY SHARE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'not_found' USING ERRCODE = 'P0001'; END IF;
+  SELECT * INTO v_existing FROM migration_artifact_mutations
+    WHERE user_id = p_user_id AND migration_id = p_migration_id AND kind = 'artifact'
+      AND idempotency_key = p_idempotency_key FOR UPDATE;
+  IF FOUND THEN
+    IF v_existing.request_hash <> encode(sha256(convert_to(p_artifact::text || p_content, 'UTF8')), 'hex')
+       THEN RAISE EXCEPTION 'operation_conflict' USING ERRCODE = 'P0001'; END IF;
+    RETURN v_existing.result || jsonb_build_object('replayed', true);
+  END IF;
+  v_result := jsonb_build_object(
+    'id', v_artifact, 'migration_id', p_migration_id, 'user_id', p_user_id,
+    'run_id', p_run_id, 'decision_revision', p_artifact->>'decision_revision',
+    'format', p_artifact->>'format', 'content_hash', v_hash,
+    'storage_key', 'db://migration_artifact_contents/' || v_artifact,
+    'target_origins', p_artifact->'target_origins', 'included_count', (p_artifact->>'included_count')::integer,
+    'excluded_count', (p_artifact->>'excluded_count')::integer,
+    'partial_policy', p_artifact->>'partial_policy', 'verification_inputs', p_artifact->'verification_inputs',
+    'replayed', false);
+  INSERT INTO migration_artifacts (id, migration_id, user_id, run_id, decision_revision, format,
+    content_hash, storage_key, target_origins, included_count, excluded_count, exclusion_reasons,
+    destination_mapping, verification_inputs, partial_policy)
+  VALUES (v_artifact, p_migration_id, p_user_id, p_run_id, p_artifact->>'decision_revision',
+    p_artifact->>'format', v_hash, 'db://migration_artifact_contents/' || v_artifact,
+    p_artifact->'target_origins', (p_artifact->>'included_count')::integer, (p_artifact->>'excluded_count')::integer,
+    p_artifact->'exclusion_reasons', p_artifact->'destination_mapping', p_artifact->'verification_inputs', p_artifact->>'partial_policy');
+  INSERT INTO migration_artifact_contents (artifact_id, migration_id, user_id, content, content_hash, format)
+    VALUES (v_artifact, p_migration_id, p_user_id, p_content, v_hash, p_artifact->>'format');
+  INSERT INTO migration_artifact_mutations (user_id, migration_id, kind, idempotency_key, request_hash, artifact_id, result)
+    VALUES (p_user_id, p_migration_id, 'artifact', p_idempotency_key,
+      encode(sha256(convert_to(p_artifact::text || p_content, 'UTF8')), 'hex'), v_artifact, v_result);
+  RETURN v_result;
+EXCEPTION WHEN unique_violation THEN
+  SELECT * INTO v_existing FROM migration_artifact_mutations WHERE user_id = p_user_id AND migration_id = p_migration_id AND kind = 'artifact' AND idempotency_key = p_idempotency_key;
+  IF FOUND THEN RETURN v_existing.result || jsonb_build_object('replayed', true); END IF;
+  RAISE EXCEPTION 'operation_conflict' USING ERRCODE = 'P0001';
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION publish_artifact_deployment(
+  p_user_id UUID, p_migration_id UUID, p_artifact_id UUID,
+  p_idempotency_key TEXT, p_deployment JSONB
+) RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER
+SET search_path = public, pg_temp AS $$
+DECLARE v_existing migration_artifact_mutations%ROWTYPE; v_deployment UUID := gen_random_uuid(); v_result JSONB; v_hash TEXT;
+  v_artifact migration_artifacts%ROWTYPE;
+BEGIN
+  IF p_user_id IS NULL OR p_migration_id IS NULL OR p_artifact_id IS NULL OR p_idempotency_key IS NULL OR btrim(p_idempotency_key) = '' OR jsonb_typeof(p_deployment) <> 'object' THEN
+    RAISE EXCEPTION 'invalid_input' USING ERRCODE = 'P0001'; END IF;
+  SELECT * INTO v_artifact FROM migration_artifacts
+    WHERE id = p_artifact_id AND migration_id = p_migration_id AND user_id = p_user_id FOR KEY SHARE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'not_found' USING ERRCODE = 'P0001'; END IF;
+  IF p_deployment->>'artifact_content_hash' IS DISTINCT FROM v_artifact.content_hash
+     OR p_deployment->>'decision_revision' IS DISTINCT FROM v_artifact.decision_revision
+     OR p_deployment->>'format' IS DISTINCT FROM v_artifact.format
+     OR (p_deployment->>'included_count')::integer IS DISTINCT FROM v_artifact.included_count
+     OR (p_deployment->>'excluded_count')::integer IS DISTINCT FROM v_artifact.excluded_count
+     OR p_deployment->'target_origins' IS DISTINCT FROM v_artifact.target_origins
+     OR jsonb_typeof(p_deployment->'verification_inputs') <> 'object'
+     OR p_deployment->'verification_inputs'->>'artifact_content_hash' IS DISTINCT FROM v_artifact.content_hash
+     OR p_deployment->'verification_inputs'->>'decision_revision' IS DISTINCT FROM v_artifact.decision_revision THEN
+    RAISE EXCEPTION 'invalid_input' USING ERRCODE = 'P0001';
+  END IF;
+  v_hash := encode(sha256(convert_to(p_deployment::text, 'UTF8')), 'hex');
+  SELECT * INTO v_existing FROM migration_artifact_mutations WHERE user_id = p_user_id AND migration_id = p_migration_id AND kind = 'deployment' AND idempotency_key = p_idempotency_key FOR UPDATE;
+  IF FOUND THEN
+    IF v_existing.request_hash <> v_hash THEN RAISE EXCEPTION 'operation_conflict' USING ERRCODE = 'P0001'; END IF;
+    RETURN v_existing.result || jsonb_build_object('replayed', true);
+  END IF;
+  v_result := jsonb_build_object('id', v_deployment, 'migration_id', p_migration_id, 'user_id', p_user_id,
+    'artifact_id', p_artifact_id, 'live_origin', p_deployment->>'live_origin', 'status', p_deployment->>'status',
+    'verification_inputs', p_deployment->'verification_inputs', 'replayed', false);
+  INSERT INTO artifact_deployments (id, migration_id, user_id, artifact_id, live_origin, status, artifact_content_hash,
+    decision_revision, format, included_count, excluded_count, target_origins, destination_mapping, verification_inputs, installation_report, installation_reported_at)
+  VALUES (v_deployment, p_migration_id, p_user_id, p_artifact_id, p_deployment->>'live_origin', p_deployment->>'status',
+    p_deployment->>'artifact_content_hash', p_deployment->>'decision_revision', p_deployment->>'format',
+    (p_deployment->>'included_count')::integer, (p_deployment->>'excluded_count')::integer, p_deployment->'target_origins',
+    p_deployment->'destination_mapping', p_deployment->'verification_inputs', p_deployment->'installation_report', NOW());
+  INSERT INTO migration_artifact_mutations (user_id, migration_id, kind, idempotency_key, request_hash, deployment_id, result)
+    VALUES (p_user_id, p_migration_id, 'deployment', p_idempotency_key, v_hash, v_deployment, v_result);
+  RETURN v_result;
+EXCEPTION WHEN unique_violation THEN
+  SELECT * INTO v_existing FROM migration_artifact_mutations WHERE user_id = p_user_id AND migration_id = p_migration_id AND kind = 'deployment' AND idempotency_key = p_idempotency_key;
+  IF FOUND THEN RETURN v_existing.result || jsonb_build_object('replayed', true); END IF;
+  RAISE EXCEPTION 'operation_conflict' USING ERRCODE = 'P0001';
+END;
+$$;
+
+REVOKE ALL ON FUNCTION publish_migration_artifact(UUID, UUID, UUID, TEXT, JSONB, TEXT) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION publish_artifact_deployment(UUID, UUID, UUID, TEXT, JSONB) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION publish_migration_artifact(UUID, UUID, UUID, TEXT, JSONB, TEXT) TO service_role;
+GRANT EXECUTE ON FUNCTION publish_artifact_deployment(UUID, UUID, UUID, TEXT, JSONB) TO service_role;
+
 COMMIT;

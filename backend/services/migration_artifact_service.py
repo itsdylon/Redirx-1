@@ -1,31 +1,22 @@
-"""Immutable export artifact and deployment-handoff boundary.
+"""Owned immutable export artifacts and deployment handoff.
 
-This service deliberately does not install anything or mint customer
-credentials.  It persists the artifact's verification inputs and records an
-owned installation report against the actual live origin supplied by the
-customer's agent.
+Selection and entitlement are server-side readers: callers provide IDs and
+idempotency keys, never export rows or counts.
 """
-
 from __future__ import annotations
 
 import hashlib
-import json
 import re
-from collections.abc import Mapping, Sequence
-from datetime import datetime, timezone
+from collections.abc import Mapping
 from typing import Any, Callable
-from uuid import UUID, uuid4
+from uuid import UUID
+from urllib.parse import urlsplit
 
 from .inventory_policy import normalize_origin
-from .redirect_export import rehost
-from .migration_repository import (
-    InvalidInputError,
-    MigrationRepository,
-    MigrationRepositoryError,
-    MigrationNotFoundError,
-    RepositoryUnavailableError,
-    _strict_uuid,
-)
+from .migration_repository import (InvalidInputError, MigrationNotFoundError,
+    MigrationRepository, MigrationRepositoryError, RepositoryUnavailableError,
+    _strict_uuid)
+from .redirect_export import build_export, rehost, select_export_mappings
 
 
 class ArtifactServiceError(MigrationRepositoryError):
@@ -48,7 +39,6 @@ class DeploymentConflictError(ArtifactServiceError):
 
 _HASH = re.compile(r"^[0-9a-f]{64}$")
 _FORMATS = {"apache", "nginx", "wordpress", "vercel", "cloudflare", "shopify", "csv", "json"}
-_DEPLOYMENT_STATUSES = {"generated", "installation_reported", "live_verified"}
 
 
 def _json_value(value: Any, depth: int = 0) -> None:
@@ -72,7 +62,6 @@ def _json_value(value: Any, depth: int = 0) -> None:
         for key, child in value.items():
             if not isinstance(key, str):
                 raise InvalidInputError("artifact metadata keys must be strings.")
-            _json_value(key, depth + 1)
             _json_value(child, depth + 1)
         return
     raise InvalidInputError("artifact metadata must be valid JSON.")
@@ -86,167 +75,200 @@ def _nonblank(value: Any, field: str, max_length: int = 200) -> str:
     return value.strip()
 
 
-def _count(value: Any, field: str) -> int:
-    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-        raise InvalidInputError(f"{field} must be a nonnegative integer.")
-    return value
-
-
-def _safe_row(result: Any, fallback: Mapping[str, Any] | None = None) -> dict[str, Any]:
+def _safe_row(result: Any) -> dict[str, Any]:
     data = getattr(result, "data", None)
     if isinstance(data, list):
         data = data[0] if len(data) == 1 else None
     if not isinstance(data, Mapping):
-        if fallback is not None and data in (None, []):
-            return dict(fallback)
         raise RepositoryUnavailableError("Artifact data is temporarily unavailable.")
     return dict(data)
 
 
-def _verification_redirects(value: Any) -> list[dict[str, str]]:
-    if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
-        raise InvalidInputError("verification_redirects must be a list.")
-    if len(value) > 50_000:
-        raise InvalidInputError("verification_redirects is too large.")
-    redirects: list[dict[str, str]] = []
+def _rpc_row(result: Any) -> dict[str, Any]:
+    error = getattr(result, "error", None)
+    if error:
+        message = str(getattr(error, "message", "") or "").lower()
+        if "operation_conflict" in message:
+            raise DeploymentConflictError("The idempotency key conflicts with an existing request.")
+        if "not_found" in message:
+            raise MigrationNotFoundError("Artifact or migration record not found.")
+        if "invalid_input" in message:
+            raise InvalidInputError("The artifact operation input is invalid.")
+        raise RepositoryUnavailableError("Artifact operation is temporarily unavailable.")
+    return _safe_row(result)
+
+
+def _redirects(value: Any) -> list[dict[str, str]]:
+    if not isinstance(value, list) or len(value) > 50_000:
+        raise InvalidInputError("verification redirects must be a bounded list.")
+    result: list[dict[str, str]] = []
     for item in value:
         if not isinstance(item, Mapping):
             raise InvalidInputError("verification redirects must be objects.")
-        mapping_id = _nonblank(item.get("mapping_id"), "mapping_id")
-        source_url = _nonblank(item.get("source_url"), "source_url", 8_192)
-        expected_url = _nonblank(item.get("expected_url"), "expected_url", 8_192)
-        redirects.append({
-            "mapping_id": mapping_id,
-            "source_url": source_url,
-            "expected_url": expected_url,
-        })
-    return redirects
+        result.append({"mapping_id": _nonblank(item.get("mapping_id"), "mapping_id"),
+                       "source_url": _nonblank(item.get("source_url"), "source_url", 8_192),
+                       "expected_url": _nonblank(item.get("expected_url"), "expected_url", 8_192)})
+    return result
 
 
-def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+def _origins(value: Any) -> list[str]:
+    if not isinstance(value, list) or not value or len(value) > 100:
+        raise InvalidInputError("target_origins must be a non-empty bounded list.")
+    result: list[str] = []
+    for item in value:
+        origin = normalize_origin(_nonblank(item, "target_origin", 2_048))
+        if origin not in result:
+            result.append(origin)
+    return result
+
+
+def _exclusion_reasons(value: Any) -> dict[str, Any]:
+    if not isinstance(value, list):
+        raise InvalidInputError("selection exclusions must be a list.")
+    counts: dict[str, int] = {}
+    items: list[dict[str, Any]] = []
+    for item in value:
+        if not isinstance(item, Mapping):
+            raise InvalidInputError("selection exclusions must be objects.")
+        reason = _nonblank(item.get("reason"), "exclusion reason", 100)
+        counts[reason] = counts.get(reason, 0) + 1
+        items.append({"index": item.get("index"), "reason": reason})
+    return {"by_reason": counts, "items": items}
 
 
 class MigrationArtifactService:
-    def __init__(self, repository: MigrationRepository | None = None):
+    def __init__(self, repository: MigrationRepository | None = None, *,
+                 selection_reader: Callable[..., Mapping[str, Any]] | None = None,
+                 grant_reader: Callable[..., Any] | None = None):
         self.repository = repository if repository is not None else MigrationRepository()
         self.client = self.repository.client
+        self.selection_reader = selection_reader
+        self.grant_reader = grant_reader
 
-    def create_artifact(
-        self,
-        user_id: UUID | str,
-        migration_id: UUID | str,
-        run_id: UUID | str,
-        *,
-        content: str,
-        fmt: str,
-        decision_revision: str,
-        selection: Mapping[str, Any],
-        target_origins: Sequence[str],
-        destination_mapping: Mapping[str, Any],
-        verification_redirects: Sequence[Mapping[str, Any]],
-        partial_policy: str = "deny",
-        entitlement_check: Callable[[], Any] | None = None,
-    ) -> dict[str, Any]:
-        _, owner = _strict_uuid(user_id, "user_id")
-        _, migration = _strict_uuid(migration_id, "migration_id")
-        _, run = _strict_uuid(run_id, "run_id")
-        self.repository.get_run(owner, migration, run)
-        if not isinstance(content, str):
-            raise InvalidInputError("content must be text.")
-        if fmt not in _FORMATS:
-            raise InvalidInputError("format is unsupported.")
-        revision = _nonblank(decision_revision, "decision_revision")
-        if partial_policy not in {"deny", "allow"}:
-            raise InvalidInputError("partial_policy must be 'deny' or 'allow'.")
-        if not isinstance(selection, Mapping):
-            raise InvalidInputError("selection must be an object.")
-        included = _count(selection.get("included_count"), "included_count")
-        excluded = _count(selection.get("excluded_count"), "excluded_count")
-        if excluded and partial_policy != "allow":
-            raise PartialArtifactError("Unresolved or excluded mappings require an explicit partial-export policy.")
-        if entitlement_check is not None:
-            decision = entitlement_check()
-            if not getattr(decision, "allowed", False):
-                raise EntitlementRequiredError("Export entitlement is required before creating an artifact.")
-
-        normalized_origins: list[str] = []
-        if not isinstance(target_origins, Sequence) or isinstance(target_origins, (str, bytes)):
-            raise InvalidInputError("target_origins must be a list.")
-        for origin in target_origins:
-            normalized_origins.append(normalize_origin(origin))
-        if not normalized_origins:
-            raise InvalidInputError("at least one target origin is required.")
-        if not isinstance(destination_mapping, Mapping):
-            raise InvalidInputError("destination_mapping must be an object.")
-        _json_value(selection)
-        _json_value(destination_mapping)
-        content_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
-        redirects = _verification_redirects(verification_redirects)
-        artifact_id = str(uuid4())
-        storage_key = f"artifacts/{artifact_id}/{content_hash}.{fmt}"
-        verification_inputs = {
-            "redirects": redirects,
-            "artifact_content_hash": content_hash,
-            "decision_revision": revision,
-        }
-        payload = {
-            "id": artifact_id,
-            "migration_id": migration,
-            "user_id": owner,
-            "run_id": run,
-            "decision_revision": revision,
-            "format": fmt,
-            "content_hash": content_hash,
-            "storage_key": storage_key,
-            "target_origins": normalized_origins,
-            "included_count": included,
-            "excluded_count": excluded,
-            "exclusion_reasons": selection.get("excluded", {}),
-            "destination_mapping": dict(destination_mapping),
-            "verification_inputs": verification_inputs,
-            "partial_policy": partial_policy,
-        }
+    def _selection(self, owner: str, migration: str, run: str, revision: str) -> dict[str, Any]:
+        reader = self.selection_reader or getattr(self.repository, "get_export_selection", None)
+        if not callable(reader):
+            raise RepositoryUnavailableError("Authoritative export selection is unavailable.")
         try:
-            result = self.client.table("migration_artifacts").insert(payload).execute()
-            error = getattr(result, "error", None)
-            if error:
-                raise RepositoryUnavailableError("Artifact data is temporarily unavailable.")
-            row = _safe_row(result, payload)
+            value = reader(owner, migration, run, revision)
         except MigrationRepositoryError:
             raise
         except Exception:
-            raise RepositoryUnavailableError("Artifact data is temporarily unavailable.") from None
-        row["verification_inputs"] = verification_inputs
-        row["content"] = content
-        return self._artifact_summary(row)
+            raise RepositoryUnavailableError("Authoritative export selection is unavailable.") from None
+        if not isinstance(value, Mapping) or value.get("selection_revision") != revision:
+            raise DeploymentConflictError("The requested selection revision is no longer current.")
+        result = dict(value)
+        _json_value(result)
+        return result
 
-    def authorize_download(self, user_id: UUID | str, migration_id: UUID | str, artifact_id: UUID | str) -> dict[str, Any]:
+    def _require_grant(self, owner: str, migration: str, run: str) -> None:
+        reader = self.grant_reader or getattr(self.repository, "get_export_grant", None)
+        if not callable(reader):
+            raise EntitlementRequiredError("An owned export grant is required before creating an artifact.")
+        try:
+            grant = reader(owner, migration, run)
+        except MigrationRepositoryError:
+            raise
+        except Exception:
+            raise RepositoryUnavailableError("Export entitlement is temporarily unavailable.") from None
+        allowed = grant.get("allowed") if isinstance(grant, Mapping) else getattr(grant, "allowed", None)
+        if allowed is not True:
+            raise EntitlementRequiredError("An owned export grant is required before creating an artifact.")
+
+    def create_artifact(self, user_id: UUID | str, migration_id: UUID | str, run_id: UUID | str,
+                        *, idempotency_key: str, fmt: str, selection_revision: str,
+                        partial_policy: str = "deny") -> dict[str, Any]:
+        _, owner = _strict_uuid(user_id, "user_id")
+        _, migration = _strict_uuid(migration_id, "migration_id")
+        _, run = _strict_uuid(run_id, "run_id")
+        key = _nonblank(idempotency_key, "idempotency_key")
+        revision = _nonblank(selection_revision, "selection_revision")
+        if fmt not in _FORMATS:
+            raise InvalidInputError("format is unsupported.")
+        if partial_policy not in {"deny", "allow"}:
+            raise InvalidInputError("partial_policy must be 'deny' or 'allow'.")
+        self.repository.get_run(owner, migration, run)
+        self._require_grant(owner, migration, run)
+        snapshot = self._selection(owner, migration, run, revision)
+        rows = snapshot.get("mappings")
+        if not isinstance(rows, list):
+            raise RepositoryUnavailableError("Authoritative export selection is unavailable.")
+        url_format = snapshot.get("url_format", "paths")
+        selected = select_export_mappings(rows, url_format=url_format,
+                                          old_domain=snapshot.get("old_domain"),
+                                          new_domain=snapshot.get("new_domain"))
+        excluded = selected["excluded"]
+        if excluded and partial_policy != "allow":
+            raise PartialArtifactError("Unresolved or excluded mappings require an explicit partial-export policy.")
+        if not selected["mappings"]:
+            raise PartialArtifactError("The authoritative selection contains no exportable mappings.")
+        content = build_export(rows, fmt, url_format=url_format,
+                               old_domain=snapshot.get("old_domain"), new_domain=snapshot.get("new_domain"))
+        targets = _origins(snapshot.get("target_origins"))
+        redirects: list[dict[str, str]] = []
+        for item in selected["mappings"]:
+            row = item.get("row")
+            if not isinstance(row, Mapping):
+                raise RepositoryUnavailableError("Authoritative export selection is unavailable.")
+            redirects.append({"mapping_id": _nonblank(row.get("mapping_id", row.get("id")), "mapping_id"),
+                               "source_url": _nonblank(item["old_url"], "source_url", 8_192),
+                               "expected_url": _nonblank(item["new_url"], "expected_url", 8_192)})
+        content_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
+        verification = {"redirects": redirects, "artifact_content_hash": content_hash,
+                        "decision_revision": revision}
+        destination = snapshot.get("destination_mapping", {})
+        if not isinstance(destination, Mapping):
+            raise RepositoryUnavailableError("Authoritative export selection is unavailable.")
+        artifact = {"migration_id": migration, "user_id": owner, "run_id": run,
+                    "decision_revision": revision, "format": fmt, "content_hash": content_hash,
+                    "target_origins": targets, "included_count": len(redirects),
+                    "excluded_count": len(excluded), "exclusion_reasons": _exclusion_reasons(excluded),
+                    "destination_mapping": dict(destination), "verification_inputs": verification,
+                    "partial_policy": partial_policy}
+        try:
+            result = self.client.rpc("publish_migration_artifact", {
+                "p_user_id": owner, "p_migration_id": migration, "p_run_id": run,
+                "p_idempotency_key": key, "p_artifact": artifact, "p_content": content}).execute()
+            row = _rpc_row(result)
+            if (row.get("content_hash") != content_hash
+                    or row.get("included_count") != len(redirects)
+                    or row.get("excluded_count") != len(excluded)
+                    or row.get("verification_inputs") != verification
+                    or str(row.get("migration_id")) != migration
+                    or str(row.get("user_id")) != owner):
+                raise RepositoryUnavailableError("Artifact operation is temporarily unavailable.")
+            return self._artifact_summary(row)
+        except MigrationRepositoryError:
+            raise
+        except Exception:
+            raise RepositoryUnavailableError("Artifact operation is temporarily unavailable.") from None
+
+    def authorize_download(self, user_id: UUID | str, migration_id: UUID | str,
+                           artifact_id: UUID | str) -> dict[str, Any]:
         _, owner = _strict_uuid(user_id, "user_id")
         _, migration = _strict_uuid(migration_id, "migration_id")
         _, artifact = _strict_uuid(artifact_id, "artifact_id")
         row = self.repository.get_artifact(owner, migration, artifact)
-        return {
-            "resource_type": "artifact_download",
-            "artifact_id": str(artifact),
-            "migration_id": str(migration),
-            "content_hash": row.get("content_hash"),
-            "format": row.get("format"),
-            "storage_key": row.get("storage_key"),
-        }
+        result = (self.client.table("migration_artifact_contents").select("*")
+                  .eq("artifact_id", str(artifact)).eq("migration_id", migration)
+                  .eq("user_id", owner).execute())
+        if getattr(result, "error", None):
+            raise RepositoryUnavailableError("Artifact content is temporarily unavailable.")
+        content = _safe_row(result)
+        if content.get("content_hash") != row.get("content_hash") or not isinstance(content.get("content"), str):
+            raise RepositoryUnavailableError("Artifact content is temporarily unavailable.")
+        return {"resource_type": "artifact_download", "artifact_id": str(artifact),
+                "migration_id": str(migration), "content_hash": row.get("content_hash"),
+                "format": row.get("format"), "content": content["content"]}
 
-    def report_installation(
-        self,
-        user_id: UUID | str,
-        migration_id: UUID | str,
-        artifact_id: UUID | str,
-        live_origin: str,
-        *,
-        installation_report: Mapping[str, Any] | None = None,
-    ) -> dict[str, Any]:
+    def report_installation(self, user_id: UUID | str, migration_id: UUID | str,
+                            artifact_id: UUID | str, live_origin: str, *,
+                            idempotency_key: str, origin_rewrites: Mapping[str, str] | None = None,
+                            installation_report: Mapping[str, Any] | None = None) -> dict[str, Any]:
         _, owner = _strict_uuid(user_id, "user_id")
         _, migration = _strict_uuid(migration_id, "migration_id")
         _, artifact = _strict_uuid(artifact_id, "artifact_id")
+        key = _nonblank(idempotency_key, "idempotency_key")
         artifact_row = self.repository.get_artifact(owner, migration, artifact)
         migration_row = self.repository.get_migration(owner, migration)
         try:
@@ -255,113 +277,93 @@ class MigrationArtifactService:
             raise InvalidInputError("live_origin must be a valid origin.") from None
         report = dict(installation_report or {})
         _json_value(report)
-        stored_inputs = artifact_row.get("verification_inputs")
-        if not isinstance(stored_inputs, Mapping):
+        stored = artifact_row.get("verification_inputs")
+        if not isinstance(stored, Mapping):
             raise RepositoryUnavailableError("Artifact verification data is temporarily unavailable.")
-        redirects = _verification_redirects(stored_inputs.get("redirects"))
-        source_origin = migration_row.get("old_origin")
-        if not isinstance(source_origin, str):
-            raise InvalidInputError("The migration has no known source origin for verification.")
-        source_origin = normalize_origin(source_origin)
-        pinned_redirects = [
-            {
-                "mapping_id": item["mapping_id"],
-                "source_url": rehost(item["source_url"], source_origin),
-                "expected_url": rehost(item["expected_url"], live),
-            }
-            for item in redirects
-        ]
+        redirects = _redirects(stored.get("redirects"))
+        targets = _origins(artifact_row.get("target_origins"))
+        rewrites: dict[str, str] = {}
+        if origin_rewrites is not None:
+            if not isinstance(origin_rewrites, Mapping):
+                raise InvalidInputError("origin_rewrites must be an object.")
+            for source, destination in origin_rewrites.items():
+                rewrites[normalize_origin(_nonblank(source, "origin_rewrite_source", 2_048))] = normalize_origin(_nonblank(destination, "origin_rewrite_destination", 2_048))
+        elif len(targets) == 1:
+            rewrites[targets[0]] = live
+        else:
+            raise InvalidInputError("explicit origin_rewrites are required for multi-origin artifacts.")
+        if len(targets) > 1 and set(rewrites) != set(targets):
+            raise InvalidInputError("origin_rewrites must cover each declared destination origin exactly.")
+        old_origin = normalize_origin(_nonblank(migration_row.get("old_origin"), "old_origin", 2_048))
         content_hash = artifact_row.get("content_hash")
-        revision = artifact_row.get("decision_revision")
+        revision = _nonblank(artifact_row.get("decision_revision"), "decision_revision")
         if not isinstance(content_hash, str) or not _HASH.fullmatch(content_hash):
             raise RepositoryUnavailableError("Artifact verification data is temporarily unavailable.")
-        revision = _nonblank(revision, "decision_revision")
-        verification_inputs = {
-            "redirects": pinned_redirects,
-            "artifact_content_hash": content_hash,
-            "decision_revision": revision,
-        }
-        deployment_id = str(uuid4())
-        payload = {
-            "id": deployment_id,
-            "migration_id": migration,
-            "user_id": owner,
-            "artifact_id": str(artifact),
-            "live_origin": live,
-            "status": "installation_reported",
-            "artifact_content_hash": artifact_row.get("content_hash"),
-            "decision_revision": artifact_row.get("decision_revision"),
-            "format": artifact_row.get("format"),
-            "included_count": artifact_row.get("included_count", 0),
-            "excluded_count": artifact_row.get("excluded_count", 0),
-            "target_origins": artifact_row.get("target_origins", []),
-            "destination_mapping": artifact_row.get("destination_mapping", {}),
-            "verification_inputs": verification_inputs,
-            "installation_report": report,
-            "installation_reported_at": _now(),
-        }
+        pinned = []
+        for item in redirects:
+            expected = item["expected_url"]
+            parsed = urlsplit(expected)
+            source_origin = f"{parsed.scheme.lower()}://{parsed.netloc.lower()}" if parsed.scheme and parsed.netloc else None
+            if source_origin in rewrites:
+                expected = rehost(expected, rewrites[source_origin])
+            pinned.append({"mapping_id": item["mapping_id"], "source_url": rehost(item["source_url"], old_origin), "expected_url": expected})
+        verification = {"redirects": pinned, "artifact_content_hash": content_hash,
+                        "decision_revision": revision}
+        payload = {"migration_id": migration, "user_id": owner, "artifact_id": str(artifact),
+                   "live_origin": live, "status": "installation_reported",
+                   "artifact_content_hash": content_hash,
+                   "decision_revision": revision, "format": artifact_row.get("format"),
+                   "included_count": artifact_row.get("included_count"), "excluded_count": artifact_row.get("excluded_count"),
+                   "target_origins": targets, "destination_mapping": artifact_row.get("destination_mapping", {}),
+                   "verification_inputs": verification, "installation_report": report}
         try:
-            result = self.client.table("artifact_deployments").insert(payload).execute()
-            error = getattr(result, "error", None)
-            if error:
-                raise DeploymentConflictError("An active deployment already exists for this live origin.")
-            row = _safe_row(result, payload)
+            result = self.client.rpc("publish_artifact_deployment", {
+                "p_user_id": owner, "p_migration_id": migration, "p_artifact_id": str(artifact),
+                "p_idempotency_key": key, "p_deployment": payload}).execute()
+            row = _rpc_row(result)
+            if (str(row.get("migration_id")) != migration or str(row.get("user_id")) != owner
+                    or str(row.get("artifact_id")) != str(artifact)
+                    or row.get("live_origin") != live or row.get("verification_inputs") != verification):
+                raise RepositoryUnavailableError("Deployment operation is temporarily unavailable.")
+            return self._deployment_summary(row, owner, migration, str(artifact))
         except MigrationRepositoryError:
             raise
         except Exception:
-            raise RepositoryUnavailableError("Deployment data is temporarily unavailable.") from None
-        return self._deployment_summary(row, owner, migration, artifact, live, verification_inputs)
+            raise RepositoryUnavailableError("Deployment operation is temporarily unavailable.") from None
 
-    def get_verification_inputs(
-        self, user_id: UUID | str, migration_id: UUID | str,
-        artifact_id: UUID | str, deployment_id: UUID | str,
-    ) -> dict[str, Any]:
-        """Return the immutable deployment snapshot consumed by P11 batches."""
+    def get_verification_inputs(self, user_id: UUID | str, migration_id: UUID | str,
+                                artifact_id: UUID | str, deployment_id: UUID | str) -> dict[str, Any]:
         _, owner = _strict_uuid(user_id, "user_id")
         _, migration = _strict_uuid(migration_id, "migration_id")
         _, artifact = _strict_uuid(artifact_id, "artifact_id")
         _, deployment = _strict_uuid(deployment_id, "deployment_id")
-        query = (self.client.table("artifact_deployments").select("*")
-                 .eq("id", str(deployment)).eq("user_id", owner)
-                 .eq("migration_id", migration).eq("artifact_id", artifact))
-        result = query.execute()
+        result = (self.client.table("artifact_deployments").select("*").eq("id", str(deployment))
+                  .eq("user_id", owner).eq("migration_id", migration)
+                  .eq("artifact_id", str(artifact)).execute())
         if getattr(result, "error", None):
             raise RepositoryUnavailableError("Deployment data is temporarily unavailable.")
         if isinstance(getattr(result, "data", None), list) and not result.data:
             raise MigrationNotFoundError("Deployment not found.")
-        row = _safe_row(result)
-        value = row.get("verification_inputs")
+        value = _safe_row(result).get("verification_inputs")
         if not isinstance(value, Mapping):
             raise RepositoryUnavailableError("Deployment verification data is temporarily unavailable.")
         return dict(value)
 
     @staticmethod
     def _artifact_summary(row: Mapping[str, Any]) -> dict[str, Any]:
-        return {
-            key: row.get(key)
-            for key in (
-                "id", "migration_id", "user_id", "run_id", "decision_revision",
-                "format", "content_hash", "storage_key", "target_origins",
-                "included_count", "excluded_count", "partial_policy",
-                "verification_inputs", "content",
-            )
-        }
+        result = {key: row.get(key) for key in ("id", "migration_id", "user_id", "run_id", "decision_revision", "format", "content_hash", "storage_key", "target_origins", "included_count", "excluded_count", "partial_policy", "verification_inputs")}
+        result["replayed"] = row.get("replayed", False)
+        return result
 
     @staticmethod
-    def _deployment_summary(row: Mapping[str, Any], owner: str, migration: str,
-                            artifact: str, live: str,
-                            verification_inputs: Mapping[str, Any]) -> dict[str, Any]:
-        deployment_id = row.get("id")
+    def _deployment_summary(row: Mapping[str, Any], owner: str, migration: str, artifact: str) -> dict[str, Any]:
         try:
-            deployment_id = str(UUID(str(deployment_id)))
+            deployment = str(UUID(str(row.get("id", row.get("deployment_id")))))
         except (ValueError, TypeError, AttributeError):
             raise RepositoryUnavailableError("Deployment data is temporarily unavailable.") from None
-        return {
-            "deployment_id": deployment_id,
-            "migration_id": migration,
-            "user_id": owner,
-            "artifact_id": artifact,
-            "live_origin": live,
-            "status": row.get("status", "installation_reported"),
-            "verification_inputs": dict(verification_inputs),
-        }
+        status = row.get("status")
+        if status not in {"generated", "installation_reported", "live_verified"}:
+            raise RepositoryUnavailableError("Deployment data is temporarily unavailable.")
+        return {"deployment_id": deployment, "migration_id": migration, "user_id": owner,
+                "artifact_id": artifact, "live_origin": row.get("live_origin"), "status": status,
+                "verification_inputs": row.get("verification_inputs"), "replayed": row.get("replayed", False)}

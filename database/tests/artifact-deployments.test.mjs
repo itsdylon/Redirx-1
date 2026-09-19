@@ -66,6 +66,56 @@ test('same live origin accepts historical artifact revisions', async () => {
   assert.equal((await row('SELECT count(*)::int AS n FROM artifact_deployments WHERE live_origin=$1', [live])).n, 2);
 });
 
+test('artifact RPC is atomic, durable, and idempotent', async () => {
+  const ids = await fixtureIds();
+  const hash = 'd'.repeat(64);
+  const content = 'RedirectMatch 301 "^/a$" "https://new.example/b"';
+  const actualHash = await row(`SELECT encode(sha256(convert_to($1,'UTF8')),'hex') AS hash`, [content]);
+  const artifact = {
+    migration_id: ids.migration_id, user_id: owner, run_id: ids.run_id,
+    decision_revision: 'revision-rpc', format: 'apache', content_hash: actualHash.hash,
+    target_origins: ['https://new.example'], included_count: 1, excluded_count: 0,
+    exclusion_reasons: { by_reason: {}, items: [] }, destination_mapping: {},
+    verification_inputs: { redirects: [{ mapping_id: 'rpc-1', source_url: 'https://old/a', expected_url: 'https://new.example/b' }],
+      artifact_content_hash: actualHash.hash, decision_revision: 'revision-rpc' }, partial_policy: 'deny',
+  };
+  const call = async (payload, key = 'rpc-artifact') => row(
+    `SELECT publish_migration_artifact($1,$2,$3,$4,$5::jsonb,$6) AS value`,
+    [owner, ids.migration_id, ids.run_id, key, JSON.stringify(payload), content],
+  );
+  const first = await call(artifact);
+  const replay = await call(artifact);
+  assert.equal(first.value.id, replay.value.id);
+  assert.equal(replay.value.replayed, true);
+  assert.equal((await row('SELECT content FROM migration_artifact_contents WHERE artifact_id=$1', [first.value.id])).content, content);
+  await assert.rejects(
+    pg.query(`UPDATE migration_artifact_contents SET content='tampered' WHERE artifact_id=$1`, [first.value.id]),
+    /immutable/,
+  );
+  const changed = { ...artifact, decision_revision: 'changed' };
+  await assert.rejects(call(changed), /operation_conflict/);
+});
+
+test('deployment RPC is owner-scoped and retry-safe', async () => {
+  const ids = await fixtureIds();
+  const artifact = await insertArtifact(ids, 'e');
+  const deployment = { migration_id: ids.migration_id, user_id: owner, artifact_id: artifact.id,
+    live_origin: 'https://rpc-live.example', status: 'installation_reported', artifact_content_hash: 'e'.repeat(64),
+    decision_revision: 'revision-e', format: 'json', included_count: 1, excluded_count: 0,
+    target_origins: [], destination_mapping: {},
+    verification_inputs: { redirects: [], artifact_content_hash: 'e'.repeat(64), decision_revision: 'revision-e' },
+    installation_report: {} };
+  const call = async (user = owner, key = 'rpc-deployment') => row(
+    `SELECT publish_artifact_deployment($1,$2,$3,$4,$5::jsonb) AS value`,
+    [user, ids.migration_id, artifact.id, key, JSON.stringify(deployment)],
+  );
+  const first = await call();
+  const replay = await call();
+  assert.equal(first.value.id, replay.value.id);
+  assert.equal(replay.value.replayed, true);
+  await assert.rejects(call('10000000-0000-0000-0000-000000000099'), /not_found/);
+});
+
 test('041 keeps pinned verification scope immutable and account deletion cascades it', async () => {
   const ids = await fixtureIds();
   const artifact = await insertArtifact(ids, 'c');

@@ -120,8 +120,9 @@ BEGIN
     FROM url_mappings m
     LEFT JOIN migration_mapping_decisions d ON d.run_id=v_run.id AND d.mapping_id=m.id
     LEFT JOIN LATERAL (
-      SELECT coalesce(bool_or(s.clicks IS NOT NULL OR s.impressions IS NOT NULL), false) AS observed,
-        sum(s.clicks)::bigint AS clicks
+      SELECT coalesce(bool_or('gsc'=ANY(s.sources) AND (s.clicks IS NOT NULL OR s.impressions IS NOT NULL)), false) AS observed,
+        sum(s.clicks) FILTER (WHERE 'gsc'=ANY(s.sources)
+          AND (s.clicks IS NOT NULL OR s.impressions IS NOT NULL))::bigint AS clicks
       FROM session_discovered_urls s
       WHERE s.session_id=v_run.legacy_session_id AND s.side='old' AND s.url=m.old_url
     ) t ON true

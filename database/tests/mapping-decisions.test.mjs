@@ -37,9 +37,8 @@ before(async () => {
   await pg.query('INSERT INTO auth.users(id) VALUES($1),($2)', [user, other]);
   await pg.query('INSERT INTO user_profiles(id) VALUES($1),($2)', [user, other]);
   await pg.exec(await read('../migrations/032_durable_migrations.sql'));
-  // Historical/imported discovery rows can predate non-null metric defaults.
-  // The list RPC must not treat a sitemap-only row as measured traffic.
-  await pg.exec('ALTER TABLE session_discovered_urls ALTER COLUMN clicks DROP NOT NULL; ALTER TABLE session_discovered_urls ALTER COLUMN impressions DROP NOT NULL;');
+  // Keep026's real NOT NULL DEFAULT0 metric columns: zeros without GSC
+  // provenance must remain absent traffic, not invented observations.
   // This is a legitimate legacy-session bridge.  P07 retains this binding for
   // new MCP runs, so do not weaken the durable-run trigger for the fixture.
   migration = (await row(`INSERT INTO migration_records(user_id,status)
@@ -68,7 +67,7 @@ before(async () => {
   await pg.query(`INSERT INTO session_discovered_urls(session_id,side,url,sources,clicks,impressions)
     VALUES($1,'old','https://old.example/c',ARRAY['gsc'],5,0),
           ($1,'old','https://old.example/d',ARRAY['gsc'],1,0),
-          ($1,'old','https://old.example/e',ARRAY['sitemap'],NULL,NULL)`, [session]);
+          ($1,'old','https://old.example/e',ARRAY['sitemap'],0,0)`, [session]);
   await pg.exec(await read('../migrations/038_mapping_decisions.sql'));
 });
 after(async () => pg.close());

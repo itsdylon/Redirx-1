@@ -286,7 +286,39 @@ would show up.
 
 ### Stage E — frontend — runs BEFORE the gate (see 1a)
 
-Manually deploy `redirx-frontend` from `main`.
+> **"Deploy from `main`" was a contradiction and is withdrawn.** `main` does not contain
+> the consent page — that is the whole point of Stage E — and the merge that would put it
+> there is Stage C, which runs *after* the gate. Stage E needs a commit-pinned deploy, and
+> the tooling for it is the constraint below.
+
+**Measured capability, 2026-09-18.** `redirx-frontend` tracks branch `main`
+(`rootDir: frontend`). The available `trigger_deploy` tool takes only `serviceId`,
+`clearCache` and `workspaceId` — **it has no `commitId` parameter**, so it redeploys the
+service's configured branch at its current remote HEAD. Triggering it today would build
+`main`, which has no consent page. Render's REST API *does* accept `commitId` on
+`POST /v1/services/{id}/deploys`, but that path needs an API key held by the MCP server
+and not available to the agent.
+
+So a commit-pinned frontend deploy requires one of these, none of which the agent can do
+unilaterally:
+
+1. **Point `redirx-frontend` at an isolated ref** carrying the reviewed commit (for
+   example `deploy/consent-frontend-<sha>`, which no other service tracks, so pushing it
+   triggers nothing). Changing a service's branch is a service setting — no MCP tool
+   exists; dashboard or REST only.
+2. **Render REST with `commitId`** against the existing `main` tracking — needs the API
+   key.
+3. **Merge to `main`** — forbidden before the gate, and it would also fire `redirx-api`
+   and `redirx-worker` while their auto-deploy is on.
+
+Option 1 is the cleanest: it keeps `main` untouched, keeps the reviewed SHA exact, and
+leaves every other service alone.
+
+*Scope note:* the reviewed SHA's frontend tree differs from `origin/main` by 8 files /
+376 insertions — `OAuthConsentPage.tsx` and its test, `routes.tsx`, `App.tsx` and its
+test, `authRedirect.ts` and its test, and `main.tsx`. That last one carries the PostHog
+init changes (cross-subdomain cookie, `capture_exceptions`, `source_repo`), so this deploy
+also switches on app-side analytics. Frontend-only, but not literally consent-only.
 
 *Verify:* `https://app.redirx.dev/` returns 200; sign-in works;
 `https://app.redirx.dev/oauth/consent` renders rather than 404ing. That route is what the

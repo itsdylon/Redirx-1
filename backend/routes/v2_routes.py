@@ -1,5 +1,6 @@
 """Opt-in durable planning and explicit inventory resources."""
 from functools import wraps
+from hashlib import sha256
 
 from flask import Blueprint, jsonify, request
 from werkzeug.exceptions import BadRequest, RequestEntityTooLarge, UnsupportedMediaType
@@ -10,6 +11,9 @@ from backend.services.mcp_delegation_service import MCPDelegationService
 from backend.services.inventory_import_service import InventoryImportService
 from backend.services.migration_repository import InvalidInputError, MigrationRepositoryError
 from backend.services.migration_planning_service import MigrationPlanningService, envelope
+from backend.services.migration_planning_service import validate_key
+from backend.services.migration_quote_service import MigrationQuoteService
+from backend.services.migration_run_service import MigrationRunService
 
 v2_blueprint = Blueprint('v2', __name__)
 
@@ -58,8 +62,10 @@ def authenticated(fn):
 def repository_error(exc):
     code = 'operation_conflict' if exc.code == 'inventory_busy' else exc.code
     http_status = {'not_found': 404, 'invalid_input': 400, 'operation_conflict': 409,
-                   'capacity_exceeded': 413}.get(code, 503)
-    return failure(code, str(exc), http_status, exc.retryable, 'retry' if exc.retryable else 'none')
+                   'capacity_exceeded': 413, 'quote_expired': 409,
+                   'inventory_incomplete': 409, 'payment_required': 402}.get(code, 503)
+    return failure(code, str(exc), http_status, exc.retryable,
+                   getattr(exc, 'next_action', 'retry' if exc.retryable else 'none'))
 
 
 @v2_blueprint.errorhandler(BadRequest)
@@ -134,3 +140,33 @@ def import_inventory(migration_id):
 @limiter.limit('120 per minute', key_func=account_limit_key)
 def operation_status(operation_id):
     return jsonify(MigrationPlanningService().operation(request.api_user_id, operation_id))
+
+
+@v2_blueprint.post('/migrations/<migration_id>/runs')
+@authenticated
+@limiter.limit('30 per minute', key_func=account_limit_key)
+def run_migration(migration_id):
+    value = body({'inventory_ids', 'quote_id', 'grant_id', 'rerun_of', 'idempotency_key'})
+    key = validate_key(value.get('idempotency_key'))
+    inventories = value.get('inventory_ids')
+    if not isinstance(inventories, dict) or set(inventories) != {'old', 'new'}:
+        raise InvalidInputError('inventory_ids must contain exactly old and new snapshot IDs.')
+    quotes = MigrationQuoteService()
+    # Keep automatic quote identity stable across payment and retries. A caller
+    # cannot silently replace its reserved run's quote by omitting quote_id.
+    quote = (quotes.get_quote(request.api_user_id, migration_id, value['quote_id'])
+             if value.get('quote_id') else quotes.create_quote(
+                 request.api_user_id, migration_id, inventories['old'], inventories['new'],
+                 'run:' + sha256(key.encode()).hexdigest()))
+    if quote['inventory_ids'] != inventories:
+        raise InvalidInputError('The quote must match both requested inventory snapshots.')
+    if quote['kind'] == 'custom':
+        return jsonify(envelope(migration_id, quote['operation_id'], status='needs_input',
+                                next_action='request_custom_quote', data=quote))
+    result = MigrationRunService().start_run(request.api_user_id, migration_id,
+        inventories['old'], inventories['new'], quote['quote_id'], key,
+        grant_id=value.get('grant_id'), rerun_of=value.get('rerun_of'))
+    next_action = {'payment_required': 'complete_payment', 'queued': 'poll', 'running': 'poll',
+                   'succeeded': 'resolve_matches', 'failed': 'retry'}[result['status']]
+    return jsonify(envelope(migration_id, result['operation_id'], status=result['status'],
+                            next_action=next_action, data={**quote, **result}))

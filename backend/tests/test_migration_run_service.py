@@ -147,6 +147,48 @@ class RunDatabaseAcceptance(unittest.TestCase):
         rerun=self.start(f,rerun_of=run['run_id']); self.assertNotEqual(rerun['run_id'],run['run_id'])
         self.assertEqual(self.sql('SELECT count(*) AS n FROM migration_purchase_grants WHERE quote_id=%s',[f['quote']])[0]['n'],1)
 
+    def test_http_automatic_quote_payment_resume_ownership_and_retry(self):
+        from flask import Flask, request
+        from backend.routes.v2_routes import v2_blueprint
+        app = Flask(__name__)
+        app.config.update(TESTING=True, RATELIMIT_ENABLED=False)
+        app.register_blueprint(v2_blueprint, url_prefix='/api/v2')
+        http = app.test_client()
+        def authenticated_owner():
+            request.api_user_id = A
+            return A
+        f = self.fixture(501)
+        path = '/api/v2/migrations/' + f['migration'] + '/runs'
+        body = {'inventory_ids': {'old': f['old'], 'new': f['new']}, 'idempotency_key': uuid4().hex}
+        with patch('backend.routes.v2_routes.resolve_authorization', return_value=None):
+            self.assertEqual(http.post(path, json=body).status_code, 401)
+        with patch('backend.routes.v2_routes.resolve_authorization', side_effect=authenticated_owner), \
+             patch('backend.routes.v2_routes.MigrationQuoteService', return_value=self.quotes), \
+             patch('backend.routes.v2_routes.MigrationRunService', return_value=self.runs):
+            for invalid in ({**body, 'paid': True}, {**body, 'inventory_ids': {'old': f['old']}},
+                            {**body, 'idempotency_key': None}):
+                self.assertEqual(http.post(path, json=invalid).status_code, 400)
+            first = http.post(path, json=body)
+            self.assertEqual(first.status_code, 200, first.json)
+            self.assertEqual((first.json['status'], first.json['next_action']), ('payment_required', 'complete_payment'))
+            self.assertIsNone(first.json['data']['session_id'])
+            replay = http.post(path + '?payment_return=success&paid=true', json=body).json
+            self.assertEqual(replay['operation_id'], first.json['operation_id'])
+            self.assertEqual(replay['data']['quote_id'], first.json['data']['quote_id'])
+            self.assertEqual(replay['status'], 'payment_required')
+            f['quote'] = first.json['data']['quote_id']
+            self.pay(f)
+            resumed = http.post(path, json=body).json
+            self.assertEqual((resumed['status'], resumed['next_action']), ('queued', 'poll'))
+            self.assertEqual(resumed['operation_id'], first.json['operation_id'])
+            repeated = http.post(path, json={**body, 'quote_id': f['quote']}).json
+            self.assertEqual(repeated['data']['run_id'], resumed['data']['run_id'])
+            self.assertEqual(self.sql('SELECT count(*) AS n FROM migration_runs WHERE migration_id=%s', [f['migration']])[0]['n'], 1)
+            foreign = self.fixture(owner=B)
+            denied = http.post('/api/v2/migrations/' + foreign['migration'] + '/runs', json={
+                'inventory_ids': {'old': foreign['old'], 'new': foreign['new']}, 'idempotency_key': uuid4().hex})
+            self.assertEqual(denied.status_code, 404)
+
     def test_paid_reserves_before_payment_and_same_operation_resumes_once(self):
         f=self.fixture(501); key=uuid4().hex
         pending=self.start(f,key)

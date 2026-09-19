@@ -30,7 +30,7 @@ class ValidationTests(unittest.TestCase):
         self.assertEqual(result['new_site'], 'http://192.168.1.15:8080')
         self.assertEqual(result['site_aliases'], {'old': [], 'new': ['https://staging.internal']})
 
-    def test_app_factory_flag_defaults_off_and_explicitly_enables_four_routes(self):
+    def test_app_factory_flag_defaults_off_and_explicitly_enables_pivot_routes(self):
         from backend.app import create_app
         with patch.dict(os.environ):
             os.environ.pop('MCP_PIVOT_ENABLED', None)
@@ -38,7 +38,11 @@ class ValidationTests(unittest.TestCase):
             self.assertFalse(any(r.rule.startswith('/api/v2') for r in app.url_map.iter_rules()))
             os.environ['MCP_PIVOT_ENABLED'] = 'true'
             app = create_app()
-            self.assertEqual(len([r for r in app.url_map.iter_rules() if r.rule.startswith('/api/v2')]), 4)
+            paths = {r.rule for r in app.url_map.iter_rules()}
+            self.assertTrue({'/api/v2/migrations', '/api/v2/migrations/<migration_id>/runs',
+                '/api/v2/migrations/<migration_id>/quotes/<quote_id>/checkout',
+                '/api/v2/billing/stripe-test/webhook',
+                '/api/v2/connections/search-console/actions'} <= paths)
 
     def test_invalid_shape_and_ambiguous_origins(self):
         for changes in ({'old_site': 'https://u:p@old.example'}, {'old_site': 'https://old.example/a'},

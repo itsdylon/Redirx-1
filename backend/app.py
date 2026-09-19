@@ -62,7 +62,11 @@ def create_app():
     # Dormant pivot API: activation is an explicit release setting.
     if os.getenv("MCP_PIVOT_ENABLED", "false").lower() == "true":
         from backend.routes.v2_routes import v2_blueprint
+        from backend.routes.migration_checkout_routes import create_migration_checkout_blueprint
+        from backend.routes.migration_gsc_routes import create_migration_gsc_blueprint
         app.register_blueprint(v2_blueprint, url_prefix="/api/v2")
+        app.register_blueprint(create_migration_checkout_blueprint(), url_prefix="/api/v2")
+        app.register_blueprint(create_migration_gsc_blueprint(), url_prefix="/api/v2")
     # Service-to-service only (shared-secret protected) — called by the
     # mcp-server gateway, never by a browser or an agent's own API key.
     app.register_blueprint(internal_blueprint, url_prefix="/api/internal")

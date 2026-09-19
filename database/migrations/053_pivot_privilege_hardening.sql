@@ -61,7 +61,7 @@ BEGIN
   'get_migration_test_checkout','get_migration_test_subscription','get_studio_work_reservation','get_subscription_checkout',
   'get_subscription_monitoring_site','guard_migration_engine_insert','included_verification_entitled','issue_free_migration_grant',
   'list_migration_matches','lock_migration_engine_attempt','manage_migration_monitor','match_migration_pages',
-  'migration_grant_summary','migration_quote_summary','migration_subscription_summary','migration_test_checkout_summary',
+  'migration_engine_url_belongs','migration_grant_summary','migration_quote_summary','migration_subscription_summary','migration_test_checkout_summary',
   'monitor_alert_counts','monitor_entitlement','monitor_observed_clicks','monitor_verified_email',
   'persist_migration_run_embedding','persist_migration_run_mapping','plan_migration','preserve_mcp_session_inputs',
   'preserve_migration_checkout_bindings','preserve_migration_operation_identity','preserve_migration_price_bindings','preserve_monitor_scope',

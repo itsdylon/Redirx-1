@@ -284,7 +284,38 @@ would show up.
 
 *Rollback:* roll back to `dep-dambgejijnfac73e6om30` (commit `23fff0b7`).
 
-### Stage E — frontend — runs BEFORE the gate (see 1a)
+### Stage E — frontend — ✅ DONE 2026-09-19 (runs BEFORE the gate, see 1a)
+
+**Deployment record.**
+
+| | |
+| --- | --- |
+| Deploy ID | `dep-damuhejm8hqs739d1500` |
+| Deployed commit | `8e6ad72b420c70fd54cee5a6355e85c980f001a5` |
+| Source ref | `refs/heads/deploy/consent-frontend-8e6ad72` (isolated; no other service tracks it) |
+| Status | `live`, finished 2026-09-19T01:43:51Z |
+| **Rollback target** | `dep-da3rgv5ckfvc7382d120`, commit `23fff0b7` |
+
+Executed with auto-deploy `off` on all four services, verified immediately beforehand.
+`main` (`23fff0b7`) and `pivot/mcp-primary` (`3e124857`) were untouched. Existing deploys
+were listed first: none targeted `8e6ad72`, so the trigger fired exactly once.
+
+**Evidence — the live JS, not the HTML status.** `app.redirx.dev` now serves
+`/assets/index-ClIuGE9E.js` (1,440,901 bytes), replacing `index-Fnu5aCIJ.js`. It contains
+`oauth/consent` ×1, `authorization_id` ×1, and the component's own copy
+(`Returning to your MCP client`, `Only approve a client you recognize`) ×1 each.
+
+> **Verification trap, worth knowing.** Two checks that look conclusive and are not.
+> First, the SPA rewrite makes *every* path return HTTP 200, so `/oauth/consent` returning
+> 200 proves nothing — it did so before this deploy too. Second, `approveAuthorization`
+> and `getAuthorizationDetails` appear in the bundle regardless, because
+> `@supabase/supabase-js` ships them; only the page's own strings distinguish it.
+> Third, and the one that actually bit: `cache-control: s-maxage=300` means the edge
+> serves the **old** bundle for up to five minutes after a successful deploy. The first
+> post-deploy fetch returned the pre-deploy hash and zero consent hits. A cache-busted
+> request revealed the new asset, with `last-modified` matching the deploy's finish time
+> to the second. Do not conclude a good deploy failed on a cached read.
+
 
 > **"Deploy from `main`" was a contradiction and is withdrawn.** `main` does not contain
 > the consent page — that is the whole point of Stage E — and the merge that would put it

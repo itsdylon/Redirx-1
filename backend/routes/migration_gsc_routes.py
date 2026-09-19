@@ -8,6 +8,24 @@ from backend.services.migration_repository import MigrationRepositoryError
 from backend.services.migration_gsc_service import MigrationGSCService
 
 
+def agent_callback_response(service_factory=None):
+    """One-use state/PKCE callback shared by the dedicated and registered legacy URL."""
+    factory = service_factory or MigrationGSCService
+    try:
+        if any(len(request.args.getlist(key)) != 1 for key in request.args):
+            raise ValueError()
+        result = factory().callback(request.args.get('state'), request.args.get('code'), request.args.get('error'))
+        success = result['status'] == 'succeeded'
+        message = ('Search Console connected. Return to your agent and select a property to sync traffic.' if success else
+                   'Search Console was not connected. Return to your agent to reconnect, or continue without traffic data.')
+        response = make_response(message, 200 if success else 400)
+    except (MigrationRepositoryError, ValueError):
+        response = make_response('This Search Console link is invalid or expired. Return to your agent and reconnect.', 400)
+    response.headers.update({'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store',
+        'Referrer-Policy': 'no-referrer', 'Content-Security-Policy': "default-src 'none'; frame-ancestors 'none'"})
+    return response
+
+
 def create_migration_gsc_blueprint(service_factory=None):
     factory = service_factory or MigrationGSCService
     blueprint = Blueprint('migration_gsc', __name__)
@@ -32,18 +50,6 @@ def create_migration_gsc_blueprint(service_factory=None):
     @limiter.limit('60 per minute')
     def callback():
         # No identity from query parameters and no caller-provided redirect.
-        try:
-            if any(len(request.args.getlist(key)) != 1 for key in request.args):
-                raise ValueError()
-            result = factory().callback(request.args.get('state'), request.args.get('code'), request.args.get('error'))
-            success = result['status'] == 'succeeded'
-            message = ('Search Console connected. Return to your agent and select a property to sync traffic.' if success else
-                       'Search Console was not connected. Return to your agent to reconnect, or continue without traffic data.')
-            response = make_response(message, 200 if success else 400)
-        except (MigrationRepositoryError, ValueError):
-            response = make_response('This Search Console link is invalid or expired. Return to your agent and reconnect.', 400)
-        response.headers.update({'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store',
-            'Referrer-Policy': 'no-referrer', 'Content-Security-Policy': "default-src 'none'; frame-ancestors 'none'"})
-        return response
+        return agent_callback_response(factory)
 
     return blueprint

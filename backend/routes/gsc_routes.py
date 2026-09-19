@@ -6,6 +6,8 @@ metrics into a migration session for traffic-weighted triage.
 """
 from urllib.parse import urlencode
 from uuid import UUID
+import os
+import re
 
 from flask import Blueprint, jsonify, redirect, request
 
@@ -69,6 +71,12 @@ def gsc_callback():
     comes from the signed state token minted in /connect.
     """
     state = request.args.get('state', '')
+    if os.getenv('MCP_PIVOT_ENABLED', 'false').lower() == 'true' and re.fullmatch(r'[A-Za-z0-9_-]{43}', state):
+        # The registered Google callback can serve both protocols. Opaque agent
+        # state is resolved only through its durable one-use/PKCE store; never
+        # retry a failed agent callback through the legacy JWT-state handler.
+        from backend.routes.migration_gsc_routes import agent_callback_response
+        return agent_callback_response()
     if request.args.get('error'):
         # User cancelled on the consent screen.
         return _frontend_redirect('/', 'cancelled')

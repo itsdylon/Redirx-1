@@ -163,7 +163,7 @@ class MigrationGSCService:
         self.store = store if store is not None else GSCRepository(repository)
         self.repository = self.store.base
         self._provider = provider
-        self.redirect_uri = redirect_uri or os.environ.get('GSC_AGENT_REDIRECT_URI', '')
+        self.redirect_uri = redirect_uri or os.environ.get('GSC_AGENT_REDIRECT_URI') or Config.GSC_OAUTH_REDIRECT_URI
         self.secret = state_secret or Config.GSC_STATE_SECRET
 
     @property

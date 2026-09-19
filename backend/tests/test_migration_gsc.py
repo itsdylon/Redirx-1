@@ -276,6 +276,45 @@ class PostgreSQLTests(TestCase):
         self.assertEqual(response.headers['Cache-Control'], 'no-store')
         self.assertNotIn('fixture-code', response.text)
 
+    def test_registered_legacy_callback_dispatches_one_use_agent_state_without_fallback(self):
+        from backend.routes.gsc_routes import gsc_blueprint
+        app = Flask(__name__); app.config['TESTING'] = True
+        app.register_blueprint(gsc_blueprint, url_prefix='/api/gsc')
+        client = app.test_client()
+        self.service.redirect_uri = 'https://api.example/api/gsc/callback'
+        _, state = self.connect()
+        with patch.dict(os.environ, {'MCP_PIVOT_ENABLED': 'true'}), \
+                patch('backend.routes.migration_gsc_routes.MigrationGSCService', return_value=self.service), \
+                patch('backend.routes.gsc_routes.GSCService') as legacy:
+            duplicate = client.get('/api/gsc/callback', query_string=[('state',state),('state',state),('code','fixture-code')])
+            self.assertEqual(duplicate.status_code, 400)
+            self.provider.exchange.assert_not_called()
+            response = client.get('/api/gsc/callback', query_string={'state':state,'code':'fixture-code','user_id':B,'return_to':'https://attacker.invalid/'})
+            self.assertEqual(response.status_code, 200)
+            self.assertNotIn('Location', response.headers)
+            self.assertEqual(response.headers['Cache-Control'], 'no-store')
+            self.provider.exchange.assert_called_once_with('fixture-code', self.service.redirect_uri, self.service._secret_value('pkce',state))
+            self.assertIsNotNone(self.store.connection(A))
+            self.assertIsNone(self.store.connection(B))
+            replay = client.get('/api/gsc/callback', query_string={'state':state,'code':'fixture-code'})
+            self.assertEqual(replay.status_code, 400)
+            legacy.assert_not_called()
+
+    def test_registered_callback_retains_legacy_jwt_and_flag_off_behavior(self):
+        from backend.routes.gsc_routes import gsc_blueprint
+        app = Flask(__name__); app.config['TESTING'] = True
+        app.register_blueprint(gsc_blueprint, url_prefix='/api/gsc')
+        with patch('backend.routes.gsc_routes.GSCService') as legacy, \
+                patch('backend.routes.migration_gsc_routes.MigrationGSCService') as agent:
+            legacy.return_value.handle_callback.return_value = {'return_to':'/review/legacy'}
+            for flag,state in [('true','signed.legacy.jwt'),('false','a'*43)]:
+                with patch.dict(os.environ, {'MCP_PIVOT_ENABLED':flag}):
+                    response=app.test_client().get('/api/gsc/callback',query_string={'state':state,'code':'fixture-code'})
+                self.assertEqual(response.status_code,302)
+                self.assertTrue(response.headers['Location'].endswith('/review/legacy?gsc=connected'))
+                legacy.return_value.handle_callback.assert_called_with('fixture-code',state)
+            agent.assert_not_called()
+
     def test_rls_and_rpc_privileges_and_account_cleanup(self):
         import psycopg
         for role in ('anon', 'authenticated'):

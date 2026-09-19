@@ -8,6 +8,7 @@ from werkzeug.exceptions import BadRequest, RequestEntityTooLarge, UnsupportedMe
 from backend.extensions import limiter
 from backend.services.api_key_service import ApiKeyService, looks_like_api_key
 from backend.services.mcp_delegation_service import MCPDelegationService
+from backend.services.companion_auth_service import resolve_companion_session
 from backend.services.inventory_import_service import InventoryImportService
 from backend.services.migration_repository import InvalidInputError, MigrationRepositoryError
 from backend.services.migration_planning_service import MigrationPlanningService, envelope
@@ -41,6 +42,8 @@ def resolve_authorization():
     user = None
     if token:
         user = ApiKeyService().resolve(token) if looks_like_api_key(token) else MCPDelegationService().resolve(token)
+        if user is None and not looks_like_api_key(token):
+            user = resolve_companion_session(token)
     request.api_user_id = user
     return user
 
@@ -53,7 +56,7 @@ def authenticated(fn):
     @wraps(fn)
     def wrapped(*args, **kwargs):
         if not resolve_authorization():
-            return failure('reconnect_required', 'Provide a valid API key or MCP delegation.', 401, next_action='reconnect')
+            return failure('reconnect_required', 'Sign in or reconnect your agent.', 401, next_action='reconnect')
         return fn(*args, **kwargs)
     return wrapped
 

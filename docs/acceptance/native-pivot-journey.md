@@ -40,7 +40,7 @@ into parameterized native SQL and normalizes JSON wire types.
 
 ## Verified journeys
 
-The suite contains three product journeys against native PostgreSQL and
+The suite contains four product journeys against native PostgreSQL and
 Node 24.21.0:
 
 1. Free account: plan through MCP; explicit old/new imports through the real
@@ -56,7 +56,10 @@ Node 24.21.0:
    artifact reference, issue resolution, pause/resume and cancellation.
 2. Exactly 500 old pages: free quote, real active free grant, one queued run,
    no checkout. This is entitlement acceptance; the 500-page pipeline is not run.
-3. 501 old pages: persisted payment_required and complete_payment, replayed
+3. The same full free journey with unchanged URL paths but moved content:
+   changed-origin path equality must not skip content evidence or produce
+   incorrect exact-URL mappings.
+4. 501 old pages: persisted payment_required and complete_payment, replayed
    operation and quote, recoverable status, no grant or content job dispatched.
 
 Native SDK tool lists contain exactly the eleven business tools. There is
@@ -75,9 +78,9 @@ initial plan truthfully requests inventory.
   Every run, grant, operation, inventory, mapping and decision is persisted in
   native PostgreSQL. Existing account rows model a fresh free account after signup.
 - The free engine fixture has three paths served by two controlled loopback
-  HTTP origins. Distinct HTML moves from `/page/i` to `/moved/page/j` on the
-  new site, with a permuted topic order. The fixture requires content evidence
-  rather than the legacy normalization of path prefixes. It executes all six
+  HTTP origins. Distinct HTML moves from `/page/i` to `/moved/page/j` or
+  `/page/j` on the new site, with a permuted topic order. Both fixtures require
+  content evidence; matching path names alone cannot satisfy their assertions. It executes all six
   actual pipeline stages with the worker's `preserve_url_identity` and
   `engine_write_context` settings. Six deterministic embedding provider
   responses are injected at the external client boundary; real 050 RPCs store
@@ -112,10 +115,9 @@ then the old export key returns its original artifact with unchanged resource
 bytes.
 
 Full semantic matching quality and the broader URL-identity edge cases still
-require separate quality fixtures. A same-path, changed-content variant exposed
-the remaining early exact-path shortcut in the pivot engine; that correction
-and regression are tracked with the engine owner. The passing renamed-path
-journey does not claim the same-path behavior is correct. This small fixture does not replace
+require separate quality fixtures. The same-path, changed-content regression
+now requires the full content path and verifies the corrected mappings through
+installation and HTTP measurements. This small fixture does not replace
 500/15000-page capacity evidence. External OAuth login, real Stripe delivery and
 signature verification, mail provider delivery, PostgREST transport, root process
 startup, and production deployment remain separate acceptance work.

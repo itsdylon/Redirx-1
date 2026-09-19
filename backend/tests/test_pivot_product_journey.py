@@ -239,7 +239,13 @@ class NativeProductJourney(unittest.TestCase):
         return mid,inv
 
     def test_free_native_journey_replay_engine_review_and_fresh_client_resume(self):
-        self.new_page_prefix='/moved/page/'
+        self.free_native_journey('/moved/page/')
+
+    def test_same_path_changed_content_requires_content_evidence(self):
+        self.free_native_journey('/page/')
+
+    def free_native_journey(self,new_page_prefix):
+        self.new_page_prefix=new_page_prefix
         self.origin_servers['old'].target_prefix=self.new_page_prefix
         mid,inv=self.plan_import(3)
         status=self.tool('get_migration',{'migration_id':mid}); self.assertEqual(status['next_action'],'run_migration')

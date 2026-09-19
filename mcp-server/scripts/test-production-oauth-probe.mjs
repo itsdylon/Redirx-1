@@ -1,7 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { request } from 'node:http';
-import { callbackListener, validateServer } from './production-oauth-probe.mjs';
+import { callbackListener, validateServer, registrationCapture } from './production-oauth-probe.mjs';
+import { registerClient } from '@modelcontextprotocol/sdk/client/auth.js';
 
 function send(url, { method = 'GET', host } = {}) {
   return new Promise((resolve, reject) => {
@@ -48,4 +49,20 @@ test('probe accepts HTTPS and loopback only, rejecting ambient credentials and U
   for (const url of ['https://mcp.example/mcp', 'http://127.0.0.1:8787/mcp']) assert.ok(validateServer(url));
   for (const url of ['http://mcp.example/mcp', 'https://user:password@mcp.example/mcp',
     'https://mcp.example/mcp?token=secret', 'https://mcp.example/mcp#secret']) assert.throws(() => validateServer(url));
+});
+
+test('native SDK registration parsing cannot discard the probe cleanup credential', async () => {
+  const metadata = { issuer: 'https://auth.example', registration_endpoint: 'https://auth.example/reg' };
+  const value = { client_id: 'probe', redirect_uris: ['http://127.0.0.1:8766/callback'],
+    registration_client_uri: 'https://auth.example/reg/probe', registration_access_token: 'management-secret' };
+  const capture = registrationCapture(() => metadata, async () => new Response(JSON.stringify(value), { status: 201 }));
+  const parsed = await registerClient(metadata.issuer, { metadata, clientMetadata: { redirect_uris: value.redirect_uris }, fetchFn: capture.fetch });
+  assert.equal(parsed.registration_access_token, undefined);
+  assert.equal(capture.information().registration_access_token, 'management-secret');
+  assert.equal(capture.information().client_id, parsed.client_id);
+  for (const uri of ['https://foreign.example/reg/probe', 'https://user:pass@auth.example/reg/probe', 'https://auth.example/reg/probe?leak=1']) {
+    const unsafe = registrationCapture(() => metadata, async () => new Response(JSON.stringify({ ...value, registration_client_uri: uri }), { status: 201 }));
+    await unsafe.fetch(metadata.registration_endpoint, { method: 'POST' });
+    assert.equal(unsafe.information(), undefined);
+  }
 });

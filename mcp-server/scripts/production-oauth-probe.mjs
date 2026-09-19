@@ -53,6 +53,35 @@ export function validateServer(raw) {
   return url;
 }
 
+// The SDK validates DCR responses with a schema that strips registration
+// management fields. Preserve only this probe's management credential in memory
+// before that parsing, so cleanup can use the server's authenticated API.
+export function registrationCapture(metadata, fetchFn = fetch) {
+  let registration;
+  return {
+    information: () => registration,
+    fetch: async (input, init) => {
+      const response = await fetchFn(input, init);
+      const config = metadata();
+      const target = input instanceof Request ? input.url : String(input);
+      const method = (init?.method || (input instanceof Request ? input.method : 'GET')).toUpperCase();
+      if (config?.registration_endpoint === target && method === 'POST' && response.status === 201) {
+        const value = await response.clone().json();
+        try {
+          const endpoint = new URL(value.registration_client_uri);
+          if (endpoint.origin === new URL(config.issuer).origin && !endpoint.username && !endpoint.password &&
+              !endpoint.hash && !endpoint.search && typeof value.client_id === 'string' &&
+              typeof value.registration_access_token === 'string' && value.registration_access_token.length <= 16384) {
+            registration = { client_id: value.client_id, registration_client_uri: endpoint.href,
+              registration_access_token: value.registration_access_token };
+          }
+        } catch { /* No safe authenticated cleanup endpoint was supplied. */ }
+      }
+      return response;
+    },
+  };
+}
+
 async function main() {
   const serverUrl = validateServer(process.argv[2]);
   const discoverDomain = process.argv[3];
@@ -60,6 +89,7 @@ async function main() {
   const state = randomBytes(32).toString('base64url');
   const listener = await callbackListener(state);
   let clientInformation, tokens, verifier, discovery, client, transport;
+  const registration = registrationCapture(() => discovery?.authorizationServerMetadata);
   const provider = {
     redirectUrl: listener.redirectUrl,
     clientMetadata: { client_name: 'RedirX production acceptance probe', redirect_uris: [listener.redirectUrl],
@@ -79,14 +109,14 @@ async function main() {
     backend_discover: false, tools: [], refresh_revoked: false, test_client_removed: false };
   try {
     client = new Client({ name: 'redirx-production-acceptance', version: '1' });
-    transport = new StreamableHTTPClientTransport(serverUrl, { authProvider: provider });
+    transport = new StreamableHTTPClientTransport(serverUrl, { authProvider: provider, fetch: registration.fetch });
     try { await client.connect(transport); }
     catch (error) {
       if (!(error instanceof UnauthorizedError)) throw error;
       await transport.finishAuth(await listener.code);
       await client.close();
       client = new Client({ name: 'redirx-production-acceptance', version: '1' });
-      transport = new StreamableHTTPClientTransport(serverUrl, { authProvider: provider });
+      transport = new StreamableHTTPClientTransport(serverUrl, { authProvider: provider, fetch: registration.fetch });
       await client.connect(transport);
     }
     report.native_oauth = Boolean(tokens?.access_token && clientInformation?.client_id);
@@ -107,12 +137,12 @@ async function main() {
       report.discovered_url_count = urls.length;
     }
     const prior = tokens.refresh_token;
-    if (!prior || await auth(provider, { serverUrl }) !== 'AUTHORIZED' || !tokens.refresh_token || tokens.refresh_token === prior) {
+    if (!prior || await auth(provider, { serverUrl, fetchFn: registration.fetch }) !== 'AUTHORIZED' || !tokens.refresh_token || tokens.refresh_token === prior) {
       throw new Error('Refresh did not rotate');
     }
     await client.close();
     client = new Client({ name: 'redirx-production-acceptance-refresh', version: '1' });
-    await client.connect(new StreamableHTTPClientTransport(serverUrl, { authProvider: provider }));
+    await client.connect(new StreamableHTTPClientTransport(serverUrl, { authProvider: provider, fetch: registration.fetch }));
     const refreshedTools = (await client.listTools()).tools.map(tool => tool.name).sort();
     if (JSON.stringify(refreshedTools) !== JSON.stringify(report.tools)) throw new Error('Refreshed capability mismatch');
     report.refresh_reconnect = true;
@@ -139,12 +169,13 @@ async function main() {
         }
       } catch { /* Safe summary below names cleanup status. */ }
     }
-    if (clientInformation?.registration_access_token && sameIssuer(clientInformation.registration_client_uri)) {
+    const management = registration.information();
+    if (management && management.client_id === clientInformation?.client_id && sameIssuer(management.registration_client_uri)) {
       try {
-        const response = await fetch(clientInformation.registration_client_uri, { method: 'DELETE', redirect: 'error',
-          signal: AbortSignal.timeout(10000), headers: { Authorization: `Bearer ${clientInformation.registration_access_token}` } });
-        const check = await fetch(clientInformation.registration_client_uri, { redirect: 'error', signal: AbortSignal.timeout(10000),
-          headers: { Authorization: `Bearer ${clientInformation.registration_access_token}` } });
+        const response = await fetch(management.registration_client_uri, { method: 'DELETE', redirect: 'error',
+          signal: AbortSignal.timeout(10000), headers: { Authorization: `Bearer ${management.registration_access_token}` } });
+        const check = await fetch(management.registration_client_uri, { redirect: 'error', signal: AbortSignal.timeout(10000),
+          headers: { Authorization: `Bearer ${management.registration_access_token}` } });
         report.test_client_removed = response.status === 204 && [401, 404].includes(check.status);
       } catch { /* Safe summary below names cleanup status. */ }
     }

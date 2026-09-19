@@ -211,3 +211,94 @@ test('advance-paid next period does not erase the currently paid period or its q
  assert.equal(prepaid.eligible,true);assert.equal(prepaid.period_id,current.period_id);assert.equal(prepaid.migrations_reserved,1);
  assert.equal((await reserve(prepaid,await scope())).period_id,current.period_id);
 });
+
+//046 runtime coverage follows042 history tests so their earlier fail-closed seam
+// remains explicit, then all execution uses the actual extended production RPCs.
+test('046 installs Studio authority without manufacturing purchase grants',async()=>{
+ await query(await read('../migrations/046_subscription_runtime.sql'));
+});
+const startStudio=(sub,s,client=db)=>rpc('reserve_studio_migration_run',[s.f.user,s.f.id,s.f.old,s.f.new,s.q.quote_id,s.key,sub.subscription_id,null,'test_only',20000,20000],client);
+async function studioJob(sub,s){
+ const queued=await startStudio(sub,s);const job=await one("SELECT * FROM claim_next_job('studio-native',now()+interval '10 minutes')");
+ assert.equal(job.id,queued.session_id);
+ await rpc('authorize_migration_run_dispatch',[job.id,job.mcp_run_id,'studio-native',job.attempt_count,'test_only']);return {queued,job};
+}
+test('Studio queues once without036 payment, native worker completion anchors slot, rerun reuses it',async()=>{
+ const sub=await event('nativeStudio');const s=await scope();const {queued,job}=await studioJob(sub,s);
+ assert.ok(queued.studio_reservation_id);assert.equal(queued.grant_id,null);
+ assert.equal((await one('SELECT count(*)::int n FROM migration_purchase_grants WHERE quote_id=$1',[s.q.quote_id])).n,0);
+ const retry=await startStudio(sub,s);assert.equal(retry.run_id,queued.run_id);assert.equal(retry.replayed,true);
+ await rpc('finalize_migration_run_session',[job.id,job.mcp_run_id,'studio-native',job.attempt_count,'completed',null]);
+ const done=await rpc('get_studio_work_reservation',[A,queued.studio_reservation_id]);assert.equal(done.state,'succeeded');assert.ok(done.first_success_at);
+ const rerun=await scope(501,s.f);const next=await studioJob(sub,rerun);
+ await rpc('finalize_migration_run_session',[next.job.id,next.job.mcp_run_id,'studio-native',next.job.attempt_count,'completed',null]);
+ const again=await rpc('get_studio_work_reservation',[A,next.queued.studio_reservation_id]);assert.equal(again.slot_id,done.slot_id);assert.equal(again.first_success_at,done.first_success_at);
+ assert.equal((await rpc('get_migration_test_subscription',[A,sub.subscription_id])).migrations_reserved,1);
+});
+test('exact worker infrastructure receipt releases once; wrong attempts and invented failures cannot',async()=>{
+ const sub=await event('nativeFailure');const s=await scope();const {queued,job}=await studioJob(sub,s);
+ const args=[job.id,job.mcp_run_id,'studio-native',job.attempt_count,'provider_timeout'];
+ await assert.rejects(rpc('finalize_migration_infrastructure_failure',[...args.slice(0,3),job.attempt_count+1,args[4]]),/operation_conflict/);
+ await assert.rejects(rpc('finalize_migration_infrastructure_failure',[...args.slice(0,4),'user_input']),/invalid_input/);
+ const result=await rpc('finalize_migration_infrastructure_failure',args);assert.equal(result.status,'failed');
+ assert.deepEqual(await rpc('finalize_migration_infrastructure_failure',args),result);
+ assert.equal((await rpc('get_studio_work_reservation',[A,queued.studio_reservation_id])).state,'released');
+ assert.equal((await rpc('get_migration_test_subscription',[A,sub.subscription_id])).migrations_reserved,0);
+ await assert.rejects(query("UPDATE migration_run_failure_receipts SET infrastructure_code='provider_unavailable' WHERE run_id=$1",[job.mcp_run_id]),/immutable/);
+ const ordinary=await scope();const next=await studioJob(sub,ordinary);
+ await rpc('finalize_migration_run_session',[next.job.id,next.job.mcp_run_id,'studio-native',next.job.attempt_count,'permanently_failed','user URL rejected']);
+ await query("UPDATE migration_operations SET result=result||'{\"error\":{\"code\":\"internal_error\"}}'::jsonb WHERE id=$1",[next.queued.operation_id]);
+ await assert.rejects(rpc('release_failed_studio_migration_work',[A,next.queued.studio_reservation_id]),/not_ready/);
+});
+test('revocation between queue and claim prevents Studio dispatch and scope bindings cannot change',async()=>{
+ const sub=await event('nativeRevoke');const s=await scope();const queued=await startStudio(sub,s);
+ await event('nativeRevoke',{status:'revoked',event:'evt_nativeRevokeNow',at:stamp(100)});
+ const job=await one("SELECT * FROM claim_next_job('studio-native',now()+interval '10 minutes')");assert.equal(job.id,queued.session_id);
+ await assert.rejects(rpc('authorize_migration_run_dispatch',[job.id,job.mcp_run_id,'studio-native',job.attempt_count,'test_only']),/payment_required/);
+ await assert.rejects(query('UPDATE migration_runs SET studio_reservation_id=NULL WHERE id=$1',[job.mcp_run_id]),/immutable/);
+ for(const name of ['anon','authenticated'])await role(name,A,()=>assert.rejects(startStudio(sub,s),/permission denied/));
+});
+test('046 reapplication retains immutable runtime receipts',async()=>{
+ const before=await one('SELECT count(*)::int n FROM migration_run_failure_receipts');await query(await read('../migrations/046_subscription_runtime.sql'));
+ assert.deepEqual(await one('SELECT count(*)::int n FROM migration_run_failure_receipts'),before);
+});
+
+test('signed webhook + retrieved mocked provider objects persist real subscription and complete actual Studio run',async()=>{
+ const {execFile}=await import('node:child_process');const {promisify}=await import('node:util');
+ const f=await fixture(501);const q=await quote(f,'signedprovider');const cp=db.connectionParameters;
+ const python=process.env.SUBSCRIPTION_TEST_PYTHON;
+ assert.ok(python,'Set SUBSCRIPTION_TEST_PYTHON to the installed app interpreter for real webhook→SQL acceptance');
+ const {stdout}=await promisify(execFile)(python,['-B','-m','backend.tests.subscription_runtime_probe'],{cwd:new URL('../../',import.meta.url),env:{...process.env,
+  MCP_PIVOT_ENABLED:'true',MCP_PIVOT_ACTIVATION:'test_only',
+  SUBSCRIPTION_FIXTURE_CONNECTION:JSON.stringify({host:cp.host,port:cp.port,dbname:cp.database,user:cp.user,password:cp.password}),
+  SUBSCRIPTION_FIXTURE_SCOPE:JSON.stringify({user:A,migration_id:f.id,old:f.old,new:f.new,quote_id:q.quote_id})}});
+ const result=JSON.parse(stdout);assert.equal(result.completed,true);assert.equal(result.replayed,true);
+ assert.equal((await one('SELECT count(*)::int n FROM migration_purchase_grants WHERE quote_id=$1',[q.quote_id])).n,0);
+ assert.equal((await one('SELECT count(*)::int n FROM migration_test_subscription_periods WHERE subscription_id=$1',[result.subscription_id])).n,1);
+});
+test('out-of-order verified refund revokes despite a newer active event and cannot resurrect',async()=>{
+ const sub=await event('lateRefund',{at:stamp(0)});
+ const revoked=await event('lateRefund',{status:'revoked',event:'evt_lateRefundOlder',at:stamp(-5000)});assert.equal(revoked.status,'revoked');
+ const again=await event('lateRefund',{event:'evt_lateRefundNewer',at:stamp(100)});assert.equal(again.status,'revoked');
+ await assert.rejects(startStudio(sub,await scope()),/payment_required/);
+});
+test('concurrent native Studio retries create exactly one session and final quota remains bounded',async()=>{
+ const sub=await event('nativeConcurrent');const scopes=[];for(let i=0;i<4;i++){const s=await scope();scopes.push(s);await startStudio(sub,s);}
+ const last=await scope();await query('BEGIN');const queued=await startStudio(sub,last);
+ const retry=startStudio(sub,last,second);await query('COMMIT');assert.equal((await retry).session_id,queued.session_id);
+ assert.equal((await one('SELECT count(*)::int n FROM migration_runs WHERE operation_id=$1',[queued.operation_id])).n,1);
+ const sixth=await scope();await assert.rejects(startStudio(sub,sixth),/allowance_exhausted/);
+ assert.equal((await one('SELECT count(*)::int n FROM migration_runs WHERE operation_id=$1',[sixth.op.operation_id])).n,0);
+ assert.equal((await rpc('get_migration_test_subscription',[A,sub.subscription_id])).migrations_reserved,5);
+});
+test('native Studio runs and immutable failure receipts cascade on account deletion',async()=>{
+ const owner='10000000-0000-0000-0000-000000000006';await query('INSERT INTO auth.users(id) VALUES($1)',[owner]);await query('INSERT INTO user_profiles(id) VALUES($1)',[owner]);
+ const sub=await event('runtimeDelete',{user:owner});const s=await scope(501,await fixture(501,2,owner));const queued=await startStudio(sub,s);
+ // Drain earlier queued fixtures through native claim; do not weaken production triggers.
+ let job;do{job=await one("SELECT * FROM claim_next_job('cascade-worker',now()+interval '10 minutes')");assert.ok(job.id);}while(job.id!==queued.session_id);
+ await rpc('authorize_migration_run_dispatch',[job.id,job.mcp_run_id,'cascade-worker',job.attempt_count,'test_only']);
+ await rpc('finalize_migration_infrastructure_failure',[job.id,job.mcp_run_id,'cascade-worker',job.attempt_count,'provider_unavailable']);
+ await query('DELETE FROM auth.users WHERE id=$1',[owner]);
+ assert.equal((await one('SELECT count(*)::int n FROM migration_run_failure_receipts WHERE run_id=$1',[queued.run_id])).n,0);
+ assert.equal((await one('SELECT count(*)::int n FROM migration_runs WHERE user_id=$1',[owner])).n,0);
+});

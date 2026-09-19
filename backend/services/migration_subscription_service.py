@@ -192,3 +192,104 @@ class MigrationSubscriptionService:
     def get_monitoring_site(self, user_id, slot_id):
         return self._rpc('get_subscription_monitoring_site', {'p_user_id': _uuid(user_id, 'user_id'),
             'p_slot_id': _uuid(slot_id, 'slot_id')}, 'site')
+
+    def _run_rpc(self, name, params):
+        try:
+            response = self.repository.client.rpc(name, params).execute()
+            if getattr(response, 'error', None):
+                raise response.error
+        except Exception as exc:
+            code = str(getattr(exc, 'message', '') or str(exc))
+            if str(getattr(exc, 'code', '')) == 'P0001':
+                errors = {'not_found': MigrationNotFoundError, 'operation_conflict': OperationConflictError,
+                    'payment_required': SubscriptionPaymentRequiredError, 'allowance_exhausted': SubscriptionAllowanceExhaustedError,
+                    'invalid_input': InvalidInputError, 'not_ready': SubscriptionNotReadyError,
+                    'custom_quote_required': SubscriptionCustomQuoteRequiredError}
+                if code in errors:
+                    raise errors[code]('The Studio run could not be completed.') from None
+                from .migration_quote_service import _ERRORS
+                if code in _ERRORS:
+                    error_type, message = _ERRORS[code]
+                    raise error_type(message) from None
+                if code == 'capacity_exceeded':
+                    from .inventory_import_service import ImportCapacityExceededError
+                    raise ImportCapacityExceededError('The inventory exceeds configured processing capacity.') from None
+            raise RepositoryUnavailableError('Studio execution storage is temporarily unavailable.') from None
+        value = getattr(response, 'data', None)
+        if isinstance(value, list):
+            value = value[0] if len(value) == 1 else None
+        try:
+            if not isinstance(value, Mapping):
+                raise ValueError()
+            result = {k: value[k] for k in ('migration_id', 'operation_id', 'run_id', 'session_id', 'status')}
+            for key in ('migration_id', 'operation_id', 'run_id', 'session_id'):
+                _uuid(result[key], key)
+            if result['status'] not in {'queued', 'running', 'succeeded', 'failed'}:
+                raise ValueError()
+            if name == 'reserve_studio_migration_run':
+                for field in ('studio_reservation_id', 'quote_id', 'inventory_ids', 'rerun_of', 'replayed'):
+                    result[field] = value[field]
+                _uuid(result['studio_reservation_id'], 'studio_reservation_id')
+                if (result['migration_id'] != params['p_migration_id'] or result['quote_id'] != params['p_quote_id']
+                        or result['inventory_ids'] != {'old': params['p_old_inventory_id'], 'new': params['p_new_inventory_id']}
+                        or result['rerun_of'] != params['p_rerun_of'] or type(result['replayed']) is not bool
+                        or value.get('grant_id') is not None):
+                    raise ValueError()
+            elif result['run_id'] != params['p_run_id'] or result['session_id'] != params['p_session_id']:
+                raise ValueError()
+            return result
+        except (KeyError, TypeError, ValueError, InvalidInputError):
+            raise RepositoryUnavailableError('Studio execution returned an invalid binding.') from None
+
+    def start_studio_run(self, user_id, subscription_id, migration_id, old_inventory_id,
+                         new_inventory_id, quote_id, idempotency_key, *, rerun_of=None):
+        """Atomically reserve allowance and queue the exact native content operation."""
+        import os
+        from .job_limits import CONTENT_MAX_OLD_URLS, CONTENT_MAX_NEW_URLS
+        if os.getenv('MCP_PIVOT_ENABLED', 'false').lower() != 'true' or os.getenv('MCP_PIVOT_ACTIVATION') != 'test_only':
+            raise SubscriptionNotReadyError('Test-only Studio dispatch is not enabled.')
+        return self._run_rpc('reserve_studio_migration_run', {
+            'p_user_id': _uuid(user_id, 'user_id'), 'p_subscription_id': _uuid(subscription_id, 'subscription_id'),
+            'p_migration_id': _uuid(migration_id, 'migration_id'), 'p_old_inventory_id': _uuid(old_inventory_id, 'old_inventory_id'),
+            'p_new_inventory_id': _uuid(new_inventory_id, 'new_inventory_id'), 'p_quote_id': _uuid(quote_id, 'quote_id'),
+            'p_idempotency_key': validate_key(idempotency_key), 'p_rerun_of': _uuid(rerun_of, 'rerun_of') if rerun_of else None,
+            'p_activation': 'test_only', 'p_max_old_urls': CONTENT_MAX_OLD_URLS, 'p_max_new_urls': CONTENT_MAX_NEW_URLS,
+        })
+
+    def finalize_worker_failure(self, job, worker_id, error):
+        """Trusted worker hook; pass the original exception, never user error text.
+
+        Only typed model-provider or qualified PostgreSQL availability failures
+        release capacity. Target-site HTTP/network failures remain ordinary failures.
+        Call only after the existing worker has exhausted its retry policy.
+        """
+        if not isinstance(job, Mapping) or not isinstance(worker_id, str) or not worker_id:
+            raise InvalidInputError('An owned worker attempt is required.')
+        attempt = job.get('attempt_count')
+        if type(attempt) is not int or attempt < 1:
+            raise InvalidInputError('An owned worker attempt is required.')
+        params = {'p_session_id': _uuid(job.get('id'), 'session_id'),
+                  'p_run_id': _uuid(job.get('mcp_run_id'), 'run_id'),
+                  'p_worker_id': worker_id, 'p_attempt_count': attempt}
+        code = classify_migration_infrastructure_error(error)
+        if code:
+            return self._run_rpc('finalize_migration_infrastructure_failure', {**params, 'p_infrastructure_code': code})
+        return self._run_rpc('finalize_migration_run_session', {**params, 'p_status': 'permanently_failed',
+                                                               'p_error': 'migration_processing_failed'})
+
+
+def classify_migration_infrastructure_error(error):
+    """Closed allowlist of infrastructure types, not text or generic timeouts."""
+    import openai
+    if isinstance(error, openai.APITimeoutError):
+        return 'provider_timeout'
+    if isinstance(error, (openai.APIConnectionError, openai.InternalServerError)):
+        return 'provider_unavailable'
+    try:
+        import psycopg
+        if isinstance(error, psycopg.OperationalError) and (
+                str(error.sqlstate or '').startswith(('08', '53')) or error.sqlstate == '57P01'):
+            return 'storage_unavailable'
+    except ImportError:
+        pass
+    return None

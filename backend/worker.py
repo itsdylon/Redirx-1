@@ -549,6 +549,7 @@ class RedirxWorker:
         pipeline_type = job.get('pipeline_type', 'content')
         is_preview = bool(job.get('is_preview', False))
         pivot_service = MigrationRunService() if job.get('mcp_run_id') else None
+        pivot_migration_id = None
 
         async def finish(status, error=None):
             if pivot_service is not None:
@@ -569,7 +570,8 @@ class RedirxWorker:
 
         try:
             if pivot_service is not None:
-                pivot_service.authorize_dispatch(job, self.worker_id)
+                authorization = pivot_service.authorize_dispatch(job, self.worker_id)
+                pivot_migration_id = authorization.get('migration_id')
 
             # Get URLs from job
             old_urls = job.get('old_urls', [])
@@ -732,6 +734,7 @@ class RedirxWorker:
                                 session_id=str(session_id),
                                 old_site_domain=old_domain,
                                 new_site_domain=new_domain,
+                                migration_id=pivot_migration_id,
                             )
                 except Exception:
                     print(f"[Worker] Completion email failed (non-blocking)")
@@ -779,6 +782,7 @@ class RedirxWorker:
                                     project_name=project_name,
                                     error_summary=str(e),
                                     session_id=str(session_id),
+                                    migration_id=pivot_migration_id,
                                 )
                     except Exception:
                         print(f"[Worker] Failure email failed (non-blocking)")

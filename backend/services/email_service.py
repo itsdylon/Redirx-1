@@ -7,6 +7,7 @@ This ensures email failures never block critical paths (login, job processing, e
 
 import logging
 import os
+from urllib.parse import quote
 from typing import Optional, Dict, Any
 
 import resend
@@ -138,7 +139,7 @@ class EmailService:
             to_email=to_email,
             email_type=EmailType.WELCOME,
             subject="Welcome to Redirx",
-            template_name="welcome.html",
+            template_name="pivot_welcome.html" if os.getenv('MCP_PIVOT_ENABLED', 'false').lower() == 'true' else "welcome.html",
             context={"user_name": user_name},
         )
 
@@ -151,14 +152,18 @@ class EmailService:
         session_id: str,
         old_site_domain: str = "",
         new_site_domain: str = "",
+        migration_id: Optional[str] = None,
     ) -> Optional[str]:
+        pivot = os.getenv('MCP_PIVOT_ENABLED', 'false').lower() == 'true'
         return self.send_email(
             user_id=user_id,
             to_email=to_email,
             email_type=EmailType.MAPPING_COMPLETE,
-            subject=f"Your redirects are ready — {project_name}",
-            template_name="mapping_complete.html",
+            subject=f"{'Matching complete' if pivot else 'Your redirects are ready'} — {project_name}",
+            template_name="pivot_mapping_update.html" if pivot else "mapping_complete.html",
             context={
+                "completed": True,
+                "result_path": '/migrations/' + quote(str(migration_id), safe='') if migration_id else '/review/' + quote(str(session_id), safe=''),
                 "project_name": project_name,
                 "total_mappings": total_mappings,
                 "session_id": session_id,
@@ -222,14 +227,17 @@ class EmailService:
         project_name: str,
         error_summary: str = "",
         session_id: str = "",
+        migration_id: Optional[str] = None,
     ) -> Optional[str]:
         return self.send_email(
             user_id=user_id,
             to_email=to_email,
             email_type=EmailType.MAPPING_FAILED,
             subject=f"Mapping job failed — {project_name}",
-            template_name="mapping_failed.html",
+            template_name="pivot_mapping_update.html" if os.getenv('MCP_PIVOT_ENABLED', 'false').lower() == 'true' else "mapping_failed.html",
             context={
+                "completed": False,
+                "result_path": '/migrations/' + quote(str(migration_id), safe='') if migration_id else '/review/' + quote(str(session_id), safe=''),
                 "project_name": project_name,
                 "error_summary": error_summary[:500] if error_summary else "",
                 "session_id": session_id,
@@ -237,6 +245,10 @@ class EmailService:
         )
 
     def send_nudge(self, user_id: str, to_email: str, day: int) -> Optional[str]:
+        # These messages teach the retired upload funnel. Preserve delivery
+        # history and legacy behavior without sending them in pivot mode.
+        if os.getenv('MCP_PIVOT_ENABLED', 'false').lower() == 'true':
+            return None
         template_map = {1: "nudge_day1.html", 3: "nudge_day3.html", 7: "nudge_day7.html"}
         subject_map = {
             1: "Quick tip: upload your first CSV",

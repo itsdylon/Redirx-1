@@ -1,0 +1,10 @@
+{% extends "_base.html" %}
+{% block title %}{{ 'Matching complete' if completed else 'Matching needs attention' }}{% endblock %}
+{% block content %}
+<h2 style="margin:0 0 16px;font-size:22px;color:#18181b;">{{ 'Matching complete' if completed else 'Matching needs attention' }}</h2>
+<p style="font-size:15px;line-height:1.6;color:#52525b;"><strong>{{ project_name }}</strong>
+{% if completed %}has {{ total_mappings }} mapping results. Review unresolved destinations before exporting. Redirects are not installed or verified yet.
+{% else %}could not finish matching after its retry attempts. Open the migration for its current status and recovery options.
+{% endif %}</p>
+<p style="font-size:15px;line-height:1.6;"><a href="{{ app_url }}{{ result_path }}" style="color:#166534;">Open migration results</a></p>
+{% endblock %}

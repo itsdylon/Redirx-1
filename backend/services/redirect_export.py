@@ -18,6 +18,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import re
 from collections.abc import Mapping
 from typing import Any, Iterable, Optional
 from urllib.parse import urlparse, urlunparse
@@ -81,6 +82,10 @@ class ExportSelectionError(ValueError):
     """A mapping cannot be safely represented as a redirect rule."""
 
 
+class UnsupportedExportInput(ExportSelectionError):
+    """The selected platform cannot faithfully represent a mapping."""
+
+
 def _safe_url(value: Any) -> Optional[str]:
     if not isinstance(value, str) or not value.strip():
         return None
@@ -88,7 +93,10 @@ def _safe_url(value: Any) -> Optional[str]:
     if (any(ord(char) < 0x20 or ord(char) == 0x7F or char == "\\" for char in value)
             or any(char.isspace() for char in value)):
         return None
-    parsed = urlparse(value)
+    try:
+        parsed = urlparse(value)
+    except ValueError:
+        return None
     if parsed.scheme or parsed.netloc:
         if (parsed.scheme.lower() not in {"http", "https"} or not parsed.netloc
                 or parsed.username is not None or parsed.password is not None):
@@ -117,13 +125,33 @@ def _url_key(value: str) -> str:
     ))
 
 
+def _apache_literal(value: str) -> str:
+    return value.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def _nginx_literal(value: str) -> str:
+    return value.replace("\\", "\\\\").replace('"', '\\"').replace("$", "\\$")
+
+
+def _regex_path(value: str) -> str:
+    parsed = urlparse(value)
+    return re.escape(parsed.path or "/") if parsed.netloc else re.escape(value)
+
+
 def _decision_exclusion(row: Mapping[str, Any]) -> Optional[str]:
     states = {
         str(row.get(field, "")).strip().lower()
         for field in ("status", "decision", "state", "mapping_status")
         if row.get(field) is not None
     }
-    if states & {"held", "rejected", "pending", "needs_review", "unresolved"}:
+    actions = {
+        str(row.get(field, "")).strip().lower()
+        for field in ("action", "decision_action")
+        if row.get(field) is not None
+    }
+    if (states & {"held", "rejected", "pending", "needs_review", "unresolved",
+                  "intentional_removal", "defer"}
+            or actions & {"intentional_removal", "defer", "reject", "held"}):
         return "held_or_rejected"
     if row.get("approved") is False or row.get("validated") is False:
         return "held_or_rejected"
@@ -132,14 +160,35 @@ def _decision_exclusion(row: Mapping[str, Any]) -> Optional[str]:
     return None
 
 
+def _effective_url(value: str, fallback_domain: Optional[str] = None) -> str:
+    parsed = urlparse(value)
+    if parsed.scheme or parsed.netloc or not fallback_domain:
+        return value
+    return rehost(value, fallback_domain)
+
+
+def _comparison_pair(old_url: str, new_url: str, old_domain: Optional[str],
+                     new_domain: Optional[str]) -> tuple[str, str]:
+    effective_old = _effective_url(old_url, old_domain)
+    fallback = new_domain or (
+        f"{urlparse(effective_old).scheme}://{urlparse(effective_old).netloc}"
+        if urlparse(effective_old).netloc else None
+    )
+    effective_new = _effective_url(new_url, fallback)
+    if not urlparse(effective_old).netloc and urlparse(effective_new).netloc:
+        effective_old = _effective_url(old_url, f"{urlparse(effective_new).scheme}://{urlparse(effective_new).netloc}")
+    return effective_old, effective_new
+
+
 def _render_pair(old_url: str, new_url: str, url_format: str,
                  old_domain: Optional[str], new_domain: Optional[str]) -> tuple[str, str]:
     old = _transform(old_url, url_format, old_domain)
     new = _transform(new_url, url_format, new_domain)
-    if url_format == "paths" and _origin(old_url) != _origin(new_url):
+    effective_old, effective_new = _comparison_pair(old_url, new_url, old_domain, new_domain)
+    if url_format == "paths" and _origin(effective_old) != _origin(effective_new):
         # A path-only source can still redirect to another host.  Dropping the
         # destination origin would turn a domain move into an internal link.
-        new = _transform(new_url, "full", new_domain)
+        new = rehost(new_url, new_domain) if new_domain and not urlparse(new_url).netloc else _transform(new_url, "full", new_domain)
     return old, new
 
 
@@ -178,7 +227,8 @@ def select_export_mappings(
         if decision_reason:
             exclusions.append({"index": index, "reason": decision_reason})
             continue
-        if _url_key(old_url) == _url_key(new_url):
+        effective_old, effective_new = _comparison_pair(old_url, new_url, old_domain, new_domain)
+        if _url_key(effective_old) == _url_key(effective_new):
             exclusions.append({"index": index, "reason": "no_op"})
             continue
         old_rendered, new_rendered = _render_pair(old_url, new_url, url_format, old_domain, new_domain)
@@ -189,7 +239,20 @@ def select_export_mappings(
             "new_url": new_url,
             "old_rendered": old_rendered,
             "new_rendered": new_rendered,
+            "effective_old": effective_old,
+            "effective_new": effective_new,
         })
+
+    unique: list[dict[str, Any]] = []
+    seen_rules: set[tuple[str, str]] = set()
+    for item in candidates:
+        rule_key = (item["old_rendered"], item["new_rendered"])
+        if rule_key in seen_rules:
+            exclusions.append({"index": item["index"], "reason": "duplicate_rule"})
+        else:
+            seen_rules.add(rule_key)
+            unique.append(item)
+    candidates = unique
 
     by_source: dict[str, list[dict[str, Any]]] = {}
     for candidate in candidates:
@@ -205,19 +268,25 @@ def select_export_mappings(
 
     # Exclude only actual cycles.  A chain is not silently rewritten; its
     # explicit rules remain inspectable and can be verified independently.
-    edges = {_url_key(item["old_url"]): _url_key(item["new_url"]) for item in kept}
+    edges = {_url_key(item["effective_old"]): _url_key(item["effective_new"]) for item in kept}
     cycle_nodes: set[str] = set()
+    state: dict[str, int] = {}
     for start in edges:
         path: list[str] = []
+        positions: dict[str, int] = {}
         current = start
-        while current in edges and current not in path:
+        while current in edges and state.get(current, 0) == 0:
+            state[current] = 1
+            positions[current] = len(path)
             path.append(current)
             current = edges[current]
-        if current in path:
-            cycle_nodes.update(path[path.index(current):])
+        if state.get(current) == 1 and current in positions:
+            cycle_nodes.update(path[positions[current]:])
+        for node in path:
+            state[node] = 2
     selected: list[dict[str, Any]] = []
     for item in kept:
-        if _url_key(item["old_url"]) in cycle_nodes:
+        if _url_key(item["effective_old"]) in cycle_nodes:
             exclusions.append({"index": item["index"], "reason": "redirect_loop"})
         else:
             selected.append(item)
@@ -244,7 +313,8 @@ def to_path(url: str) -> str:
         return url
     if not parsed.scheme or not parsed.netloc:
         return url
-    return parsed.path or "/"
+    path = parsed.path or "/"
+    return f"{path}?{parsed.query}" if parsed.query else path
 
 
 def rehost(url: str, domain: str) -> str:
@@ -331,15 +401,43 @@ def build_export(
     """
     if fmt not in FORMATS:
         raise UnknownExportFormat(fmt)
+    if fmt in PATH_ONLY_FORMATS and url_format != "paths":
+        raise UnsupportedExportInput(
+            f"{fmt} requires url_format='paths' for an exact, deployable source rule."
+        )
 
-    pairs = _pairs(mappings, url_format, old_domain, new_domain)
+    selection = select_export_mappings(
+        mappings,
+        url_format=url_format,
+        old_domain=old_domain,
+        new_domain=new_domain,
+    )
+    selected = selection["mappings"]
+    if fmt in PATH_ONLY_FORMATS and any(urlparse(item["effective_old"]).query for item in selected):
+        raise UnsupportedExportInput(
+            "This platform cannot express query-sensitive source rules safely."
+        )
+    pairs = [
+        (item["old_rendered"], item["new_rendered"])
+        for item in selected
+    ]
 
     if fmt == APACHE:
-        return "\n".join(f"Redirect 301 {old} {new}" for old, new in pairs)
+        return "\n".join(
+            f'RedirectMatch 301 "^{_apache_literal(_regex_path(item["old_rendered"]))}$" '
+            f'"{_apache_literal(item["new_rendered"])}"'
+            for item in selected
+        )
 
     if fmt == NGINX:
-        body = "\n".join(f"    {old} {new};" for old, new in pairs)
-        return "map $uri $new_uri {\n" + body + ("\n" if body else "") + "}"
+        if not selected:
+            return "# No redirect rules generated."
+        body = "\n".join(
+            f'location = "{_nginx_literal(item["old_rendered"])}" {{ '
+            f'return 301 "{_nginx_literal(item["new_rendered"])}"; }}'
+            for item in selected
+        )
+        return "# Include inside the target server block.\n" + body
 
     if fmt == WORDPRESS:
         return _csv_rows([], [[old, new, "301"] for old, new in pairs])

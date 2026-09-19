@@ -9,6 +9,7 @@ import json
 import os
 import sys
 import unittest
+from time import monotonic
 
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
 sys.path.insert(0, BASE_DIR)
@@ -24,7 +25,7 @@ ROWS = [
 
 class TestPathHandling(unittest.TestCase):
     def test_absolute_url_reduces_to_path(self):
-        self.assertEqual(rx.to_path("https://e.com/a/b?x=1"), "/a/b")
+        self.assertEqual(rx.to_path("https://e.com/a/b?x=1"), "/a/b?x=1")
 
     def test_bare_path_survives_untouched(self):
         # Rows can already be paths; mangling them would break the file.
@@ -50,20 +51,20 @@ class TestFormats(unittest.TestCase):
     def test_apache(self):
         out = rx.build_export(ROWS, rx.APACHE)
         self.assertEqual(
-            out.splitlines()[0], "Redirect 301 /about-us https://new.example.com/company/about"
+            out.splitlines()[0],
+            'RedirectMatch 301 "^/about\\\\-us$" "https://new.example.com/company/about"',
         )
 
     def test_nginx_is_a_closed_map_block(self):
         out = rx.build_export(ROWS, rx.NGINX)
         lines = out.splitlines()
-        self.assertEqual(lines[0], "map $uri $new_uri {")
-        self.assertEqual(lines[-1], "}")
-        self.assertIn("    /pricing https://new.example.com/plans;", lines)
+        self.assertEqual(lines[0], "# Include inside the target server block.")
+        self.assertIn('location = "/pricing" { return 301 "https://new.example.com/plans"; }', lines)
 
     def test_nginx_with_no_rows_still_closes_the_block(self):
         # An unclosed map block is a config file nginx refuses to start with.
         out = rx.build_export([], rx.NGINX)
-        self.assertEqual(out, "map $uri $new_uri {\n}")
+        self.assertEqual(out, "# No redirect rules generated.")
 
     def test_wordpress_rows_carry_the_status(self):
         out = rx.build_export(ROWS, rx.WORDPRESS)
@@ -101,8 +102,8 @@ class TestFormats(unittest.TestCase):
 
 class TestUrlFormat(unittest.TestCase):
     def test_full_keeps_absolute_urls(self):
-        out = rx.build_export(ROWS, rx.APACHE, url_format="full")
-        self.assertIn("https://old.example.com/about-us", out)
+        with self.assertRaises(rx.UnsupportedExportInput):
+            rx.build_export(ROWS, rx.APACHE, url_format="full")
 
     def test_paths_is_the_default(self):
         # Most targets match on the request path, and an agent has nobody to
@@ -144,7 +145,7 @@ class TestSafeSelection(unittest.TestCase):
         out = rx.build_export([
             {"old_url": "https://old.example/a", "new_url": "https://new.example/a"},
         ], rx.APACHE)
-        self.assertEqual(out, "Redirect 301 /a https://new.example/a")
+        self.assertEqual(out, 'RedirectMatch 301 "^/a$" "https://new.example/a"')
 
     def test_noops_and_held_or_rejected_rows_are_excluded(self):
         selection = rx.select_export_mappings([
@@ -187,6 +188,69 @@ class TestSafeSelection(unittest.TestCase):
         ], rx.JSON_FORMAT))
         self.assertEqual(parsed[0]["from"], "/\"q")
 
+    def test_malformed_ipv6_is_an_exclusion(self):
+        result = rx.select_export_mappings([
+            {"old_url": "https://[broken/a", "new_url": "/new"},
+            {"old_url": "/old", "new_url": "https://[broken"},
+        ])
+        self.assertEqual(result["included_count"], 0)
+        self.assertEqual(result["excluded_count"], 2)
+
+    def test_duplicate_rules_are_deduplicated_and_accounted_for(self):
+        result = rx.select_export_mappings([
+            {"old_url": "/a", "new_url": "/b"},
+            {"old_url": "/a", "new_url": "/b", "id": "duplicate"},
+        ])
+        self.assertEqual(result["included_count"], 1)
+        self.assertEqual(result["excluded"], [{"index": 1, "reason": "duplicate_rule"}])
+
+    def test_mixed_absolute_relative_forms_use_effective_origin(self):
+        result = rx.select_export_mappings([
+            {"old_url": "https://old.example/a", "new_url": "/a"},
+        ])
+        self.assertEqual(result["included_count"], 0)
+        result = rx.select_export_mappings([
+            {"old_url": "/a", "new_url": "/b"},
+        ], old_domain="https://old.example", new_domain="https://new.example")
+        self.assertEqual(result["mappings"][0]["new_rendered"], "https://new.example/b")
+
+    def test_decision_actions_are_excluded(self):
+        rows = [
+            {"old_url": f"/a{index}", "new_url": f"/b{index}", "action": action}
+            for index, action in enumerate(("intentional_removal", "defer", "reject"))
+        ]
+        result = rx.select_export_mappings(rows)
+        self.assertEqual(result["included_count"], 0)
+        self.assertEqual(result["excluded_count"], 3)
+
+    def test_large_chain_cycle_scan_is_linear_enough(self):
+        count = 15_000
+        rows = [
+            {"old_url": f"/chain/{index}", "new_url": f"/chain/{index + 1}"}
+            for index in range(count)
+        ]
+        started = monotonic()
+        result = rx.select_export_mappings(rows)
+        elapsed = monotonic() - started
+        self.assertEqual(result["included_count"], count)
+        self.assertLess(elapsed, 1.0)
+
+    def test_query_sensitive_path_exports_fail_explicitly(self):
+        with self.assertRaises(rx.UnsupportedExportInput):
+            rx.build_export([
+                {"old_url": "https://old.example/a?x=1", "new_url": "/b"},
+            ], rx.NGINX)
+
+    def test_config_escaping_is_not_raw_interpolation(self):
+        apache = rx.build_export([
+            {"old_url": "/a;\"$", "new_url": "https://new.example/b;\"$"},
+        ], rx.APACHE)
+        self.assertIn('\\"', apache)
+        nginx = rx.build_export([
+            {"old_url": "/a$", "new_url": "https://new.example/b$"},
+        ], rx.NGINX)
+        self.assertIn("\\$", nginx)
+
 
 class TestRobustness(unittest.TestCase):
     def test_rows_missing_a_side_are_skipped(self):
@@ -198,7 +262,7 @@ class TestRobustness(unittest.TestCase):
         out = rx.build_export(
             [{"oldUrl": "https://o.com/a", "newUrl": "https://n.com/b"}], rx.APACHE
         )
-        self.assertEqual(out, "Redirect 301 /a https://n.com/b")
+        self.assertEqual(out, 'RedirectMatch 301 "^/a$" "https://n.com/b"')
 
     def test_commas_in_urls_are_quoted_not_corrupted(self):
         # String-joined CSV would produce an extra column here.

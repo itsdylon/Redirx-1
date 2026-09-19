@@ -182,3 +182,21 @@ Python peaks exclude the actual external provider's SDK response characteristics
 and other concurrent jobs. The synthetic provider supplies real-size vectors;
 it does not prove deployed network latency, rate limits, or provider memory.
 No feature flag or production setting is changed by these source defaults.
+
+## Native full-inventory admission and fenced tail writes
+
+Migration 050 now checks exact run inventory membership through the existing
+inventory URL index, avoiding repeated copying and linear scans of the queued
+35,000-URL JSON arrays. Lease/attempt locking and public RPC interfaces are
+unchanged. The private helper is not callable by anon or authenticated roles.
+
+`measure_guarded_writes.py` creates an actual owned 15,000-old/20,000-new migration,
+imports complete inventories, quotes it, records verified fixture payment,
+reserves and claims its native run, authorizes dispatch, and persists 100 tail
+embeddings through 050. Setup took 2.615 seconds and 100 writes took 1.688 seconds
+with a fresh connection per RPC. Membership-only comparison took 11.431 ms for
+100 JSON-array checks versus 0.160 ms using the inventory index; this microbenchmark
+is not an equivalent speedup of the complete write path. All 18 native run,
+worker, and fencing tests pass after this change, including independent-connection
+retries and expired/reclaimed-worker rejection. The native fixture uses JSONB
+embedding storage; actual pgvector capacity is verified separately.

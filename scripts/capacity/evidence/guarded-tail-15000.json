@@ -1,0 +1,10 @@
+{
+  "setup_seconds": 2.615,
+  "old_urls": 15000,
+  "new_urls": 20000,
+  "guarded_insert_count": 100,
+  "guarded_insert_seconds": 1.688,
+  "array_membership_100_ms": 11.431,
+  "indexed_membership_100_ms": 0.16,
+  "limitations": "native PostgreSQL actual owned paid test grant/run; JSONB embedding storage because local server has no pgvector; each fenced RPC uses a fresh connection"
+}

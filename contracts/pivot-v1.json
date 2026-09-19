@@ -19,6 +19,8 @@
     "included_verifications": 1,
     "paid_monitoring_days": 30,
     "monitoring_anchor": "deployment_confirmed_at",
+    "monitoring_activation_max_delay_days": 90,
+    "monitoring_activation_deadline_anchor": "purchase_at",
     "monitoring_monthly_cents": 2900,
     "automatic_monitoring_renewal": false,
     "studio": {
@@ -30,10 +32,7 @@
     },
     "agency": { "pricing": "custom_grant" },
     "unresolved_launch_choices": [
-      "Confirm the provisional 500-page free ceiling",
-      "Confirm Studio self-serve coverage through 15000 old pages",
       "Set validated new-site technical capacity independently of price",
-      "Set maximum delay before included monitoring activation",
       "Set transparent free-use abuse limits and verification retry policy"
     ]
   },

@@ -281,6 +281,14 @@ class MonitoringTests(unittest.TestCase):
   self.assertEqual(expired['data']['state'],'expired');self.assertEqual(expired['next_action'],'complete_payment')
   with self.assertRaises(VerificationEntitlementError):self.manage(second,str(old),'resume')
 
+ def test_activation_deadline_uses_purchase_not_first_success(self):
+  d=self.deployment(501,installed=False)
+  result=self.begin(d)
+  row=self.sql('''SELECT m.activation_deadline=g.created_at+interval '90 days' AS purchase_anchored
+   FROM migration_monitors m JOIN migration_purchase_grants g ON g.id=m.included_grant_id
+   WHERE m.id=%s''',[result['data']['monitoring_id']])[0]
+  self.assertTrue(row['purchase_anchored'])
+
  def test_ambiguous_old_alert_is_not_resent_and_unverified_contact_is_suppressed(self):
   d=self.deployment();sub,_=self.sub();mid=self.begin(d,sub)['data']['monitoring_id']
   self.finish_sweep({1:('failed','wrong_target')})

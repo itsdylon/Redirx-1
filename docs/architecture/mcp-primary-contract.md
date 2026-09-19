@@ -130,7 +130,9 @@ POST deployment confirmation. These resources share the same envelope/auth rules
 
 ## Commercial defaults and launch gates
 
-The JSON policy uses proposed 500-free/$49/$99/$199 bands on old pages only.
+The JSON policy uses 500-free/$49/$99/$199 bands on old pages only.
+The owner confirmed the 500-page free ceiling and activation of included monitoring
+within 90 days of purchase on 2026-09-19. Studio's 15,000-page cap was also confirmed.
 Small sites get full quality, export and one post-launch check. Paid migrations
 include 30 rerun days from the first successful paid run and 30 monitoring days
 from explicit deployment confirmation. Clocks are immutable; no implicit paid
@@ -138,10 +140,10 @@ renewal. Requotes for growth/new scope are explicit. Purchased artifact download
 outlive the rerun window. Studio's five migration slots use the billing period;
 monitoring slots measure concurrent sites. Reruns/downloads don't consume slots.
 
-Unresolved launch choices remain enumerated in the shared JSON. In particular the
-landing's “every site size included” Studio line conflicts with custom pricing
-above 15,000. The implementation default is self-serve through 15,000, not an
-approved unlimited promise. These choices do not block test-mode implementation.
+Unresolved capacity and abuse-control choices remain enumerated in the shared JSON.
+Studio supports self-serve migrations through 15,000 old pages; larger migrations
+require a custom quote. Confirmed commercial terms do not by themselves activate
+live billing: provider and combined workflow acceptance remain release gates.
 
 ## Verification and release boundary
 

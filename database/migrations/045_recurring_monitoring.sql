@@ -169,7 +169,7 @@ BEGIN
    END IF;
    INSERT INTO migration_monitors(user_id,migration_id,artifact_id,deployment_id,live_origin,state,included_grant_id,subscription_id,activation_deadline)
     VALUES(p_user,p_migration,a.id,d.id,lower(rtrim(d.live_origin,'/')),'awaiting_deployment',g.id,p_subscription,
-     CASE WHEN g.id IS NOT NULL THEN g.first_successful_paid_run_at+make_interval(days=>p_activation_days) ELSE NULL END) RETURNING * INTO m;
+     CASE WHEN g.id IS NOT NULL THEN g.created_at+make_interval(days=>p_activation_days) ELSE NULL END) RETURNING * INTO m;
   END IF;
   PERFORM activate_migration_monitor(m.id);
  ELSE

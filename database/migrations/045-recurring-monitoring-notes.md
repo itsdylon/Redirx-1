@@ -30,8 +30,8 @@ Do not drain a whole site or send mail inside the public request handler.
 A paid 036 migration gets one included 30-day monitoring window. Its first
 explicit 041 `installation_reported_at` is persisted as deployment confirmation
 and starts the window. Export, first probe, pause and resume never reset it.
-The activation deadline is first successful paid run plus the configured maximum
-delay. Root approved the transparent test-only default of **90 days**, with
+The activation deadline is the purchase grant creation time plus the configured
+maximum delay. The owner confirmed **90 days from purchase** on 2026-09-19, with
 `MONITORING_ACTIVATION_MAX_DELAY_DAYS` constrained to 1–365. Each monitor persists
 its chosen deadline. Late activation or an expired window requires an explicit
 paid monitoring purchase; it does not silently extend free access.

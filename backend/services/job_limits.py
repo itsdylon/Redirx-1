@@ -17,6 +17,11 @@ _DEFAULT_CONTENT_URL_CAP = _positive_int_env("CONTENT_MAX_URLS_PER_SITE", 5000)
 CONTENT_MAX_OLD_URLS = _positive_int_env("CONTENT_MAX_OLD_URLS", _DEFAULT_CONTENT_URL_CAP)
 CONTENT_MAX_NEW_URLS = _positive_int_env("CONTENT_MAX_NEW_URLS", _DEFAULT_CONTENT_URL_CAP)
 
+# Local real-pipeline acceptance established these bounds for the bounded pivot
+# engine only. Operators may reduce them; raising them requires new evidence.
+PIVOT_CONTENT_MAX_OLD_URLS = min(15000, _positive_int_env("PIVOT_CONTENT_MAX_OLD_URLS", 15000))
+PIVOT_CONTENT_MAX_NEW_URLS = min(20000, _positive_int_env("PIVOT_CONTENT_MAX_NEW_URLS", 20000))
+
 
 class ContentJobUrlCapExceeded(ValueError):
     """
@@ -74,6 +79,8 @@ def validate_content_job_url_counts(
     old_urls: Optional[Sequence[str]],
     new_urls: Optional[Sequence[str]],
     pipeline_type: str = "content",
+    *,
+    pivot: bool = False,
 ) -> None:
     """
     Enforce hard caps for content jobs. url_only jobs are exempt.
@@ -83,8 +90,10 @@ def validate_content_job_url_counts(
 
     old_count = len(old_urls or ())
     new_count = len(new_urls or ())
-    exceeds_old = old_count > CONTENT_MAX_OLD_URLS
-    exceeds_new = new_count > CONTENT_MAX_NEW_URLS
+    max_old = PIVOT_CONTENT_MAX_OLD_URLS if pivot else CONTENT_MAX_OLD_URLS
+    max_new = PIVOT_CONTENT_MAX_NEW_URLS if pivot else CONTENT_MAX_NEW_URLS
+    exceeds_old = old_count > max_old
+    exceeds_new = new_count > max_new
 
     if not (exceeds_old or exceeds_new):
         return
@@ -93,8 +102,8 @@ def validate_content_job_url_counts(
         reason_code = "content_both_url_caps_exceeded"
         affected_file = "both"
         user_message = (
-            f"Deep Match limits are {CONTENT_MAX_OLD_URLS:,} URLs for Old Site CSV "
-            f"and {CONTENT_MAX_NEW_URLS:,} URLs for New Site CSV. "
+            f"Deep Match limits are {max_old:,} URLs for Old Site CSV "
+            f"and {max_new:,} URLs for New Site CSV. "
             f"You uploaded {old_count:,} old URLs and {new_count:,} new URLs. "
             "Split your CSVs or switch to Quick Match."
         )
@@ -102,7 +111,7 @@ def validate_content_job_url_counts(
         reason_code = "content_old_url_cap_exceeded"
         affected_file = "old"
         user_message = (
-            f"Deep Match has a per-file limit of {CONTENT_MAX_OLD_URLS:,} URLs. "
+            f"Deep Match has a per-file limit of {max_old:,} URLs. "
             f"Your Old Site CSV has {old_count:,} URLs. "
             "Split your CSV or switch to Quick Match."
         )
@@ -110,9 +119,15 @@ def validate_content_job_url_counts(
         reason_code = "content_new_url_cap_exceeded"
         affected_file = "new"
         user_message = (
-            f"Deep Match has a per-file limit of {CONTENT_MAX_NEW_URLS:,} URLs. "
+            f"Deep Match has a per-file limit of {max_new:,} URLs. "
             f"Your New Site CSV has {new_count:,} URLs. "
             "Split your CSV or switch to Quick Match."
+        )
+
+    if pivot:
+        user_message = (
+            f"Content matching supports at most {max_old:,} old URLs and {max_new:,} new URLs. "
+            f"The inventories contain {old_count:,} old URLs and {new_count:,} new URLs."
         )
 
     raise ContentJobUrlCapExceeded(
@@ -121,7 +136,7 @@ def validate_content_job_url_counts(
         affected_file=affected_file,
         old_url_count=old_count,
         new_url_count=new_count,
-        max_old_urls=CONTENT_MAX_OLD_URLS,
-        max_new_urls=CONTENT_MAX_NEW_URLS,
+        max_old_urls=max_old,
+        max_new_urls=max_new,
         pipeline_type=pipeline_type,
     )

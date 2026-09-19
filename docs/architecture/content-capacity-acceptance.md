@@ -8,8 +8,9 @@ contains no LLM stage. Local host pacing and the safe connector are replaced
 inside the loopback-only fixture, which rejects any external HTTP request.
 
 The tests do not establish deployed throughput, external provider cost or
-quality, concurrent production worker capacity, or arbitrary provider latency. Technical caps remain unchanged in this packet;
-the measured pivot bounds must be wired separately from legacy limits.
+quality, concurrent production worker capacity, or arbitrary provider latency. Pivot technical limits are 15,000 old and 20,000 new URLs, independently
+bounded. Legacy defaults remain 5,000 per side. Production activation remains a
+separate release decision, including actual worker memory and disk allocation.
 
 ## Fixes
 
@@ -163,3 +164,21 @@ zero provider/candidate/write calls. All originals and tail targets remained
 correct with no duplicate rows (`restart-body-500.json`). The corrected 052
 namespace tests passed 160 actual vector queries across public and extensions
 schemas, including restricted operator lookup.
+
+## Pivot-only limits and release wiring
+
+`backend.services.job_limits` exports `PIVOT_CONTENT_MAX_OLD_URLS` (15,000)
+and `PIVOT_CONTENT_MAX_NEW_URLS` (20,000). Corresponding environment variables
+may lower these limits; values above the demonstrated maximum are clamped.
+`validate_content_job_url_counts(..., pivot=True)` selects these bounds; existing
+callers retain legacy behavior. Limits count stored original URLs, including
+query/case variants, independently of billable count keys. Root must pass the
+pivot keyword in the worker and use the pivot constants for run reservation.
+
+Before production activation, inspect the worker's actual memory, disk, and
+concurrency allocation. Budget at least 1.12 GB temporary extracted-text storage
+per active full-size job plus operating-system and database overhead. Measured
+Python peaks exclude the actual external provider's SDK response characteristics
+and other concurrent jobs. The synthetic provider supplies real-size vectors;
+it does not prove deployed network latency, rate limits, or provider memory.
+No feature flag or production setting is changed by these source defaults.

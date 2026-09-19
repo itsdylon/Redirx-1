@@ -18,7 +18,7 @@ from urllib.parse import urljoin, urlsplit, urlunsplit
 import xml.etree.ElementTree as ET
 
 import aiohttp
-from bs4 import BeautifulSoup
+from .discovery_parsing import crawl_links, sitemap_urls
 
 from src.redirx.safe_fetch import create_safe_connector, validate_public_url, SSRFBlockedError, MAX_REDIRECTS
 from src.redirx.robots import RobotsPolicy
@@ -89,20 +89,30 @@ class SafeDiscoveryFetcher:
                                 url=urljoin(url,response.headers['Location']); continue
                             if response.status in (429,503):
                                 raise FetchFailure('rate_limited',max(5,retry or 0))
-                            chunks=[]; count=0
+                            encoding=response.headers.get('Content-Encoding','').lower()
+                            if encoding not in ('','identity','gzip'):
+                                raise FetchFailure('unsupported_encoding')
+                            raw=bytearray(); prefix=bytearray(); decoder=None; decided=False; count=0
                             async for chunk in response.content.iter_chunked(65536):
                                 count+=len(chunk)
                                 if count>self.max_wire_bytes: raise FetchFailure('response_too_large')
-                                chunks.append(chunk)
-                            raw=b''.join(chunks)
-                            encoding=response.headers.get('Content-Encoding','').lower()
-                            if raw[:2]==b'\x1f\x8b' or encoding=='gzip':
-                                decoder=zlib.decompressobj(31)
-                                raw=decoder.decompress(raw,self.max_body_bytes+1)
-                                if len(raw)>self.max_body_bytes or decoder.unconsumed_tail or decoder.unused_data or not decoder.eof:
-                                    raise FetchFailure('invalid_or_oversized_gzip')
-                            elif encoding not in ('','identity'):
-                                raise FetchFailure('unsupported_encoding')
+                                if not decided:
+                                    prefix.extend(chunk)
+                                    if len(prefix)<2: continue
+                                    chunk=bytes(prefix); prefix.clear(); decided=True
+                                    if chunk[:2]==b'\x1f\x8b' or encoding=='gzip': decoder=zlib.decompressobj(31)
+                                if decoder:
+                                    chunk=decoder.decompress(chunk,self.max_body_bytes-len(raw)+1)
+                                    if decoder.unconsumed_tail:
+                                        raise FetchFailure('invalid_or_oversized_gzip')
+                                raw.extend(chunk)
+                                if len(raw)>self.max_body_bytes:
+                                    raise FetchFailure('invalid_or_oversized_gzip' if decoder else 'response_too_large')
+                            if not decided:
+                                if encoding=='gzip': raise FetchFailure('invalid_or_oversized_gzip')
+                                raw.extend(prefix)
+                            if decoder and (decoder.unused_data or not decoder.eof):
+                                raise FetchFailure('invalid_or_oversized_gzip')
                             if len(raw)>self.max_body_bytes: raise FetchFailure('response_too_large')
                             return Fetched(response.status,raw.decode('utf-8',errors='strict'),headers,str(response.url))
                     raise FetchFailure('redirect_limit')
@@ -300,16 +310,12 @@ class MigrationDiscoveryService:
                 state['queue'].pop(0); return [],None
             if response.status!=200: raise FetchFailure('sitemap_unavailable')
             if '<!DOCTYPE' in response.text.upper() or '<!ENTITY' in response.text.upper(): raise FetchFailure('invalid_sitemap')
-            try: xml=ET.fromstring(response.text)
-            except ET.ParseError: raise FetchFailure('invalid_sitemap') from None
-            kind=xml.tag.rsplit('}',1)[-1]
-            if kind not in ('sitemapindex','urlset'): raise FetchFailure('invalid_sitemap')
-            urls=[]
-            for item in xml:
-                if item.tag.rsplit('}',1)[-1] not in ('url','sitemap'): continue
-                loc=next((c.text for c in item if c.tag.rsplit('}',1)[-1]=='loc'),None)
-                if not isinstance(loc,str) or not loc.strip(): raise FetchFailure('invalid_sitemap')
-                urls.append(loc.strip())
+            try:
+                parsed=iter(sitemap_urls(response.text))
+                kind=next(parsed)
+                urls=list(parsed)
+            except (ET.ParseError,ValueError,StopIteration):
+                raise FetchFailure('invalid_sitemap') from None
             if kind=='sitemapindex':
                 state['queue'].pop(0); state['seen'].append(url)
                 for child in urls:
@@ -345,15 +351,17 @@ class MigrationDiscoveryService:
             if response.status!=200: raise FetchFailure('crawl_unavailable')
             state['crawl_queue'].pop(0); state['crawl_seen'].append(task['url'])
             rows=_rows([task['url']],'crawl',request,state)
-            soup=BeautifulSoup(response.text,'html.parser')
-            for link in soup.find_all('a',href=True):
-                try: target=canonical_url_identity(urljoin(response.url,link['href']))
+            visited=set(state['crawl_seen'])
+            queued={item['url'] for item in state['crawl_queue']}
+            for href in crawl_links(response.text):
+                try: target=canonical_url_identity(urljoin(response.url,href))
                 except (InventoryPolicyError,ValueError): continue
                 if _origin(target) not in request['origins'] or urlsplit(target).path.lower().endswith(ASSETS): continue
-                if target in state['crawl_seen'] or any(item['url']==target for item in state['crawl_queue']): continue
+                if target in visited or target in queued: continue
                 if task['depth']>=bounds['max_depth'] or len(state['crawl_seen'])+len(state['crawl_queue'])>=bounds['max_urls']:
                     _error(state,'crawl_depth_or_capacity_limit'); state['sources']['crawl']['status']='partial'; continue
                 state['crawl_queue'].append({'url':target,'depth':task['depth']+1})
+                queued.add(target)
             state['retries']=0; return rows,None
         if phase=='gsc':
             if not request['gsc']:

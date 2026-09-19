@@ -84,6 +84,20 @@ class DiscoveryAcceptance(unittest.IsolatedAsyncioTestCase):
         self.fail('Discovery did not terminate within bounded fixture steps')
     def inventory(self,result): return self.repository.get_inventory(A,self.mid,result['data']['inventory']['id'])
 
+    async def test_streamed_gzip_decoded_boundary_and_concatenation(self):
+        body=b'a'*(8*1024*1024)
+        self.route('/bounded',gzip.compress(body),headers={'Content-Encoding':'gzip'})
+        result=await self.fetcher.fetch(self.root+'/bounded',[self.root])
+        self.assertEqual(len(result.text),len(body))
+        self.route('/bounded',gzip.compress(body+b'x'),headers={'Content-Encoding':'gzip'})
+        with self.assertRaises(FetchFailure) as error:
+            await self.fetcher.fetch(self.root+'/bounded',[self.root])
+        self.assertEqual(error.exception.code,'invalid_or_oversized_gzip')
+        self.route('/bounded',gzip.compress(b'first')+gzip.compress(b'second'),headers={'Content-Encoding':'gzip'})
+        with self.assertRaises(FetchFailure) as error:
+            await self.fetcher.fetch(self.root+'/bounded',[self.root])
+        self.assertEqual(error.exception.code,'invalid_or_oversized_gzip')
+
     async def test_15000_nested_snapshot_survives_service_restart_and_exact_replay(self):
         self.route('/robots.txt','Sitemap: '+self.root+'/sitemap.xml')
         self.route('/sitemap.xml',index([self.root+f'/map-{i}.xml' for i in range(30)]))

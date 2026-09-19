@@ -232,6 +232,25 @@ class MigrationRepository:
         _, object_id = _strict_uuid(migration_id, "migration_id")
         return self._get_owned("migration_records", owner, object_id, {})
 
+    def get_operation(self, user_id, operation_id, migration_id=None):
+        _, owner = _strict_uuid(user_id, "user_id")
+        _, object_id = _strict_uuid(operation_id, "operation_id")
+        filters = {}
+        if migration_id is not None:
+            _, filters["migration_id"] = _strict_uuid(migration_id, "migration_id")
+        return self._get_owned("migration_operations", owner, object_id, filters)
+
+    def latest_inventory(self, user_id, migration_id, side):
+        _, owner = _strict_uuid(user_id, "user_id")
+        _, migration = _strict_uuid(migration_id, "migration_id")
+        if side not in ("old", "new"):
+            raise InvalidInputError("Invalid inventory side.")
+        query = (self.client.table("inventory_snapshots").select("*")
+                 .eq("user_id", owner).eq("migration_id", migration).eq("side", side)
+                 .order("created_at", desc=True).order("id", desc=True).limit(1))
+        rows = _rows(self._execute(query))
+        return _row_ids("inventory_snapshots", rows[0]) if rows else None
+
     def get_inventory(self, user_id: UUID | str, migration_id: UUID | str, inventory_id: UUID | str) -> dict[str, Any]:
         _, owner = _strict_uuid(user_id, "user_id")
         _, migration = _strict_uuid(migration_id, "migration_id")

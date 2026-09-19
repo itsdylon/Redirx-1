@@ -59,6 +59,10 @@ def create_app():
     app.register_blueprint(watch_blueprint, url_prefix="/api/watches")
     # Public, agent-facing. Versioned because agents pin to it.
     app.register_blueprint(v1_blueprint, url_prefix="/api/v1")
+    # Dormant pivot API: activation is an explicit release setting.
+    if os.getenv("MCP_PIVOT_ENABLED", "false").lower() == "true":
+        from backend.routes.v2_routes import v2_blueprint
+        app.register_blueprint(v2_blueprint, url_prefix="/api/v2")
     # Service-to-service only (shared-secret protected) — called by the
     # mcp-server gateway, never by a browser or an agent's own API key.
     app.register_blueprint(internal_blueprint, url_prefix="/api/internal")

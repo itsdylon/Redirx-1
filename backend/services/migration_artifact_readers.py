@@ -7,7 +7,6 @@ rows or an entitlement decision from the caller.  Mapping pages come from the
 from __future__ import annotations
 
 from collections.abc import Mapping
-from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -15,6 +14,7 @@ from .migration_repository import (
     InvalidInputError, MigrationNotFoundError, MigrationRepository,
     RepositoryUnavailableError, _strict_uuid,
 )
+from .redirect_export import select_export_mappings
 
 
 def _safe_error(result: Any) -> None:
@@ -81,6 +81,9 @@ class MigrationArtifactReaders:
             raise InvalidInputError("selection_revision is out of range.")
         migration_row = self.repository.get_migration(owner, migration)
         self.repository.get_run(owner, migration, run)
+        initial_revision = self._selection_revision(owner, migration, run)
+        if initial_revision != requested:
+            raise RepositoryUnavailableError("Migration selection revision is no longer current.")
         items: list[dict[str, Any]] = []
         cursor: dict[str, Any] | None = None
         seen_cursors: set[str] = set()
@@ -104,6 +107,8 @@ class MigrationArtifactReaders:
                     row["new_url"] = row.get("decision_target")
                 row["action"] = row.get("decision_action")
                 items.append(row)
+            if self._selection_revision(owner, migration, run) != initial_revision:
+                raise RepositoryUnavailableError("Migration selection changed while it was being read.")
             next_cursor = page.get("next_cursor")
             if next_cursor is None:
                 break
@@ -116,24 +121,36 @@ class MigrationArtifactReaders:
             cursor = dict(next_cursor)
             if len(items) > 50_000:
                 raise RepositoryUnavailableError("Migration selection exceeds the supported artifact bound.")
-        current_revision = max((item["revision"] for item in items), default=0)
-        if current_revision != requested:
+        if self._selection_revision(owner, migration, run) != initial_revision:
             raise RepositoryUnavailableError("Migration selection revision is no longer current.")
         origins: list[str] = []
-        configured = migration_row.get("new_origin")
-        if isinstance(configured, str):
-            origins.append(configured)
-        for item in items:
-            destination = item.get("decision_target") if item.get("decision_action") in {"set_target", "accept_repair"} else item.get("new_url")
+        emitted = select_export_mappings(
+            items, url_format="paths", old_domain=migration_row.get("old_origin"),
+            new_domain=migration_row.get("new_origin"),
+        )["mappings"]
+        for item in emitted:
+            destination = item.get("new_url")
             destination_origin = _origin(destination)
             if destination_origin and destination_origin not in origins:
                 origins.append(destination_origin)
+            elif not destination_origin and isinstance(migration_row.get("new_origin"), str):
+                fallback = migration_row["new_origin"].rstrip("/")
+                if fallback not in origins:
+                    origins.append(fallback)
         return {
             "selection_revision": str(requested), "mappings": items,
             "target_origins": origins, "old_domain": migration_row.get("old_origin"),
             "new_domain": migration_row.get("new_origin"), "url_format": "paths",
             "destination_mapping": {},
         }
+
+    def _selection_revision(self, owner: str, migration: str, run: str) -> int:
+        value = self._rpc_json("get_migration_selection_revision", {
+            "p_user_id": owner, "p_migration_id": migration, "p_run_id": run,
+        }).get("selection_revision")
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            raise RepositoryUnavailableError("Migration selection revision is temporarily unavailable.")
+        return value
 
     def get_export_grant(self, user_id: str, migration_id: str, run_id: str) -> dict[str, Any]:
         _, owner = _strict_uuid(user_id, "user_id")
@@ -170,14 +187,8 @@ class MigrationArtifactReaders:
         }, "id,user_id,migration_id,quote_id,source,state,created_at,rerun_expires_at")
         if not grant or grant.get("state") != "active":
             raise MigrationNotFoundError("Migration grant is not active.")
-        expiry = grant.get("rerun_expires_at")
-        if expiry:
-            try:
-                parsed = datetime.fromisoformat(str(expiry).replace("Z", "+00:00"))
-                if parsed <= datetime.now(timezone.utc):
-                    raise MigrationNotFoundError("Migration grant has expired.")
-            except ValueError:
-                raise RepositoryUnavailableError("Migration grant is temporarily unavailable.") from None
+        # rerun_expires_at limits creation of another run, not download of a
+        # completed paid artifact. Explicit state=revoked still denies access.
         self._require_completed_session(owner, run_row, run)
         grant["authority"] = "quote_grant"
         grant["run_id"] = run

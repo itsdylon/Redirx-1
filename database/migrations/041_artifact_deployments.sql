@@ -244,7 +244,7 @@ BEGIN
       SELECT 1 FROM migration_purchase_grants g
        WHERE g.id=(v_run_json->>'grant_id')::uuid AND g.user_id=p_user_id
          AND g.migration_id=p_migration_id AND g.quote_id=(v_run_json->>'quote_id')::uuid
-         AND g.state='active' AND (g.rerun_expires_at IS NULL OR g.rerun_expires_at>now())) THEN
+         AND g.state='active') THEN
     RAISE EXCEPTION 'not_found' USING ERRCODE = 'P0001';
   END IF;
   IF v_run_json->>'studio_reservation_id' IS NOT NULL THEN
@@ -282,6 +282,9 @@ BEGIN
   EXCEPTION WHEN invalid_text_representation THEN
     RAISE EXCEPTION 'invalid_input' USING ERRCODE = 'P0001';
   END;
+  IF v_run_json->>'selection_revision' IS DISTINCT FROM v_revision::text THEN
+    RAISE EXCEPTION 'operation_conflict' USING ERRCODE = 'P0001';
+  END IF;
   IF EXISTS (SELECT 1 FROM migration_mapping_decisions
       WHERE run_id=p_run_id AND migration_id=p_migration_id AND user_id=p_user_id
         AND revision > v_revision) THEN

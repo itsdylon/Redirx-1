@@ -49,23 +49,37 @@ class Repo:
 class TestMigrationArtifactReaders(unittest.TestCase):
     def test_038_pages_are_bounded_and_revision_bound(self):
         pages = [
+            {"selection_revision": 2},
             {"items": [{"mapping_id": "00000000-0000-0000-0000-000000000010", "old_url": "https://old.example/a", "new_url": "https://new.example/a", "revision": 2, "decision_action": None, "decision_target": None}], "next_cursor": {"observed": False, "clicks": -1, "id": "00000000-0000-0000-0000-000000000010"}},
+            {"selection_revision": 2},
             {"items": [{"mapping_id": "00000000-0000-0000-0000-000000000011", "old_url": "https://old.example/b", "new_url": "https://new.example/b", "revision": 2, "decision_action": "approve", "decision_target": None}], "next_cursor": None},
+            {"selection_revision": 2},
+            {"selection_revision": 2},
         ]
         client = Client(pages)
         value = MigrationArtifactReaders(Repo(client)).get_export_selection(OWNER, MIGRATION, RUN, "2")
         self.assertEqual(len(value["mappings"]), 2)
-        self.assertEqual([call["p_limit"] for call in client.calls], [500, 500])
+        self.assertEqual([call["p_limit"] for call in client.calls if "p_limit" in call], [500, 500])
         self.assertEqual(value["target_origins"], ["https://new.example"])
 
     def test_revision_mismatch_fails_closed(self):
-        client = Client([{"items": [{"old_url": "/a", "new_url": "/b", "revision": 3}], "next_cursor": None}])
+        client = Client([{"selection_revision": 2}])
         with self.assertRaises(RepositoryUnavailableError):
-            MigrationArtifactReaders(Repo(client)).get_export_selection(OWNER, MIGRATION, RUN, "2")
+            MigrationArtifactReaders(Repo(client)).get_export_selection(OWNER, MIGRATION, RUN, "1")
+
+    def test_same_max_row_revision_counterexample_is_caught_by_run_revision(self):
+        client = Client([
+            {"selection_revision": 1},
+            {"items": [{"mapping_id": "00000000-0000-0000-0000-000000000010", "old_url": "/a", "new_url": "/b", "revision": 1}], "next_cursor": {"observed": False, "clicks": -1, "id": "00000000-0000-0000-0000-000000000010"}},
+            {"selection_revision": 1},
+            {"selection_revision": 2},
+        ])
+        with self.assertRaises(RepositoryUnavailableError):
+            MigrationArtifactReaders(Repo(client)).get_export_selection(OWNER, MIGRATION, RUN, "1")
 
     def test_quote_grant_requires_owner_active_state_and_completed_session(self):
         run = {"id": RUN, "migration_id": MIGRATION, "user_id": OWNER, "grant_id": "40000000-0000-0000-0000-000000000001", "quote_id": "50000000-0000-0000-0000-000000000001", "legacy_session_id": "60000000-0000-0000-0000-000000000001", "operation_id": "70000000-0000-0000-0000-000000000001", "authorized_attempt": 2}
-        tables = {"migration_purchase_grants": [{"id": run["grant_id"], "user_id": OWNER, "migration_id": MIGRATION, "quote_id": run["quote_id"], "state": "active"}], "migration_sessions": [{"id": run["legacy_session_id"], "user_id": OWNER, "mcp_run_id": RUN, "status": "completed", "attempt_count": 2}]}
+        tables = {"migration_purchase_grants": [{"id": run["grant_id"], "user_id": OWNER, "migration_id": MIGRATION, "quote_id": run["quote_id"], "state": "active", "rerun_expires_at": "2000-01-01T00:00:00+00:00"}], "migration_sessions": [{"id": run["legacy_session_id"], "user_id": OWNER, "mcp_run_id": RUN, "status": "completed", "attempt_count": 2}]}
         grant = MigrationArtifactReaders(Repo(Client([], tables), run)).get_export_grant(OWNER, MIGRATION, RUN)
         self.assertEqual(grant["authority"], "quote_grant")
         with self.assertRaises(MigrationNotFoundError):

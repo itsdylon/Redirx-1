@@ -194,6 +194,16 @@ DECLARE
   v_hash TEXT;
   v_artifact UUID := gen_random_uuid();
   v_result JSONB;
+  v_run migration_runs%ROWTYPE;
+  v_run_json JSONB;
+  v_revision INTEGER;
+  v_session UUID;
+  v_item JSONB;
+  v_mapping UUID;
+  v_current_old TEXT;
+  v_current_new TEXT;
+  v_current_action TEXT;
+  v_studio_authority JSONB;
 BEGIN
   IF p_user_id IS NULL OR p_migration_id IS NULL OR p_run_id IS NULL
      OR p_idempotency_key IS NULL OR btrim(p_idempotency_key) = ''
@@ -213,6 +223,82 @@ BEGIN
   END IF;
   PERFORM 1 FROM migration_runs WHERE id = p_run_id AND migration_id = p_migration_id AND user_id = p_user_id FOR KEY SHARE;
   IF NOT FOUND THEN RAISE EXCEPTION 'not_found' USING ERRCODE = 'P0001'; END IF;
+  SELECT * INTO v_run FROM migration_runs
+    WHERE id = p_run_id AND migration_id = p_migration_id AND user_id = p_user_id FOR KEY SHARE;
+  v_run_json := to_jsonb(v_run);
+  IF v_run_json->>'legacy_session_id' IS NULL
+     OR v_run_json->>'operation_id' IS NULL
+     OR v_run_json->>'authorized_attempt' IS NULL THEN
+    RAISE EXCEPTION 'not_found' USING ERRCODE = 'P0001';
+  END IF;
+  v_session := (v_run_json->>'legacy_session_id')::uuid;
+  IF NOT EXISTS (SELECT 1 FROM migration_sessions
+      WHERE id=v_session AND user_id=p_user_id::text AND mcp_run_id=p_run_id
+        AND status='completed' AND attempt_count=(v_run_json->>'authorized_attempt')::integer) THEN
+    RAISE EXCEPTION 'not_found' USING ERRCODE = 'P0001';
+  END IF;
+  IF v_run_json->>'grant_id' IS NULL AND v_run_json->>'studio_reservation_id' IS NULL THEN
+    RAISE EXCEPTION 'not_found' USING ERRCODE = 'P0001';
+  END IF;
+  IF v_run_json->>'grant_id' IS NOT NULL AND NOT EXISTS (
+      SELECT 1 FROM migration_purchase_grants g
+       WHERE g.id=(v_run_json->>'grant_id')::uuid AND g.user_id=p_user_id
+         AND g.migration_id=p_migration_id AND g.quote_id=(v_run_json->>'quote_id')::uuid
+         AND g.state='active' AND (g.rerun_expires_at IS NULL OR g.rerun_expires_at>now())) THEN
+    RAISE EXCEPTION 'not_found' USING ERRCODE = 'P0001';
+  END IF;
+  IF v_run_json->>'studio_reservation_id' IS NOT NULL THEN
+    BEGIN
+      EXECUTE 'SELECT studio_run_entitlement($1::uuid,$2::uuid,$3::uuid)'
+        INTO v_studio_authority
+        USING p_user_id, p_migration_id, p_run_id;
+    EXCEPTION WHEN undefined_function THEN
+      RAISE EXCEPTION 'not_found' USING ERRCODE = 'P0001';
+    END;
+    IF jsonb_typeof(v_studio_authority) <> 'object'
+       OR v_studio_authority->>'eligible' IS DISTINCT FROM 'true'
+       OR v_studio_authority->>'reservation_id' IS DISTINCT FROM v_run_json->>'studio_reservation_id'
+       OR v_studio_authority->>'quote_id' IS DISTINCT FROM v_run_json->>'quote_id'
+       OR v_studio_authority->>'operation_id' IS DISTINCT FROM v_run_json->>'operation_id' THEN
+      RAISE EXCEPTION 'not_found' USING ERRCODE = 'P0001';
+    END IF;
+    -- 046 is optional at migration-install time.  When its column is bound,
+    -- dynamic SQL keeps 041 installable before the Studio tables exist.
+    EXECUTE $q$
+      SELECT 1 FROM migration_studio_work_reservations w
+      JOIN migration_studio_slots s ON s.id=w.slot_id AND s.migration_id=w.migration_id AND s.user_id=w.user_id
+      JOIN migration_test_subscriptions sub ON sub.id=s.subscription_id AND sub.user_id=s.user_id
+      WHERE w.id=$1::uuid AND w.user_id=$2::uuid AND w.migration_id=$3::uuid
+        AND w.quote_id=$4::uuid AND w.run_operation_id=$5::uuid
+        AND w.state='succeeded' AND s.state='completed' AND s.first_success_at IS NOT NULL
+        AND sub.status <> 'revoked'
+    $q$
+    USING (v_run_json->>'studio_reservation_id'), p_user_id, p_migration_id,
+      v_run_json->>'quote_id', v_run_json->>'operation_id';
+    IF NOT FOUND THEN RAISE EXCEPTION 'not_found' USING ERRCODE = 'P0001'; END IF;
+  END IF;
+  BEGIN
+    v_revision := (p_artifact->>'decision_revision')::integer;
+  EXCEPTION WHEN invalid_text_representation THEN
+    RAISE EXCEPTION 'invalid_input' USING ERRCODE = 'P0001';
+  END;
+  IF EXISTS (SELECT 1 FROM migration_mapping_decisions
+      WHERE run_id=p_run_id AND migration_id=p_migration_id AND user_id=p_user_id
+        AND revision > v_revision) THEN
+    RAISE EXCEPTION 'operation_conflict' USING ERRCODE = 'P0001';
+  END IF;
+  FOR v_item IN SELECT value FROM jsonb_array_elements(p_artifact->'verification_inputs'->'redirects') LOOP
+    BEGIN v_mapping := (v_item->>'mapping_id')::uuid;
+    EXCEPTION WHEN invalid_text_representation THEN RAISE EXCEPTION 'invalid_input' USING ERRCODE = 'P0001'; END;
+    SELECT m.old_url, COALESCE(d.target_url,m.new_url), d.action INTO v_current_old,v_current_new,v_current_action
+      FROM url_mappings m LEFT JOIN migration_mapping_decisions d ON d.run_id=p_run_id AND d.mapping_id=m.id
+      WHERE m.id=v_mapping AND m.session_id=v_session;
+    IF NOT FOUND OR v_item->>'source_url' IS DISTINCT FROM v_current_old
+       OR v_item->>'expected_url' IS DISTINCT FROM v_current_new
+       OR v_current_action IN ('reject','defer','intentional_removal') THEN
+      RAISE EXCEPTION 'operation_conflict' USING ERRCODE = 'P0001';
+    END IF;
+  END LOOP;
   SELECT * INTO v_existing FROM migration_artifact_mutations
     WHERE user_id = p_user_id AND migration_id = p_migration_id AND kind = 'artifact'
       AND idempotency_key = p_idempotency_key FOR UPDATE;

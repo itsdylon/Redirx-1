@@ -62,7 +62,7 @@ class Repository:
     def get_run(self, user, migration, run):
         if user != OWNER: raise MigrationNotFoundError("not found")
         return {"id": run, "migration_id": migration, "user_id": user}
-    def get_export_grant(self, user, migration, run): return {"allowed": user == OWNER}
+    def get_export_grant(self, user, migration, run): return {"authority": "quote_grant", "state": "active"} if user == OWNER else {"authority": "quote_grant", "state": "revoked"}
     def get_export_selection(self, user, migration, run, revision):
         return {"selection_revision": revision, "target_origins": ["https://new.example"],
                 "mappings": [{"id": "map-1", "old_url": "https://old.example/a", "new_url": "https://new.example/b"}]}
@@ -75,6 +75,7 @@ class Repository:
                 "mapping_id": "map-1", "source_url": "https://old.example/a", "expected_url": "https://new.example/b"}],
                 "artifact_content_hash": "a" * 64, "decision_revision": "rev-1"}}
     def get_migration(self, user, migration): return {"id": migration, "user_id": user, "old_origin": "https://old.example"}
+    def get_artifact_download_grant(self, user, migration, artifact): return {"authority": "quote_grant", "state": "active"}
 
 
 class TestMigrationArtifactService(unittest.TestCase):
@@ -95,7 +96,7 @@ class TestMigrationArtifactService(unittest.TestCase):
 
     def test_missing_grant_is_fail_closed_and_wrong_revision_is_rejected(self):
         service, client = self.make()
-        service.grant_reader = lambda *_: {"allowed": False}
+        service.grant_reader = lambda *_: {"authority": "quote_grant", "state": "revoked"}
         with self.assertRaises(EntitlementRequiredError):
             service.create_artifact(OWNER, MIGRATION, RUN, idempotency_key="x", fmt="json", selection_revision="rev-1")
         service, _ = self.make()

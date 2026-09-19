@@ -13,6 +13,7 @@ from uuid import UUID
 from urllib.parse import urlsplit
 
 from .inventory_policy import normalize_origin
+from .migration_artifact_readers import MigrationArtifactReaders
 from .migration_repository import (InvalidInputError, MigrationNotFoundError,
     MigrationRepository, MigrationRepositoryError, RepositoryUnavailableError,
     _strict_uuid)
@@ -139,11 +140,14 @@ def _exclusion_reasons(value: Any) -> dict[str, Any]:
 class MigrationArtifactService:
     def __init__(self, repository: MigrationRepository | None = None, *,
                  selection_reader: Callable[..., Mapping[str, Any]] | None = None,
-                 grant_reader: Callable[..., Any] | None = None):
+                 grant_reader: Callable[..., Any] | None = None,
+                 download_grant_reader: Callable[..., Any] | None = None):
         self.repository = repository if repository is not None else MigrationRepository()
         self.client = self.repository.client
-        self.selection_reader = selection_reader
-        self.grant_reader = grant_reader
+        default_readers = MigrationArtifactReaders(self.repository)
+        self.selection_reader = selection_reader or getattr(self.repository, "get_export_selection", None) or default_readers.get_export_selection
+        self.grant_reader = grant_reader or getattr(self.repository, "get_export_grant", None) or default_readers.get_export_grant
+        self.download_grant_reader = download_grant_reader or getattr(self.repository, "get_artifact_download_grant", None) or default_readers.get_artifact_download_grant
 
     def _selection(self, owner: str, migration: str, run: str, revision: str) -> dict[str, Any]:
         reader = self.selection_reader or getattr(self.repository, "get_export_selection", None)
@@ -171,8 +175,9 @@ class MigrationArtifactService:
             raise
         except Exception:
             raise RepositoryUnavailableError("Export entitlement is temporarily unavailable.") from None
-        allowed = grant.get("allowed") if isinstance(grant, Mapping) else getattr(grant, "allowed", None)
-        if allowed is not True:
+        state = grant.get("state") if isinstance(grant, Mapping) else getattr(grant, "state", None)
+        authority = grant.get("authority") if isinstance(grant, Mapping) else getattr(grant, "authority", None)
+        if state not in {"active", "succeeded"} or authority not in {"quote_grant", "studio"}:
             raise EntitlementRequiredError("An owned export grant is required before creating an artifact.")
 
     def create_artifact(self, user_id: UUID | str, migration_id: UUID | str, run_id: UUID | str,
@@ -249,6 +254,11 @@ class MigrationArtifactService:
         _, migration = _strict_uuid(migration_id, "migration_id")
         _, artifact = _strict_uuid(artifact_id, "artifact_id")
         row = self.repository.get_artifact(owner, migration, artifact)
+        authority = self.download_grant_reader(owner, migration, artifact)
+        state = authority.get("state") if isinstance(authority, Mapping) else getattr(authority, "state", None)
+        authority_kind = authority.get("authority") if isinstance(authority, Mapping) else getattr(authority, "authority", None)
+        if state not in {"active", "succeeded"} or authority_kind not in {"quote_grant", "studio"}:
+            raise EntitlementRequiredError("An owned export grant is required to download this artifact.")
         result = (self.client.table("migration_artifact_contents").select("*")
                   .eq("artifact_id", str(artifact)).eq("migration_id", migration)
                   .eq("user_id", owner).execute())

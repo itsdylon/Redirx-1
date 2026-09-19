@@ -127,7 +127,7 @@ class MigrationSubscriptionService:
                 ('p_quote_id', 'quote_id'), ('p_run_operation_id', 'operation_id'),
                 ('p_reservation_id', 'reservation_id'), ('p_slot_id', 'slot_id'), ('p_deployment_id', 'deployment_id')]:
             # Provider subscription identifiers are private source IDs, not durable IDs.
-            if name == 'record_verified_subscription_period':
+            if name in {'record_verified_subscription_period', 'record_verified_subscription_checkout_period'}:
                 break
             if parameter in params and field in result and params[parameter] != result[field]:
                 raise RepositoryUnavailableError('Subscription storage returned an invalid binding.')
@@ -135,7 +135,7 @@ class MigrationSubscriptionService:
 
     def apply_verified_subscription_event(self, *, user_id, stripe_subscription_id, stripe_customer_id, sku,
             status, period_start, period_end, stripe_invoice_id, amount_cents, currency, event_id,
-            event_hash, event_at, livemode, deployment_id=None):
+            event_hash, event_at, livemode, deployment_id=None, checkout_id=None, price_id=None):
         """INTERNAL only: caller has verified subscription/invoice facts; no client route."""
         if livemode is not False or sku not in {'studio', 'monitoring'}:
             raise InvalidInputError('Verified test-mode subscription facts are required.')
@@ -147,14 +147,20 @@ class MigrationSubscriptionService:
                     raise ValueError()
         except (TypeError, ValueError):
             raise InvalidInputError('Verified full-price paid invoice facts are required.') from None
-        return self._rpc('record_verified_subscription_period', {
+        params = {
             'p_user_id': _uuid(user_id, 'user_id'), 'p_subscription_id': stripe_subscription_id,
             'p_customer_id': stripe_customer_id, 'p_sku': sku, 'p_status': status,
             'p_period_start': period_start, 'p_period_end': period_end, 'p_invoice_id': stripe_invoice_id,
             'p_amount_cents': amount_cents, 'p_currency': currency, 'p_event_id': event_id,
             'p_event_hash': event_hash, 'p_event_at': event_at, 'p_livemode': livemode,
             'p_deployment_id': _uuid(deployment_id, 'deployment_id') if deployment_id is not None else None,
-        }, 'subscription')
+        }
+        name = 'record_verified_subscription_period'
+        if checkout_id is not None:
+            params['p_checkout_id'] = _uuid(checkout_id, 'checkout_id')
+            params['p_price_id'] = price_id
+            name = 'record_verified_subscription_checkout_period'
+        return self._rpc(name, params, 'subscription')
 
     def get_subscription(self, user_id, subscription_id):
         return self._rpc('get_migration_test_subscription', {'p_user_id': _uuid(user_id, 'user_id'),
@@ -276,6 +282,50 @@ class MigrationSubscriptionService:
             return self._run_rpc('finalize_migration_infrastructure_failure', {**params, 'p_infrastructure_code': code})
         return self._run_rpc('finalize_migration_run_session', {**params, 'p_status': 'permanently_failed',
                                                                'p_error': 'migration_processing_failed'})
+
+
+    def select_run_subscription(self, user_id, migration_id, old_inventory_id, new_inventory_id,
+                                quote_id, idempotency_key, *, subscription_id=None):
+        """Read-only selection. start_studio_run rechecks and reserves atomically."""
+        from .job_limits import CONTENT_MAX_OLD_URLS, CONTENT_MAX_NEW_URLS
+        params = {'p_user_id': _uuid(user_id, 'user_id'), 'p_migration_id': _uuid(migration_id, 'migration_id'),
+            'p_old_inventory_id': _uuid(old_inventory_id, 'old_inventory_id'), 'p_new_inventory_id': _uuid(new_inventory_id, 'new_inventory_id'),
+            'p_quote_id': _uuid(quote_id, 'quote_id'), 'p_key': validate_key(idempotency_key),
+            'p_subscription_id': _uuid(subscription_id, 'subscription_id') if subscription_id is not None else None,
+            'p_max_old_urls': CONTENT_MAX_OLD_URLS, 'p_max_new_urls': CONTENT_MAX_NEW_URLS}
+        try:
+            response = self.repository.client.rpc('select_studio_run_subscription', params).execute()
+            if getattr(response, 'error', None):
+                raise response.error
+        except Exception as exc:
+            from .migration_quote_service import _ERRORS
+            code = str(getattr(exc, 'message', '') or str(exc))
+            if str(getattr(exc, 'code', '')) == 'P0001':
+                if code == 'capacity_exceeded':
+                    from .inventory_import_service import ImportCapacityExceededError
+                    raise ImportCapacityExceededError('The inventory exceeds configured processing capacity.') from None
+                if code in _ERRORS:
+                    error, message = _ERRORS[code]
+                    raise error(message) from None
+            raise RepositoryUnavailableError('Subscription selection is temporarily unavailable.') from None
+        value = getattr(response, 'data', None)
+        if isinstance(value, list):
+            value = value[0] if len(value) == 1 else None
+        try:
+            result = {key: value[key] for key in ('use_studio', 'subscription_id', 'reason', 'next_action')}
+            if type(result['use_studio']) is not bool or result['reason'] not in {
+                    'existing_operation', 'included_rerun', 'available_allowance', 'no_subscription',
+                    'payment_required', 'allowance_exhausted', 'custom_quote_required', 'free_quote', 'purchased_quote'}:
+                raise ValueError()
+            if result['subscription_id'] is not None:
+                _uuid(result['subscription_id'], 'subscription_id')
+            if result['use_studio'] and (result['subscription_id'] is None or result['next_action'] != 'run_migration'):
+                raise ValueError()
+            if subscription_id is not None and result['subscription_id'] is not None and result['subscription_id'] != params['p_subscription_id']:
+                raise ValueError()
+            return result
+        except (KeyError, TypeError, ValueError, InvalidInputError):
+            raise RepositoryUnavailableError('Subscription selection returned an invalid result.') from None
 
 
 def classify_migration_infrastructure_error(error):

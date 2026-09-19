@@ -152,6 +152,13 @@ class MigrationSubscriptionWebhookService:
         else:
             sub_id = obj.get('id')
         sub = self._retrieve(self.stripe.v1.subscriptions, sub_id, 'sub_')
+        return self._apply_retrieved_subscription(sub, event_id=event['id'], event_hash=hashlib.sha256(raw_body).hexdigest(),
+                                                  event_at=event_at, invoice=invoice, charge=charge)
+
+    def _apply_retrieved_subscription(self, sub, *, event_id, event_hash, event_at, invoice=None, charge=None):
+        """Internal only: invoked after SDK signature and independent retrieval."""
+        if getattr(self, 'require_checkout_consent', False) and not _dict(sub.get('metadata')).get('redirx_subscription_checkout_id'):
+            raise OperationConflictError('The subscription has no persisted recurring checkout consent.')
         owner, sku, deployment, amount, item = self._scope(sub)
         status = sub.get('status')
         if status not in {'active', 'past_due', 'unpaid', 'canceled', 'paused', 'incomplete', 'incomplete_expired'}:
@@ -183,7 +190,8 @@ class MigrationSubscriptionWebhookService:
         result = self.service.apply_verified_subscription_event(user_id=owner, stripe_subscription_id=sub['id'],
             stripe_customer_id=sub['customer'], sku=sku, status=status, period_start=start, period_end=end,
             stripe_invoice_id=invoice_id, amount_cents=paid_amount, currency=currency,
-            event_id=event['id'], event_hash=hashlib.sha256(raw_body).hexdigest(), event_at=event_at,
-            livemode=False, deployment_id=deployment)
+            event_id=event_id, event_hash=event_hash, event_at=event_at,
+            livemode=False, deployment_id=deployment,
+            checkout_id=_dict(sub.get('metadata')).get('redirx_subscription_checkout_id'),price_id=item['price']['id'])
         return {'received': True, 'subscription_id': result['subscription_id'], 'status': result['status'],
                 'replayed': result.get('replayed', False)}

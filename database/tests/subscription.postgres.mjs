@@ -396,3 +396,80 @@ test('048 preserves Studio included history on reapply and actual account deleti
  assert.equal((await one('SELECT count(*)::int n FROM migration_verifications WHERE id=$1',[job.id])).n,0);
  assert.equal((await one('SELECT count(*)::int n FROM migration_verification_items WHERE verification_id=$1',[job.id])).n,0);
 });
+
+test('049 installs explicit recurring checkout and server-owned Studio selection',async()=>{
+ await query(await read('../migrations/049_subscription_checkout.sql'));
+});
+async function newAccount(){const {id}=await one('INSERT INTO auth.users(id) VALUES(gen_random_uuid()) RETURNING id');await query('INSERT INTO user_profiles(id) VALUES($1)',[id]);return id;}
+const subscriptionCheckout=(owner,key,sku='studio',dep=null,consent=true,client=db)=>rpc('reserve_subscription_checkout',[owner,sku,dep,key,consent,sku==='studio'?'price_studio':'price_monitoring'],client);
+const checkoutFacts=(owner,c,suffix,changes={})=>{
+ const o={status:'active',start:stamp(-day),end:stamp(29*day),at:stamp(0),event:`evt_${suffix}`,hash:'a'.repeat(64),...changes};
+ return rpc('record_verified_subscription_checkout_period',[c.checkout_id,owner,`sub_${suffix}`,`cus_${suffix}`,c.sku,o.status,o.start,o.end,`in_${suffix}`,
+ c.monthly_amount_cents,'usd',o.event,o.hash,o.at,false,c.deployment_id,c.sku==='studio'?'price_studio':'price_monitoring']);
+};
+test('explicit recurring consent and owned installed live origin are required; concurrent checkout retries dedupe',async()=>{
+ const owner=await newAccount();await assert.rejects(subscriptionCheckout(owner,'no-consent','studio',null,false),/invalid_input/);
+ const foreign=await deployment('installation_reported',B);await assert.rejects(subscriptionCheckout(owner,'foreign-site','monitoring',foreign.id),/not_found/);
+ const generated=await deployment('generated',owner);await assert.rejects(subscriptionCheckout(owner,'generated','monitoring',generated.id),/not_ready/);
+ await query('BEGIN');const c=await subscriptionCheckout(owner,'sub-once');const waiting=subscriptionCheckout(owner,'sub-once','studio',null,true,second);await query('COMMIT');
+ assert.equal((await waiting).checkout_id,c.checkout_id);assert.equal((await subscriptionCheckout(owner,'alias')).checkout_id,c.checkout_id);
+ const installed=await deployment('installation_reported',owner);const monitoring=await subscriptionCheckout(owner,'monitor','monitoring',installed.id);
+ assert.equal(monitoring.monthly_amount_cents,2900);assert.equal(monitoring.live_origin,installed.origin);
+ await assert.rejects(subscriptionCheckout(owner,'sub-once','monitoring',installed.id),/operation_conflict/);
+ assert.equal((await one('SELECT count(*)::int n FROM migration_subscription_checkouts WHERE user_id=$1',[owner])).n,2);
+});
+test('checkout/customer identity, verified invoice duplication and out-of-order expiration preserve paid rights',async()=>{
+ const owner=await newAccount();const c=await subscriptionCheckout(owner,'financial');await rpc('attach_subscription_customer',[owner,'cus_checkfinancial']);
+ await rpc('attach_subscription_checkout',[owner,c.checkout_id,'cs_test_checkfinancial','https://checkout.stripe.com/c/pay/checkfinancial']);
+ const paid=await checkoutFacts(owner,c,'checkfinancial');assert.equal(paid.eligible,true);
+ assert.equal((await checkoutFacts(owner,c,'checkfinancial')).replayed,true);
+ await assert.rejects(checkoutFacts(owner,c,'checkfinancial',{hash:'b'.repeat(64)}),/operation_conflict/);
+ const expired=await rpc('expire_verified_subscription_checkout',[c.checkout_id,'cs_test_checkfinancial','evt_expiredfinancial','b'.repeat(64),'expired']);
+ assert.equal(expired.state,'complete');assert.equal(expired.subscription.eligible,true);
+ await assert.rejects(subscriptionCheckout(owner,'duplicate-active'),/subscription_exists/);
+ await assert.rejects(rpc('attach_subscription_customer',[owner,'cus_other']),/operation_conflict/);
+ await assert.rejects(rpc('get_subscription_checkout',[B,c.checkout_id]),/not_found/);
+ await assert.rejects(query("UPDATE migration_subscription_checkouts SET sku='monitoring' WHERE id=$1",[c.checkout_id]),/immutable/);
+});
+test('late first payment persists explicit reconciliation and never creates an active paid period',async()=>{
+ const owner=await newAccount();const c=await one(`INSERT INTO migration_subscription_checkouts(user_id,sku,stripe_price_id,consented_at,created_at,expires_at)
+ VALUES($1,'studio','price_studio',now()-interval '2 days',now()-interval '2 days',now()-interval '1 day') RETURNING id`,[owner]);
+ const summary=await rpc('get_subscription_checkout',[owner,c.id]);await rpc('attach_subscription_customer',[owner,'cus_checkoutlate']);
+ const value=await checkoutFacts(owner,summary,'checkoutlate');assert.equal(value.eligible,false);assert.equal(value.status,'incomplete');
+ const stored=await rpc('get_subscription_checkout',[owner,c.id]);assert.equal(stored.state,'reconciliation_required');
+ assert.equal((await one('SELECT count(*)::int n FROM migration_test_subscription_periods WHERE subscription_id=$1',[value.subscription_id])).n,0);
+ const again=await checkoutFacts(owner,summary,'checkoutlate',{event:'evt_checkoutlateretry',at:stamp(100)});assert.equal(again.eligible,false);
+});
+const choose=(s,key=s.key,sub=null)=>rpc('select_studio_run_subscription',[s.f.user,s.f.id,s.q.quote_id,s.f.old,s.f.new,key,sub,20000,20000]);
+test('Studio selection preserves original operation, free/purchased rights, owner scope and recoverable sixth-slot state',async()=>{
+ const owner=await newAccount();const sub=await event('selector',{user:owner});const s=await scope(501,await fixture(501,2,owner));
+ assert.equal((await choose(s)).subscription_id,sub.subscription_id);
+ await startStudio(sub,s);assert.equal((await choose(s)).reason,'existing_operation');
+ const free=await scope(2,await fixture(2,2,owner));assert.equal((await choose(free)).reason,'free_quote');
+ const bought=await scope(501,await fixture(501,2,owner));await paid(bought.f,bought.q,'selectorPaid');assert.equal((await choose(bought)).reason,'purchased_quote');
+ await assert.rejects(choose(s,s.key,(await event('selectorForeign',{user:B})).subscription_id),/not_found/);
+ for(let i=1;i<5;i++)await reserve(sub,await scope(501,await fixture(501,2,owner)));
+ const sixth=await scope(501,await fixture(501,2,owner));const result=await choose(sixth,sixth.key,sub.subscription_id);
+ assert.equal(result.use_studio,false);assert.equal(result.reason,'allowance_exhausted');assert.equal(result.next_action,'complete_payment');
+ await assert.rejects(rpc('select_studio_run_subscription',[owner,s.f.id,s.q.quote_id,s.f.old,s.f.new,s.key,null,100,20000]),/capacity_exceeded/);
+});
+test('checkout authority is inaccessible to browser roles and all new account-owned history cascades',async()=>{
+ const owner=await newAccount();const c=await subscriptionCheckout(owner,'delete-checkout');await rpc('attach_subscription_customer',[owner,'cus_deletecheckout']);
+ await rpc('attach_subscription_checkout',[owner,c.checkout_id,'cs_test_deletecheckout','https://checkout.stripe.com/c/pay/deletecheckout']);
+ await checkoutFacts(owner,c,'deletecheckout');
+ for(const roleName of ['anon','authenticated'])await role(roleName,owner,()=>assert.rejects(subscriptionCheckout(owner,'browser'),/permission denied/));
+ await query('DELETE FROM auth.users WHERE id=$1',[owner]);
+ for(const table of ['migration_subscription_customers','migration_subscription_checkouts','migration_subscription_checkout_keys'])assert.equal((await one(`SELECT count(*)::int n FROM ${table} WHERE user_id=$1`,[owner])).n,0);
+});
+test('real checkout creation ledger through signed recurring events enables Studio run and owned monitoring, then respects cancellation',async()=>{
+ const owner=await newAccount();const f=await fixture(501,2,owner);const q=await quote(f,'checkout-full');const dep=await deployment('installation_reported',owner);
+ const cp=db.connectionParameters;const {execFile}=await import('node:child_process');const {promisify}=await import('node:util');
+ const {stdout}=await promisify(execFile)(process.env.SUBSCRIPTION_TEST_PYTHON,['-B','-m','backend.tests.subscription_checkout_runtime_probe'],{cwd:new URL('../../',import.meta.url),env:{...process.env,
+ MCP_PIVOT_ENABLED:'true',MCP_PIVOT_ACTIVATION:'test_only',
+ SUBSCRIPTION_FIXTURE_CONNECTION:JSON.stringify({host:cp.host,port:cp.port,dbname:cp.database,user:cp.user,password:cp.password}),
+ SUBSCRIPTION_FIXTURE_SCOPE:JSON.stringify({user:owner,migration_id:f.id,old:f.old,new:f.new,quote_id:q.quote_id,deployment_id:dep.id})}});
+ const result=JSON.parse(stdout);assert.ok(result.studio.run_id);assert.ok(result.monitoring.site_slot_id);
+ assert.equal((await one('SELECT count(*)::int n FROM migration_subscription_checkouts WHERE user_id=$1 AND state=$2',[owner,'complete'])).n,2);
+ assert.equal((await one('SELECT count(*)::int n FROM migration_test_subscription_periods WHERE user_id=$1',[owner])).n,2);
+ assert.equal((await one('SELECT count(*)::int n FROM migration_purchase_grants WHERE user_id=$1',[owner])).n,0);
+});

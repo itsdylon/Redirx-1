@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Card } from './ui/card';
 import { Button } from './ui/button';
@@ -9,6 +9,9 @@ export function AuthCallback() {
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
   const { completeOAuthCallback } = useAuth();
+  // Hydrating the account recreates the context callback. Share one completion
+  // for this mounted route so it cannot exchange/consume the return path twice.
+  const completion = useRef<Promise<string> | null>(null);
 
   const parseCallbackError = (): string | null => {
     const searchParams = new URLSearchParams(window.location.search);
@@ -44,6 +47,7 @@ export function AuthCallback() {
   };
 
   useEffect(() => {
+    let active = true;
     const handleCallback = async () => {
       try {
         const callbackError = parseCallbackError();
@@ -52,17 +56,21 @@ export function AuthCallback() {
           return;
         }
 
-        const redirect = await completeOAuthCallback();
-        navigate(redirect, { replace: true });
+        completion.current ??= completeOAuthCallback();
+        const redirect = await completion.current;
+        if (active) navigate(redirect, { replace: true });
       } catch (err: any) {
-        console.error('Auth callback error:', err);
-        setError(err.message || 'Unable to complete sign-in. Please try again.');
+        if (active) {
+          console.error('Auth callback could not complete.');
+          setError(err.message || 'Unable to complete sign-in. Please try again.');
+        }
       } finally {
-        setLoading(false);
+        if (active) setLoading(false);
       }
     };
 
     handleCallback();
+    return () => { active = false; };
   }, [completeOAuthCallback, navigate]);
 
   if (loading) {

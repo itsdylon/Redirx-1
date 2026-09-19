@@ -1,13 +1,16 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { act, render, screen } from '@testing-library/react';
+import { StrictMode } from 'react';
+import { Link, MemoryRouter, Route, Routes } from 'react-router-dom';
+import userEvent from '@testing-library/user-event';
 import { AuthCallback } from './AuthCallback';
 
 const mockCompleteOAuthCallback = vi.fn();
+let callbackImplementation = mockCompleteOAuthCallback;
 
 vi.mock('../contexts/AuthContext', () => ({
   useAuth: () => ({
-    completeOAuthCallback: mockCompleteOAuthCallback,
+    completeOAuthCallback: callbackImplementation,
   }),
 }));
 
@@ -27,6 +30,7 @@ function renderCallback(initialPath = '/auth/callback') {
 describe('AuthCallback', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    callbackImplementation = mockCompleteOAuthCallback;
   });
 
   it('completes callback and navigates to resolved redirect', async () => {
@@ -51,5 +55,67 @@ describe('AuthCallback', () => {
 
     expect(await screen.findByText('Sign-in Failed')).toBeInTheDocument();
     expect(screen.getByText('Unable to establish session.')).toBeInTheDocument();
+  });
+
+  it('does not restart completion when auth hydration changes the context function', async () => {
+    let resolve!: (path: string) => void;
+    mockCompleteOAuthCallback.mockImplementationOnce(() => new Promise<string>((done) => { resolve = done; }));
+    window.history.pushState({}, '', '/auth/callback');
+    const tree = () => (
+      <MemoryRouter initialEntries={['/auth/callback']}>
+        <Routes>
+          <Route path="/auth/callback" element={<AuthCallback />} />
+          <Route path="/oauth/consent" element={<div>Consent Route</div>} />
+          <Route path="/" element={<div>Unexpected Home</div>} />
+        </Routes>
+      </MemoryRouter>
+    );
+    const view = render(tree());
+    // AuthProvider recreates completeOAuthCallback after setUser. A duplicate
+    // completion would consume an already-consumed auth_redirect and return '/'.
+    callbackImplementation = vi.fn().mockResolvedValue('/');
+    view.rerender(tree());
+    expect(callbackImplementation).not.toHaveBeenCalled();
+    await act(async () => resolve('/oauth/consent?authorization_id=test-request'));
+    expect(await screen.findByText('Consent Route')).toBeInTheDocument();
+    expect(mockCompleteOAuthCallback).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText('Unexpected Home')).not.toBeInTheDocument();
+  });
+
+  it('completes once across StrictMode effect replay', async () => {
+    mockCompleteOAuthCallback.mockResolvedValue('/quick-match');
+    window.history.pushState({}, '', '/auth/callback');
+    render(
+      <StrictMode>
+        <MemoryRouter initialEntries={['/auth/callback']}>
+          <Routes>
+            <Route path="/auth/callback" element={<AuthCallback />} />
+            <Route path="/quick-match" element={<div>Quick Match Route</div>} />
+          </Routes>
+        </MemoryRouter>
+      </StrictMode>
+    );
+    expect(await screen.findByText('Quick Match Route')).toBeInTheDocument();
+    expect(mockCompleteOAuthCallback).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not navigate after the user leaves a pending callback', async () => {
+    let resolve!: (path: string) => void;
+    mockCompleteOAuthCallback.mockImplementationOnce(() => new Promise<string>((done) => { resolve = done; }));
+    window.history.pushState({}, '', '/auth/callback');
+    render(
+      <MemoryRouter initialEntries={['/auth/callback']}>
+        <Link to="/login">Leave callback</Link>
+        <Routes>
+          <Route path="/auth/callback" element={<AuthCallback />} />
+          <Route path="/login" element={<div>Login Route</div>} />
+          <Route path="/quick-match" element={<div>Unexpected Home</div>} />
+        </Routes>
+      </MemoryRouter>
+    );
+    await userEvent.setup().click(screen.getByText('Leave callback'));
+    await act(async () => resolve('/quick-match'));
+    expect(screen.getByText('Login Route')).toBeInTheDocument();
+    expect(screen.queryByText('Unexpected Home')).not.toBeInTheDocument();
   });
 });

@@ -199,7 +199,8 @@ left untouched; implementation and tests ran in isolated worktrees.
 The parent published only `deploy/consent-frontend-8e6ad72`, pinned to
 `8e6ad72b420c70fd54cee5a6355e85c980f001a5`. Neither `main` nor the remote pivot
 branch moved. Frontend build and 41 auth/consent/routing tests passed for that
-tree. This ref must remain pinned; subsequent local diagnostics do not change it.
+tree. This was the initial deployment pin; diagnostic-only work must not move it.
+Any later frontend hotfix must explicitly record a new reviewed SHA and deploy ID.
 
 Claude's subsequent read-only Render check through Herdr confirmed auto-deploy
 **off for frontend, API, worker and MCP** (settings updates through September 19
@@ -216,3 +217,23 @@ strict gateway-compatible claims and credential-free console output. No live
 consent/token exchange was run. This does not satisfy the production OAuth gate
 or prove authenticated MCP tool execution. It introduces no production imports,
 new dependencies, pricing activation or schema changes.
+
+## GitHub return-path regression (September 18, after first live consent attempt)
+
+User clarified that GitHub sign-in returned to the app, not the loopback callback.
+The probe received no valid callback and no token issuance was verified. Stage E
+itself is live at `8e6ad72` / `dep-damuhejm8hqs739d1500`; see the operational handoff.
+
+Reproduced a callback race locally: `AuthProvider` recreates
+`completeOAuthCallback` during account hydration. `AuthCallback` treats that function
+as an effect dependency and can start a second completion, exchanging again and
+consuming `auth_redirect` again (then defaulting to `/`). Context-change and StrictMode
+regression tests both failed against the old implementation. This is a confirmed
+code bug and a plausible explanation, not a verified trace of the user's browser.
+The previously observed deployment HTML cache is another possible contributor.
+
+The local hotfix shares one completion promise per mounted callback route and ignores
+stale effect settlements, including after navigation away. **44 auth/consent/routing
+tests pass; frontend build passes.** Production OAuth acceptance is still pending.
+Only the callback component and its tests change under `frontend`; all runtime
+backend/gateway behavior, SQL, pricing and auto-deploy settings remain untouched.

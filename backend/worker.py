@@ -29,6 +29,7 @@ from src.redirx.lib import Pipeline
 from uuid import UUID
 from src.redirx.config import Config
 from backend.services.deep_preview_service import DeepPreviewService
+from backend.services.migration_run_service import MigrationRunService
 from backend.services.match_repair_service import MatchRepairService
 from backend.services.job_limits import (
     ContentJobUrlCapExceeded,
@@ -391,6 +392,7 @@ class RedirxWorker:
                     'pipeline_type': claimed.get('pipeline_type') or 'content',
                     'is_preview': bool(claimed.get('is_preview', False)),
                     'source_session_id': claimed_source,
+                    'mcp_run_id': str(claimed['mcp_run_id']) if claimed.get('mcp_run_id') else None,
                 }
                 return job
         except TRANSIENT_DB_ERRORS as e:
@@ -410,7 +412,7 @@ class RedirxWorker:
         Uses optimistic status check for safe single-row claim.
         """
         pending = client.table('migration_sessions').select(
-            'id,user_id,project_name,old_urls,new_urls,attempt_count,pipeline_type,is_preview,source_session_id'
+            '*'
         ).eq(
             'status', 'pending'
         ).order(
@@ -458,6 +460,7 @@ class RedirxWorker:
             'pipeline_type': candidate.get('pipeline_type') or 'content',
             'is_preview': bool(candidate.get('is_preview', False)),
             'source_session_id': candidate.get('source_session_id'),
+            'mcp_run_id': candidate.get('mcp_run_id'),
         }
         print(
             f"[Worker] Claimed job via fallback: {job['id']} (attempt {job['attempt_count']})",
@@ -541,6 +544,13 @@ class RedirxWorker:
         attempt_count = job.get('attempt_count', 1)
         pipeline_type = job.get('pipeline_type', 'content')
         is_preview = bool(job.get('is_preview', False))
+        pivot_service = MigrationRunService() if job.get('mcp_run_id') else None
+
+        async def finish(status, error=None):
+            if pivot_service is not None:
+                pivot_service.finalize_session(job, self.worker_id, status, error)
+            else:
+                await self.release_lease(session_id, status, error)
 
         print(
             f"[Worker] Processing job {session_id} (attempt {attempt_count}, "
@@ -553,6 +563,9 @@ class RedirxWorker:
         preview_service = DeepPreviewService()
 
         try:
+            if pivot_service is not None:
+                pivot_service.authorize_dispatch(job, self.worker_id)
+
             # Get URLs from job
             old_urls = job.get('old_urls', [])
             new_urls = job.get('new_urls', [])
@@ -561,7 +574,7 @@ class RedirxWorker:
                 print(f"[Worker] Job {session_id} has no URLs")
                 if is_preview:
                     preview_service.mark_failed(session_id, 'No URLs provided')
-                await self.release_lease(session_id, 'permanently_failed', 'No URLs provided')
+                await finish('permanently_failed', 'No URLs provided')
                 return False
 
             try:
@@ -571,7 +584,7 @@ class RedirxWorker:
                 print(f"[Worker] Job {session_id} rejected before processing: {fail_message}")
                 if is_preview:
                     preview_service.mark_failed(session_id, fail_message)
-                await self.release_lease(session_id, 'permanently_failed', fail_message)
+                await finish('permanently_failed', fail_message)
                 return False
 
             print(f"[Worker] Processing {len(old_urls)} old URLs and {len(new_urls)} new URLs (pipeline: {pipeline_type})")
@@ -613,14 +626,15 @@ class RedirxWorker:
                 mappings = mapping_db.get_mappings_by_session(session_id)
                 mapping_count = len(mappings or [])
 
-                self._apply_usage_accounting(
-                    user_id=user_id,
-                    session_id=session_id,
-                    pipeline_type=pipeline_type,
-                    is_preview=is_preview,
-                    old_urls=old_urls,
-                    new_urls=new_urls,
-                )
+                if pivot_service is None:
+                    self._apply_usage_accounting(
+                        user_id=user_id,
+                        session_id=session_id,
+                        pipeline_type=pipeline_type,
+                        is_preview=is_preview,
+                        old_urls=old_urls,
+                        new_urls=new_urls,
+                    )
 
             # Propose repairs for the rows the matcher flagged, using the
             # rename conventions this session's own confident matches
@@ -666,7 +680,7 @@ class RedirxWorker:
                     preview_service.mark_failed(session_id, str(preview_err))
 
             # Success - release lease and mark completed
-            await self.release_lease(session_id, 'completed')
+            await finish('completed')
             print(f"[Worker] Job {session_id} completed successfully")
 
             # Send completion email (fire-and-forget)
@@ -724,7 +738,7 @@ class RedirxWorker:
             # Check if we should retry or permanently fail
             if attempt_count >= WORKER_MAX_ATTEMPTS:
                 print(f"[Worker] Job {session_id} exceeded max attempts, marking as permanently failed")
-                await self.release_lease(session_id, 'permanently_failed', error_msg)
+                await finish('permanently_failed', error_msg)
 
                 # Send failure email (fire-and-forget)
                 if not is_preview:
@@ -750,7 +764,7 @@ class RedirxWorker:
                         print(f"[Worker] Failure email failed (non-blocking)")
             else:
                 print(f"[Worker] Job {session_id} will be retried")
-                await self.release_lease(session_id, 'pending', error_msg)
+                await finish('pending', error_msg)
 
             return False
 

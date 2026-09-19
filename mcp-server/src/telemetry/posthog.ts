@@ -62,7 +62,9 @@ export function setupTelemetry(server: McpServer): void {
 
   instrument(server, posthog, {
     context: true,
-    reportMissing: true,
+    // The pivot contract fixes the complete tool inventory at eleven. Retain
+    // the deliberately added roadmap helper on the legacy surface only.
+    reportMissing: !config.pivotEnabled,
     identify: async (_request, extra) => {
       const authInfo = (extra as { authInfo?: AuthInfo & { extra?: VerifiedIdentity } } | undefined)
         ?.authInfo;

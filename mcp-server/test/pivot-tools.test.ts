@@ -2,10 +2,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 
+vi.mock('posthog-node', () => ({ PostHog: class { capture() {} async shutdown() {} } }));
+
 vi.mock('../src/config.js', () => ({
   config: {
     backendBaseUrl: 'https://backend.test', pivotEnabled: true,
-    posthog: {},
+    posthog: { apiKey: 'fixture-no-network' },
   },
 }));
 
@@ -69,7 +71,7 @@ describe('opt-in pivot MCP tools', () => {
     config.pivotEnabled = false;
     const { client, close } = await connected();
     try {
-      expect((await client.listTools()).tools.map(tool => tool.name).sort()).toEqual(['deep_match', 'discover', 'export', 'preview']);
+      expect((await client.listTools()).tools.map(tool => tool.name).sort()).toEqual(['deep_match', 'discover', 'export', 'get_more_tools', 'preview']);
     } finally {
       config.pivotEnabled = true;
       await close();
@@ -98,6 +100,20 @@ describe('opt-in pivot MCP tools', () => {
       } });
       expect(result.isError).toBe(true);
       expect(fetchMock).not.toHaveBeenCalled();
+    } finally { await close(); }
+  });
+
+  it('preserves side-qualified aliases for the authoritative planning validator', async () => {
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(envelope({})), { headers: { 'content-type': 'application/json' } }));
+    const { client, close } = await connected();
+    try {
+      await client.callTool({ name: 'plan_migration', arguments: {
+        old_site: 'https://old.test', new_site: 'https://new.test', idempotency_key: 'plan-1',
+        site_aliases: { old: ['https://www.old.test'], new: ['https://preview.new.test'] },
+      } });
+      expect(JSON.parse(fetchMock.mock.calls[0][1].body).site_aliases).toEqual({
+        old: ['https://www.old.test'], new: ['https://preview.new.test'],
+      });
     } finally { await close(); }
   });
 

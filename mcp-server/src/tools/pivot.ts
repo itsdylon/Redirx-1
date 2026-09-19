@@ -81,7 +81,7 @@ function query(path: string, values: Record<string, string | number | undefined>
 export function registerPivotTools(server: McpServer): void {
   server.registerTool('plan_migration', {
     title: 'Plan a migration', description: 'Create an owned old-site/new-site migration plan. This starts no paid work.',
-    inputSchema: { old_site: z.string().min(1), new_site: z.string().min(1), name: z.string().max(200).optional(), aliases: z.array(z.string()).max(20).optional(), gsc_property: z.string().max(2048).optional(), idempotency_key: IDEMPOTENCY },
+    inputSchema: { old_site: z.string().min(1).max(8192), new_site: z.string().min(1).max(8192), name: z.string().max(200).optional(), site_aliases: z.object({ old: z.array(z.string().max(8192)).max(100).optional(), new: z.array(z.string().max(8192)).max(100).optional() }).optional(), idempotency_key: IDEMPOTENCY },
     annotations: { readOnlyHint: false, idempotentHint: true, openWorldHint: true },
   }, (args, extra) => call(extra as ToolExtra, 'POST', '/migrations', args));
 

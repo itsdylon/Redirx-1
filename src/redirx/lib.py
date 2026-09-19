@@ -138,7 +138,13 @@ class Pipeline:
     but in the future should yield debug information about the iteration.
     """
     async def iterate(self) -> any:
-        while self.__index < len(self.__stages):
-            self.state = await self.__stages[self.__index].execute(self.state)
-            self.__index += 1
-            yield self.state
+        try:
+            while self.__index < len(self.__stages):
+                self.state = await self.__stages[self.__index].execute(self.state)
+                self.__index += 1
+                yield self.state
+        finally:
+            for stage in self.__stages:
+                close = getattr(stage, 'close_resources', None)
+                if callable(close):
+                    close()

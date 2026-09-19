@@ -188,11 +188,20 @@ async def measure(args, client):
     def summarize_plan(node):
         return {key:value for key,value in node.items() if key in {'Node Type','Index Name','Relation Name'}} | ({'Plans':[summarize_plan(child) for child in node['Plans']]} if node.get('Plans') else {})
     plan = summarize_plan(plan[0]['QUERY PLAN'][0]['Plan'])
+    pages = list(pipeline.state[0]) + list(pipeline.state[1])
+    stores = {id(page._content_store): page._content_store for page in pages if getattr(page, '_content_store', None)}
+    retained_html = sum(len(page.html) for page in pages)
+    retained_text = sum(len((page._extracted_text or '').encode('utf-8')) for page in pages)
+    assert retained_html == retained_text == 0, 'Pivot pages must release full HTML and spool semantic text'
+    assert all(store.file.closed for store in stores.values()), 'Pipeline must close temporary content stores'
+    assert all(page._text_reference[1] <= 32000 for page in pages if page._text_reference)
     usage = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
     return {'old_urls':args.old,'new_urls':args.new,'requested_html_bytes':args.html_bytes,
         'wall_seconds':round(time.perf_counter()-start,3),'stage_timings':stages,
         'python_peak_rss_bytes':usage if sys.platform=='darwin' else usage*1024,
         'candidate_query_plan':plan,
+        'retained_html_characters':retained_html,'retained_text_heap_bytes':retained_text,
+        'temporary_content_bytes':sum(store.bytes_written for store in stores.values()),'content_stores_closed':True,
         'database_child':client.http.get(client.url+'/metrics').json(),
         'http_requests':hits,'peak_observed_http_handlers':peak_active,'embedding_provider_calls':provider.calls,
         'dimensions':1536,'candidate_sql_queries':client.candidate_queries,'vector_read_pages':client.vector_read_pages,

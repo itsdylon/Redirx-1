@@ -1,0 +1,78 @@
+{
+  "old_urls": 15000,
+  "new_urls": 20000,
+  "requested_html_bytes": 65536,
+  "wall_seconds": 747.275,
+  "stage_timings": [
+    {
+      "stage": "Filtering URLs",
+      "seconds": 0.071
+    },
+    {
+      "stage": "Matching exact URLs",
+      "seconds": 0.064
+    },
+    {
+      "stage": "Scraping webpages",
+      "seconds": 18.373
+    },
+    {
+      "stage": "Matching HTML content",
+      "seconds": 0.004
+    },
+    {
+      "stage": "Generating embeddings",
+      "seconds": 563.502
+    },
+    {
+      "stage": "Pairing URLs",
+      "seconds": 164.375
+    }
+  ],
+  "python_peak_rss_bytes": 156663808,
+  "candidate_query_plan": {
+    "Node Type": "Subquery Scan",
+    "Plans": [
+      {
+        "Node Type": "Limit",
+        "Plans": [
+          {
+            "Node Type": "Index Scan",
+            "Index Name": "webpage_embeddings_embedding_idx",
+            "Relation Name": "webpage_embeddings"
+          }
+        ]
+      }
+    ]
+  },
+  "retained_html_characters": 0,
+  "retained_text_heap_bytes": 0,
+  "temporary_content_bytes": 1120000000,
+  "content_stores_closed": true,
+  "database_child": {
+    "queries": 65604,
+    "sampled_peak_rss_bytes": 1397948416,
+    "os_peak_rss_bytes": 1437450240,
+    "current_rss_bytes": 364593152
+  },
+  "http_requests": 35002,
+  "peak_observed_http_handlers": 8,
+  "embedding_provider_calls": 35000,
+  "dimensions": 1536,
+  "candidate_sql_queries": 15000,
+  "vector_read_pages": 442,
+  "max_vector_page_rows": 97,
+  "mappings_persisted": 15000,
+  "correct_semantic_targets": 15000,
+  "semantic_recall": 1.0,
+  "acceptance_passed": true,
+  "tail_verified": true,
+  "query_case_slash_variants_verified": true,
+  "provider": "deterministic injected embeddings; no LLM exists in this content pipeline",
+  "database": "real PGlite PostgreSQL + pgvector + documented HNSW match_pages SQL",
+  "limitations": [
+    "loopback pacing disabled",
+    "synthetic content and embeddings",
+    "not a live provider/deployed worker benchmark"
+  ]
+}

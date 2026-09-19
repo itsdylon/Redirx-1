@@ -11,6 +11,7 @@ import numpy as np
 from openai import AsyncOpenAI
 
 from .async_batch import bounded_map
+from .bounded_content import BoundedContentStore, ContentStorageError, ContentTooLarge, ContentUnavailable, extract_bounded_content, read_bounded_text
 from .config import Config
 from .database import WebPageEmbeddingDB, MigrationSessionDB, URLMappingDB
 from .safe_fetch import create_safe_connector
@@ -553,12 +554,17 @@ class WebScraperStage(Stage):
             )
 
         self.preserve_url_identity = preserve_url_identity
+        self.content_store = BoundedContentStore() if preserve_url_identity else None
         self.max_total_concurrency = total
         self.max_site_concurrency = min(per_site, total)
         # Escape hatch: set false to restore straight per-page scraping.
         self.use_content_ladder = os.getenv(
             "CONTENT_LADDER_ENABLED", "true"
         ).strip().lower() not in ("0", "false", "no", "off")
+
+    def close_resources(self):
+        if self.content_store is not None:
+            self.content_store.close()
 
     @staticmethod
     def _root_of(urls: list[str]) -> Optional[str]:
@@ -588,17 +594,26 @@ class WebScraperStage(Stage):
                 from .discovery import detect_generator
 
                 async with session.get(
-                    f"{root}/", timeout=aiohttp.ClientTimeout(total=20)
+                    f"{root}/", timeout=aiohttp.ClientTimeout(total=20),
+                    **({'auto_decompress': False, 'headers': {'Accept-Encoding': 'identity'}} if self.preserve_url_identity else {}),
                 ) as resp:
                     origin_reachable = resp.status < 400
-                    html = await resp.text(errors="replace") if origin_reachable else ""
+                    html = ""
+                    if origin_reachable:
+                        if self.preserve_url_identity:
+                            try:
+                                html = await read_bounded_text(resp)
+                            except (ContentTooLarge, ContentUnavailable):
+                                pass  # The origin is reachable; only detection failed.
+                        else:
+                            html = await resp.text(errors="replace")
                     generator = detect_generator(html, dict(resp.headers))
             except Exception:
                 # Unreachable origin promotes archived content ahead of
                 # per-page fetching, which would only produce failures.
                 origin_reachable = False
 
-        fetcher = ContentFetcher(session, preserve_url_identity=self.preserve_url_identity)
+        fetcher = ContentFetcher(session, preserve_url_identity=self.preserve_url_identity, content_store=self.content_store)
         resolved = await fetcher.fetch(
             urls, root or "", generator=generator, origin_reachable=origin_reachable
         )
@@ -612,7 +627,12 @@ class WebScraperStage(Stage):
         pages = []
         for url in urls:
             page = resolved.get(fetcher.key(url))
-            pages.append(page if page and page.url == url else WebPage(url, page.html if page else ""))
+            if page is not None:
+                pages.append(page if page.url == url else page.with_url(url))
+            else:
+                unavailable = WebPage(url, "")
+                unavailable.content_error = fetcher.errors.get(fetcher.key(url), 'content_unavailable') if self.preserve_url_identity else None
+                pages.append(unavailable)
         return pages
 
     async def execute(self, input: tuple[list[str], list[str]]) -> tuple[list[WebPage], list[WebPage]]:
@@ -638,7 +658,7 @@ class WebScraperStage(Stage):
             async def scrape_with_limits(url: str, site_semaphore: asyncio.Semaphore):
                 async with total_semaphore:
                     async with site_semaphore:
-                        return await WebPage.scrape(session, url)
+                        return await WebPage.scrape(session, url, **({'compact': True, 'content_store': self.content_store} if self.preserve_url_identity else {}))
 
             async def gather_old():
                 return await bounded_map(lambda url: scrape_with_limits(url, old_site_semaphore), old_urls, self.max_site_concurrency)
@@ -663,9 +683,9 @@ class WebScraperStage(Stage):
                 new_webpages = new_task.result()
 
         # Log scraping results
-        old_success = sum(1 for p in old_webpages if len(p.html) > 0)
+        old_success = sum(1 for p in old_webpages if p.html_length > 0)
         old_failed = len(old_webpages) - old_success
-        new_success = sum(1 for p in new_webpages if len(p.html) > 0)
+        new_success = sum(1 for p in new_webpages if p.html_length > 0)
         new_failed = len(new_webpages) - new_success
 
         print(f"WebScraperStage: Old site - {old_success} succeeded, {old_failed} failed")
@@ -675,22 +695,22 @@ class WebScraperStage(Stage):
         if old_failed > 0:
             print(f"⚠️  WebScraperStage: Failed to scrape {old_failed} old pages:")
             for page in old_webpages:
-                if len(page.html) == 0:
+                if page.html_length == 0:
                     print(f"   - {page.url}")
 
         if new_failed > 0:
             print(f"⚠️  WebScraperStage: Failed to scrape {new_failed} new pages:")
             for page in new_webpages:
-                if len(page.html) == 0:
+                if page.html_length == 0:
                     print(f"   - {page.url}")
 
         # Log HTML sizes for successful scrapes
         if old_success > 0:
-            avg_old_size = sum(len(p.html) for p in old_webpages if len(p.html) > 0) / old_success
+            avg_old_size = sum(p.html_length for p in old_webpages if p.html_length > 0) / old_success
             print(f"WebScraperStage: Old pages avg HTML size: {int(avg_old_size)} bytes")
 
         if new_success > 0:
-            avg_new_size = sum(len(p.html) for p in new_webpages if len(p.html) > 0) / new_success
+            avg_new_size = sum(p.html_length for p in new_webpages if p.html_length > 0) / new_success
             print(f"WebScraperStage: New pages avg HTML size: {int(avg_new_size)} bytes")
 
         return (old_webpages, new_webpages)
@@ -721,8 +741,8 @@ class HtmlPruneStage(Stage):
         old_pages, new_pages = input
 
         # Filter out pages with empty/short HTML
-        valid_new_pages = [p for p in new_pages if len(p.html) >= self.MIN_HTML_LENGTH]
-        valid_old_pages = [p for p in old_pages if len(p.html) >= self.MIN_HTML_LENGTH]
+        valid_new_pages = [p for p in new_pages if p.html_length >= self.MIN_HTML_LENGTH]
+        valid_old_pages = [p for p in old_pages if p.html_length >= self.MIN_HTML_LENGTH]
 
         # Log filtering
         skipped_old = len(old_pages) - len(valid_old_pages)
@@ -783,8 +803,8 @@ class EmbedStage(Stage):
 
         # Filter out pages with empty or very short HTML (scraping failures)
         MIN_HTML_LENGTH = 100
-        valid_old_pages = [p for p in old_pages if len(p.html) >= MIN_HTML_LENGTH]
-        valid_new_pages = [p for p in new_pages if len(p.html) >= MIN_HTML_LENGTH]
+        valid_old_pages = [p for p in old_pages if p.html_length >= MIN_HTML_LENGTH]
+        valid_new_pages = [p for p in new_pages if p.html_length >= MIN_HTML_LENGTH]
 
         skipped_old = len(old_pages) - len(valid_old_pages)
         skipped_new = len(new_pages) - len(valid_new_pages)
@@ -793,13 +813,13 @@ class EmbedStage(Stage):
         if skipped_old > 0:
             print(f"⚠️  EmbedStage: Skipping {skipped_old} old pages (failed to scrape):", flush=True)
             for page in old_pages:
-                if len(page.html) < MIN_HTML_LENGTH:
+                if page.html_length < MIN_HTML_LENGTH:
                     print(f"   - {page.url}", flush=True)
 
         if skipped_new > 0:
             print(f"⚠️  EmbedStage: Skipping {skipped_new} new pages (failed to scrape):", flush=True)
             for page in new_pages:
-                if len(page.html) < MIN_HTML_LENGTH:
+                if page.html_length < MIN_HTML_LENGTH:
                     print(f"   - {page.url}", flush=True)
 
         print(f"EmbedStage: Generating embeddings for {len(valid_old_pages)} old + {len(valid_new_pages)} new pages...", flush=True)
@@ -1102,7 +1122,7 @@ class PairingStage(Stage):
             for index, page in enumerate(final_orphaned):
                 if index % 32 == 0:
                     await asyncio.sleep(0)
-                self.mapping_db.insert_mapping(self.session_id, page.url, None, 0.0, 'unmatched', True)
+                self.mapping_db.insert_mapping(self.session_id, page.url, None, 0.0, page.content_error or 'unmatched', True)
         if final_orphaned:
             print(f"\nOrphaned pages (no suitable match found):")
             for page in final_orphaned:
@@ -1276,9 +1296,49 @@ class WebPage:
         self.__html_cache = None
         self._extracted_text = None
         self._title = None
+        self._compacted = False
+        self._original_html_length = len(html)
+        self._content_digest = None
+        self._content_store = None
+        self._text_reference = None
+        self.content_error = None
+
+    @property
+    def html_length(self):
+        return self._original_html_length if self._compacted else len(self.html)
+
+    def compact(self, content_store=None):
+        """Retain bounded semantic content and exact HTML identity, then discard HTML."""
+        if self._compacted:
+            if content_store is not None and self._content_store is None:
+                self._text_reference = content_store.write_text(self._extracted_text or '')
+                self._content_store = content_store
+                self._extracted_text = None
+            return self
+        import hashlib
+        self.__html_cache = hash(self.html)
+        self._content_digest = hashlib.sha256(self.html.encode('utf-8')).digest()
+        if self.html:
+            self._extracted_text, self._title = extract_bounded_content(self.html, self.url)
+        else:
+            self._extracted_text, self._title = '', ''
+        self._original_html_length = len(self.html)
+        self.html = ''
+        self._compacted = True
+        if content_store is not None:
+            self._text_reference = content_store.write_text(self._extracted_text)
+            self._content_store = content_store
+            self._extracted_text = None
+        return self
+
+    def with_url(self, url):
+        import copy
+        page = copy.copy(self)
+        page.url = url
+        return page
 
     @staticmethod
-    async def scrape(session: aiohttp.ClientSession, url: str, max_retries: int = 3) -> WebPage:
+    async def scrape(session: aiohttp.ClientSession, url: str, max_retries: int = 3, compact: bool = False, content_store=None) -> WebPage:
         """
         Scrape a URL with retry logic and exponential backoff.
 
@@ -1305,7 +1365,8 @@ class WebPage:
                     # Global per-host pacing, shared across every worker.
                     await limiter.acquire(url)
 
-                async with session.get(url, timeout=aiohttp.ClientTimeout(total=30)) as response:
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=30),
+                    **({'auto_decompress': False, 'headers': {'Accept-Encoding': 'identity'}} if compact else {})) as response:
                     if limiter is not None:
                         ra = parse_retry_after(response.headers.get("Retry-After"))
                         if limiter.note_response(response.status, ra):
@@ -1314,12 +1375,21 @@ class WebPage:
                             await limiter.record_success(url)
 
                     if response.status == 200:
-                        html = await response.text()
-                        return WebPage(url, html)
+                        html = await read_bounded_text(response) if compact else await response.text()
+                        page = WebPage(url, html)
+                        return page.compact(content_store) if compact else page
                     else:
                         last_error = f"Status {response.status}"
                         if attempt == max_retries - 1:
                             print(f"Warning: Failed to scrape {url} - {last_error} (after {max_retries} attempts)")
+
+            except ContentStorageError:
+                raise
+
+            except (ContentTooLarge, ContentUnavailable) as exc:
+                page = WebPage(url, "")
+                page.content_error = exc.code
+                return page
 
             except CircuitOpen:
                 # Host is blocking us; further attempts would only deepen a ban.
@@ -1341,9 +1411,15 @@ class WebPage:
                 if attempt == max_retries - 1:
                     print(f"Warning: {last_error} scraping {url} (after {max_retries} attempts)")
 
-        return WebPage(url, html)
+        page = WebPage(url, html)
+        if compact:
+            page.content_error = 'content_unavailable'
+            page.compact(content_store)
+        return page
 
     def extract_text(self) -> str:
+        if self._content_store is not None:
+            return self._content_store.read_text(self._text_reference)
         if self._extracted_text is not None:
             return self._extracted_text
 
@@ -1410,4 +1486,9 @@ class WebPage:
         """
         if not isinstance(other, WebPage):
             return False
+        if self._compacted or other._compacted:
+            import hashlib
+            left = self._content_digest or hashlib.sha256(self.html.encode('utf-8')).digest()
+            right = other._content_digest or hashlib.sha256(other.html.encode('utf-8')).digest()
+            return left == right
         return self.html == other.html

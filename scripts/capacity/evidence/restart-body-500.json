@@ -1,0 +1,56 @@
+{
+  "old_urls": 500,
+  "new_urls": 600,
+  "processes": [
+    {
+      "pid": 12619,
+      "wall_seconds": 9.296,
+      "embedding_provider_calls": 1100,
+      "candidate_sql_queries": 125,
+      "mapping_writes": 125,
+      "max_vector_page_rows": 97,
+      "python_peak_rss_bytes": 139182080,
+      "exit_status": 75,
+      "embeddings_persisted": 1100,
+      "mappings_persisted": 125
+    },
+    {
+      "pid": 12847,
+      "wall_seconds": 2.934,
+      "embedding_provider_calls": 0,
+      "candidate_sql_queries": 375,
+      "mapping_writes": 375,
+      "max_vector_page_rows": 97,
+      "python_peak_rss_bytes": 139034624,
+      "exit_status": 0,
+      "embeddings_persisted": 1100,
+      "mappings_persisted": 500
+    },
+    {
+      "pid": 12916,
+      "wall_seconds": 0.414,
+      "embedding_provider_calls": 0,
+      "candidate_sql_queries": 0,
+      "mapping_writes": 0,
+      "max_vector_page_rows": 97,
+      "python_peak_rss_bytes": 141819904,
+      "exit_status": 0,
+      "embeddings_persisted": 1100,
+      "mappings_persisted": 500
+    }
+  ],
+  "http_requests": 3306,
+  "database_child": {
+    "queries": 2188,
+    "sampled_peak_rss_bytes": 1307623424,
+    "os_peak_rss_bytes": 1528545280,
+    "current_rss_bytes": 548913152
+  },
+  "all_originals_and_tail_verified": true,
+  "duplicate_embedding_or_mapping_rows": 0,
+  "limitations": [
+    "sequential actual engine process restart; not overlapping stale workers",
+    "deterministic embedding provider",
+    "real PGlite/pgvector; not deployed PostgreSQL latency"
+  ]
+}

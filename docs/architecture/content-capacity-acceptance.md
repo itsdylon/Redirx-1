@@ -8,9 +8,8 @@ contains no LLM stage. Local host pacing and the safe connector are replaced
 inside the loopback-only fixture, which rejects any external HTTP request.
 
 The tests do not establish deployed throughput, external provider cost or
-quality, concurrent production worker capacity, or arbitrary HTML-body memory
-limits. Raw HTML retention is a separate release requirement. Technical caps
-remain unchanged pending that measurement.
+quality, concurrent production worker capacity, or arbitrary provider latency. Technical caps remain unchanged in this packet;
+the measured pivot bounds must be wired separately from legacy limits.
 
 ## Fixes
 
@@ -117,3 +116,50 @@ actual HNSW index with low search effort: 72 of 80 queries missed a strong
 candidate, and all 80 were correct after exact fallback. It also verifies real
 pgvector JSON coercion, session/side filtering, response bounds, null limit
 rejection, and denied authenticated-role execution.
+
+## Bounded response and retained-content acceptance
+
+Pivot HTTP reads now bound both compressed and decoded response bodies to 2 MiB,
+including chunked responses and gzip expansion. Unsupported or malformed
+compression is explicitly unavailable. Oversized content persists an unmatched
+row with `match_type=content_too_large`; an oversized root probe does not turn
+an otherwise reachable origin into an unreachable origin. Legacy fetching is
+unchanged. Exact HTML evidence retains a digest, never the full body.
+
+Extracted content retains at most 32,000 UTF-8 bytes per page and 512 title bytes.
+A private per-pipeline spool keeps at most 8 MiB in heap before spilling to disk;
+texts are read when the embedding stage needs them. The spool closes on normal
+completion, cancellation, and failure. A spool failure fails the job rather than
+reporting missing content. At 35,000 pages the maximum extracted-text disk budget
+is 1,120,000,000 bytes per active pipeline, in addition to database storage.
+
+The actual full pipeline with 15,000 old and 20,000 new pages containing 64 KiB
+HTML each completed in 747.275 seconds, with all 15,000 expected mappings and
+original identities verified. Python peak RSS was 156,663,808 bytes; the separate
+PGlite process peaked at 1,437,450,240 bytes. Scraping took 18.373 seconds, embedding
+persistence 563.502 seconds, and pairing 164.375 seconds. All 35,000 extracted
+texts used the spool (1,120,000,000 bytes total), which was closed afterward;
+retained HTML and retained text heap were both zero. This is real HTTP and real
+vector SQL with deterministic external embeddings, not deployed provider timing.
+
+A separate dense-markup scraper stress used 32 pages of 2,096,985 bytes each
+(125,824 markup tokens per page), made 34 HTTP requests, and completed in 16.249
+seconds with Python peak RSS 300,400,640 bytes. It exercises the real scraper and
+extraction path near the body limit; it is not a full-pipeline benchmark.
+
+Evidence is in `body-500.json`, `body-15000.json`, and `body-dense-max.json`.
+The large benchmark preceded the final disk-failure classification and explicit
+BeautifulSoup cleanup improvements; focused tests validate those improvements.
+Reproduce the large-body run by adding `--html-bytes 65536` to the full benchmark
+command. Run `scripts/capacity/stress_scrape_memory.py` for dense-markup stress.
+The eight real HTTP body tests cover early termination of huge chunked responses,
+compression bombs, invalid gzip, CMS/archive fallbacks, root reachability, disk
+failure, cancellation cleanup, and unchanged legacy behavior.
+
+Final combined restart acceptance used three fresh engine processes: the first
+committed 1,100 embeddings and 125 mappings before abrupt exit; the second made
+zero embedding calls and completed the remaining 375 mappings; the third made
+zero provider/candidate/write calls. All originals and tail targets remained
+correct with no duplicate rows (`restart-body-500.json`). The corrected 052
+namespace tests passed 160 actual vector queries across public and extensions
+schemas, including restricted operator lookup.

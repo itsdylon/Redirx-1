@@ -1,0 +1,16 @@
+{
+  "old_urls": 16,
+  "new_urls": 16,
+  "html_body_bytes": 2096985,
+  "html_elements_per_page": 125824,
+  "http_requests": 34,
+  "wall_seconds": 16.249,
+  "python_peak_rss_bytes": 300400640,
+  "retained_html_characters": 0,
+  "retained_text_heap_bytes": 0,
+  "temporary_content_bytes": 1024000,
+  "limitations": [
+    "actual scraper and parser only; full matching is measured separately",
+    "loopback HTTP pacing disabled"
+  ]
+}

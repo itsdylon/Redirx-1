@@ -39,6 +39,7 @@ import aiohttp
 from .rate_limit import CircuitOpen, get_limiter, parse_retry_after
 from .stages import WebPage
 from .async_batch import bounded_map
+from .bounded_content import ContentStorageError, ContentTooLarge, ContentUnavailable, read_bounded_body, read_bounded_text
 
 logger = logging.getLogger(__name__)
 
@@ -74,10 +75,12 @@ def _key(url: str) -> str:
 
 def is_usable(page: Optional[WebPage]) -> bool:
     """Whether a fetched page carries enough text to embed meaningfully."""
-    if page is None or not page.html:
+    if page is None or not page.html_length:
         return False
     try:
         return len(page.extract_text()) >= MIN_USABLE_TEXT
+    except ContentStorageError:
+        raise
     except Exception:
         return False
 
@@ -98,8 +101,13 @@ def _page_from_parts(url: str, title: str, body_html: str) -> WebPage:
 class ContentFetcher:
     """Resolves URLs to WebPages using the cheapest tier that yields real text."""
 
-    def __init__(self, session: aiohttp.ClientSession, enable_wayback: bool = True, preserve_url_identity=False):
+    def __init__(self, session: aiohttp.ClientSession, enable_wayback: bool = True, preserve_url_identity=False, content_store=None):
         self.session = session
+        self.preserve_url_identity = preserve_url_identity
+        self.content_store = content_store
+        self.request_options = {'auto_decompress': False, 'headers': {'Accept-Encoding': 'identity'}} if preserve_url_identity else {}
+        self.errors = {}
+        self.wanted_keys = None
         self.key = (lambda url: url.split("#", 1)[0]) if preserve_url_identity else _key
         self.enable_wayback = enable_wayback
         self.stats: dict[str, int] = {
@@ -108,6 +116,9 @@ class ContentFetcher:
             SOURCE_WAYBACK: 0,
             "failed": 0,
         }
+
+    def _prepare(self, page):
+        return page.compact(self.content_store) if self.preserve_url_identity else page
 
     # ---- tier 1: platform APIs ------------------------------------------
 
@@ -122,11 +133,11 @@ class ContentFetcher:
                     f"?per_page={WP_PER_PAGE}&page={page}&_fields=link,title,content"
                 )
                 try:
-                    async with self.session.get(url, timeout=aiohttp.ClientTimeout(total=HTTP_TIMEOUT)) as resp:
+                    async with self.session.get(url, timeout=aiohttp.ClientTimeout(total=HTTP_TIMEOUT), **self.request_options) as resp:
                         if resp.status != 200:
                             break
                         total_pages = int(resp.headers.get("X-WP-TotalPages", "1") or 1)
-                        items = json.loads(await resp.read())
+                        items = json.loads(await read_bounded_body(resp) if self.preserve_url_identity else await resp.read())
                 except Exception as exc:
                     logger.info("WordPress API unavailable for %s: %s", root_url, type(exc).__name__)
                     break
@@ -135,13 +146,13 @@ class ContentFetcher:
                     break
                 for item in items:
                     link = (item or {}).get("link")
-                    if not link:
+                    if not link or (self.wanted_keys is not None and self.key(link) not in self.wanted_keys):
                         continue
-                    out[self.key(link)] = _page_from_parts(
+                    out[self.key(link)] = self._prepare(_page_from_parts(
                         link,
                         ((item.get("title") or {}).get("rendered") or ""),
                         ((item.get("content") or {}).get("rendered") or ""),
-                    )
+                    ))
                 if page >= total_pages:
                     break
                 page += 1
@@ -154,10 +165,10 @@ class ContentFetcher:
         while page <= SHOPIFY_MAX_PAGES:
             url = f"{root_url}/products.json?limit={SHOPIFY_PER_PAGE}&page={page}"
             try:
-                async with self.session.get(url, timeout=aiohttp.ClientTimeout(total=HTTP_TIMEOUT)) as resp:
+                async with self.session.get(url, timeout=aiohttp.ClientTimeout(total=HTTP_TIMEOUT), **self.request_options) as resp:
                     if resp.status != 200:
                         break
-                    items = (json.loads(await resp.read()) or {}).get("products", [])
+                    items = (json.loads(await read_bounded_body(resp) if self.preserve_url_identity else await resp.read()) or {}).get("products", [])
             except Exception as exc:
                 logger.info("Shopify API unavailable for %s: %s", root_url, type(exc).__name__)
                 break
@@ -169,9 +180,11 @@ class ContentFetcher:
                 if not handle:
                     continue
                 link = f"{root_url}/products/{handle}"
-                out[self.key(link)] = _page_from_parts(
+                if self.wanted_keys is not None and self.key(link) not in self.wanted_keys:
+                    continue
+                out[self.key(link)] = self._prepare(_page_from_parts(
                     link, item.get("title") or "", item.get("body_html") or ""
-                )
+                ))
             if len(items) < SHOPIFY_PER_PAGE:
                 break
             page += 1
@@ -192,14 +205,20 @@ class ContentFetcher:
         async def one(url: str) -> tuple[str, Optional[WebPage]]:
             async with semaphore:
                 try:
-                    return url, await WebPage.scrape(self.session, url, max_retries=2)
+                    page = await WebPage.scrape(self.session, url, max_retries=2,
+                        **({'compact': True, 'content_store': self.content_store} if self.preserve_url_identity else {}))
+                    if page.content_error:
+                        self.errors[self.key(url)] = page.content_error
+                    return url, self._prepare(page)
                 except CircuitOpen:
                     return url, None
+                except ContentStorageError:
+                    raise
                 except Exception:
                     return url, None
 
         results = await bounded_map(one, urls, concurrency)
-        return {self.key(u): p for u, p in results if p is not None and p.html}
+        return {self.key(u): p for u, p in results if p is not None and p.html_length}
 
     # ---- tier 3: wayback -------------------------------------------------
 
@@ -209,10 +228,11 @@ class ContentFetcher:
                 WAYBACK_AVAILABILITY,
                 params={"url": url},
                 timeout=aiohttp.ClientTimeout(total=HTTP_TIMEOUT),
+                **self.request_options,
             ) as resp:
                 if resp.status != 200:
                     return None
-                payload = json.loads(await resp.read())
+                payload = json.loads(await read_bounded_body(resp) if self.preserve_url_identity else await resp.read())
         except Exception:
             return None
 
@@ -224,14 +244,17 @@ class ContentFetcher:
         archived = snapshot["url"].replace("/http", "id_/http", 1)
         try:
             async with self.session.get(
-                archived, timeout=aiohttp.ClientTimeout(total=HTTP_TIMEOUT)
+                archived, timeout=aiohttp.ClientTimeout(total=HTTP_TIMEOUT), **self.request_options
             ) as resp:
                 if resp.status != 200:
                     return None
-                html = await resp.text(errors="replace")
+                html = await read_bounded_text(resp) if self.preserve_url_identity else await resp.text(errors="replace")
+        except (ContentTooLarge, ContentUnavailable) as exc:
+            self.errors[self.key(url)] = exc.code
+            return None
         except Exception:
             return None
-        return WebPage(url, html) if html else None
+        return self._prepare(WebPage(url, html)) if html else None
 
     async def fetch_wayback(self, urls: Iterable[str]) -> dict[str, WebPage]:
         if not self.enable_wayback:
@@ -265,6 +288,7 @@ class ContentFetcher:
         """
         resolved: dict[str, WebPage] = {}
         wanted = {self.key(u): u for u in urls}
+        self.wanted_keys = set(wanted) if self.preserve_url_identity else None
 
         platform = await self.fetch_platform(root_url, generator)
         for k, page in platform.items():

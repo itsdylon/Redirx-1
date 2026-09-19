@@ -11,6 +11,8 @@ class Pipeline:
         session_id: Optional[UUID] = None,
         pipeline_type: str = 'content',
         match_config: Optional[UrlMatchConfig] = None,
+        preserve_url_identity: bool = False,
+        engine_write_context: Optional[dict] = None,
     ):
         """
         Initialize the pipeline.
@@ -30,7 +32,22 @@ class Pipeline:
                 match_config=match_config,
             )
         else:
-            self.__stages = Pipeline.default_pipeline(session_id=session_id)
+            self.__stages = Pipeline.default_pipeline(session_id=session_id, preserve_url_identity=preserve_url_identity)
+
+        if engine_write_context is not None:
+            if not preserve_url_identity or pipeline_type != 'content':
+                raise ValueError('Engine write context requires the pivot content pipeline')
+            if set(engine_write_context) != {'run_id', 'worker_id', 'attempt_count'}:
+                raise ValueError('Engine write context requires run, worker and attempt')
+            context = dict(engine_write_context)
+            context['run_id'] = str(UUID(str(context['run_id'])))
+            if not isinstance(context['worker_id'], str) or not context['worker_id'] or type(context['attempt_count']) is not int or context['attempt_count'] < 1:
+                raise ValueError('Engine write context requires a claimed worker attempt')
+            for stage in self.__stages:
+                for name in ('embedding_db', 'mapping_db'):
+                    database = getattr(stage, name, None)
+                    if database is not None:
+                        database.engine_write_context = context
 
         self.__index = 0
         self.state = input
@@ -41,7 +58,7 @@ class Pipeline:
     Returns the default pipeline.
     """
     @classmethod
-    def default_pipeline(cls, session_id: Optional[UUID] = None) -> list[stages.Stage]:
+    def default_pipeline(cls, session_id: Optional[UUID] = None, preserve_url_identity=False) -> list[stages.Stage]:
         """
         Create the default pipeline with optional session ID.
 
@@ -67,11 +84,11 @@ class Pipeline:
         """
         return [
             stages.UrlPruneStage(),
-            stages.ExactUrlMatchStage(session_id=session_id),
-            stages.WebScraperStage(),
-            stages.HtmlPruneStage(),
-            stages.EmbedStage(session_id=session_id),
-            stages.PairingStage(session_id=session_id),
+            stages.ExactUrlMatchStage(session_id=session_id, preserve_url_identity=preserve_url_identity),
+            stages.WebScraperStage(preserve_url_identity=preserve_url_identity),
+            stages.HtmlPruneStage(preserve_url_identity=preserve_url_identity),
+            stages.EmbedStage(session_id=session_id, preserve_url_identity=preserve_url_identity),
+            stages.PairingStage(session_id=session_id, preserve_url_identity=preserve_url_identity),
         ]
 
     @classmethod

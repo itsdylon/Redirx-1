@@ -1,0 +1,133 @@
+"""Kill one actual engine process mid-pairing, restart it against the same DB.
+
+Run only with the local-only PGlite fixture; deterministic provider substitutes
+external embeddings. The engine and SQL candidate/mapping paths are unchanged.
+"""
+import argparse
+import asyncio
+from contextlib import ExitStack, redirect_stdout
+import json
+import os
+from pathlib import Path
+import resource
+import subprocess
+import sys
+import time
+from unittest.mock import patch
+from uuid import UUID
+
+import aiohttp
+from aiohttp import web
+from run_content_benchmark import Embeddings, LocalClient, NoLimit, Pipeline, URLMappingDB
+
+
+async def engine(manifest, output, stop_after):
+    data = json.loads(manifest.read_text())
+    client = LocalClient(data['db_port'])
+    provider = Embeddings()
+    original_request = aiohttp.ClientSession._request
+    async def local_only(session, method, url, **kwargs):
+        if not str(url).startswith(data['root']+'/'):
+            raise RuntimeError('Restart fixture forbids external HTTP')
+        return await original_request(session, method, url, **kwargs)
+    original_sql = client.sql
+    writes = 0
+    started = time.perf_counter()
+    def metrics():
+        rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+        return {'pid':os.getpid(), 'wall_seconds':round(time.perf_counter()-started,3),
+                'embedding_provider_calls':provider.calls,'candidate_sql_queries':client.candidate_queries,
+                'mapping_writes':writes,'max_vector_page_rows':client.max_vector_page,
+                'python_peak_rss_bytes':rss if sys.platform=='darwin' else rss*1024}
+    def sql(statement, params=()):
+        nonlocal writes
+        result = original_sql(statement, params)
+        if statement.startswith('INSERT INTO url_mappings'):
+            writes += 1
+            if stop_after and writes == stop_after:
+                output.write_text(json.dumps(metrics()))
+                # Abrupt process loss: no Pipeline cleanup, final status, or resume
+                # checkpoint beyond the actual committed embedding/mapping rows.
+                os._exit(75)
+        return result
+    client.sql = sql
+    with ExitStack() as stack:
+        stack.enter_context(patch('aiohttp.ClientSession._request', new=local_only))
+        stack.enter_context(patch('src.redirx.database.SupabaseClient.get_client',return_value=client))
+        stack.enter_context(patch('src.redirx.stages.AsyncOpenAI',return_value=provider))
+        stack.enter_context(patch('src.redirx.stages.Config.validate_embeddings',return_value=True))
+        stack.enter_context(patch('src.redirx.stages.create_safe_connector',side_effect=aiohttp.TCPConnector))
+        stack.enter_context(patch('src.redirx.stages.HostRateLimiter',return_value=NoLimit()))
+        pipeline = Pipeline((data['old_urls'],data['new_urls']),session_id=UUID(data['session']),preserve_url_identity=True)
+        async for _ in pipeline.iterate():
+            if pipeline.stage_names[pipeline.current_stage_index-1]=='Generating embeddings':
+                original_sql('ANALYZE webpage_embeddings')
+    output.write_text(json.dumps(metrics()))
+
+
+async def exercise(args, client):
+    hits = 0
+    async def page(request):
+        nonlocal hits
+        hits += 1
+        index = identities.get(request.raw_path, 0)
+        return web.Response(text=f'<html><title>ENTITY {index}</title><body>ENTITY {index} '+request.path+(' content material '*80)+'</body></html>',content_type='text/html')
+    app = web.Application(); app.router.add_get('/{tail:.*}',page)
+    runner = web.AppRunner(app); await runner.setup()
+    site = web.TCPSite(runner,'127.0.0.1',0); await site.start()
+    root = 'http://127.0.0.1:'+str(site._server.sockets[0].getsockname()[1])
+    variants = ['Variant','variant','Variant/','Variant?q=1','Variant?q=2','variant?q=1','Variant/?q=1','VARIANT']
+    old = [root+'/old/'+(variants[n] if n<len(variants) else f'source-{n}') for n in range(args.old)]
+    new = [root+'/new/'+(variants[n] if n<len(variants) else f'target-{n}') for n in range(args.new)]
+    identities = {url[len(root):]:n for urls in (old,new) for n,url in enumerate(urls)}
+    session = client.sql("INSERT INTO migration_sessions(user_id) VALUES('restart-fixture') RETURNING id")[0]['id']
+    manifest = args.output.with_suffix('.manifest.json')
+    manifest.write_text(json.dumps({'root':root,'db_port':int(client.url.rsplit(':',1)[1]),'session':session,'old_urls':old,'new_urls':new}))
+    processes = []
+    try:
+        for number, stop in enumerate((args.stop_after,0,0)):
+            result_path = args.output.with_suffix(f'.process{number}.json')
+            with args.output.with_suffix(f'.process{number}.log').open('w') as log:
+                process = await asyncio.create_subprocess_exec(sys.executable,__file__,'--engine',str(manifest),'--output',str(result_path),'--stop-after',str(stop),stdout=log,stderr=log)
+                status = await process.wait()
+            assert status == (75 if stop else 0), (number,status)
+            result = json.loads(result_path.read_text()); result['exit_status']=status
+            counts = client.sql('SELECT count(*)::int AS rows,count(DISTINCT (site_type,url))::int AS identities FROM webpage_embeddings')[0]
+            mappings = client.sql('SELECT count(*)::int AS rows,count(DISTINCT old_url)::int AS identities FROM url_mappings')[0]
+            assert counts['rows']==counts['identities']==args.old+args.new,counts
+            assert mappings['rows']==mappings['identities']==(stop or args.old),mappings
+            if number: assert result['embedding_provider_calls']==0,result
+            if number==2: assert result['candidate_sql_queries']==result['mapping_writes']==0,result
+            result['embeddings_persisted']=counts['rows']; result['mappings_persisted']=mappings['rows']
+            processes.append(result)
+        assert len({row['pid'] for row in processes})==3
+        rows = URLMappingDB(client).get_mappings_by_session(UUID(session))
+        assert {row['old_url']:row['new_url'] for row in rows}==dict(zip(old,new))
+        return {'old_urls':args.old,'new_urls':args.new,'processes':processes,'http_requests':hits,
+                'database_child':client.http.get(client.url+'/metrics').json(),
+                'all_originals_and_tail_verified':True,'duplicate_embedding_or_mapping_rows':0,
+                'limitations':['sequential actual engine process restart; not overlapping stale workers','deterministic embedding provider','real PGlite/pgvector; not deployed PostgreSQL latency']}
+    finally:
+        await runner.cleanup()
+        manifest.unlink(missing_ok=True)
+
+
+def main():
+    parser=argparse.ArgumentParser()
+    parser.add_argument('--old',type=int,default=500);parser.add_argument('--new',type=int,default=600)
+    parser.add_argument('--stop-after',type=int,default=125);parser.add_argument('--output',type=Path,required=True)
+    parser.add_argument('--engine',type=Path)
+    args=parser.parse_args()
+    if args.engine:
+        asyncio.run(engine(args.engine,args.output,args.stop_after));return
+    assert 0<args.stop_after<args.old<=args.new
+    process=subprocess.Popen(['node',str(Path(__file__).with_name('vector_fixture_server.mjs'))],stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
+    try:
+        line=process.stdout.readline()
+        if not line:raise RuntimeError(process.stderr.read())
+        result=asyncio.run(exercise(args,LocalClient(json.loads(line)['port'])))
+        args.output.write_text(json.dumps(result,indent=2)+'\n');print(json.dumps(result))
+    finally:
+        process.terminate();process.wait(timeout=30)
+
+if __name__=='__main__':main()

@@ -10,6 +10,7 @@ from uuid import UUID, uuid4
 import numpy as np
 from openai import AsyncOpenAI
 
+from .async_batch import bounded_map
 from .config import Config
 from .database import WebPageEmbeddingDB, MigrationSessionDB, URLMappingDB
 from .safe_fetch import create_safe_connector
@@ -236,9 +237,10 @@ class ExactUrlMatchStage(Stage):
     """
     name = "Matching exact URLs"
 
-    def __init__(self, session_id: Optional[UUID] = None):
+    def __init__(self, session_id: Optional[UUID] = None, preserve_url_identity=False):
         super().__init__()
         self.session_id = session_id
+        self.preserve_url_identity = preserve_url_identity
         self.mapping_db = URLMappingDB() if session_id else None
 
     # Extensions to strip during path normalization
@@ -310,6 +312,30 @@ class ExactUrlMatchStage(Stage):
             return stripped if stripped.startswith('/') else '/' + stripped
         return path
 
+    async def _execute_preserving_identity(self, input):
+        """Match routing identities without discarding any original URL variant."""
+        old_urls, new_urls = input
+        def key(url):
+            parsed = urlparse(url)
+            return (parsed.path or '/') + ('?' + parsed.query if parsed.query else '')
+        targets = {}
+        for url in new_urls:
+            targets.setdefault(key(url), url)
+        persisted = {row['old_url'] for row in self.mapping_db.get_mappings_by_session(self.session_id)} if self.session_id and self.mapping_db else set()
+        unmatched = []
+        matched = set()
+        for index, old_url in enumerate(old_urls):
+            if index % 32 == 0:
+                await asyncio.sleep(0)
+            target = targets.get(key(old_url))
+            if target is None:
+                unmatched.append(old_url)
+            else:
+                if self.session_id and self.mapping_db and old_url not in persisted:
+                    self.mapping_db.insert_mapping(self.session_id, old_url, target, 1.0, 'exact_url', False)
+                matched.add(target)
+        return unmatched, [url for url in new_urls if url not in matched]
+
     async def execute(self, input: tuple[list[str], list[str]]) -> tuple[list[str], list[str]]:
         """
         Find and remove exact URL path matches.
@@ -324,11 +350,13 @@ class ExactUrlMatchStage(Stage):
         Returns:
             Tuple of (unmatched_old_urls, unmatched_new_urls)
         """
+        if self.preserve_url_identity:
+            return await self._execute_preserving_identity(input)
         old_urls, new_urls = input
 
         print(f"\nExactUrlMatchStage: Checking {len(old_urls)} old vs {len(new_urls)} new URLs for exact path matches...")
 
-        # Deduplicate old URLs by normalized path (prefer shorter/cleaner URLs)
+        # Deduplicate legacy normalized paths. Pivot identities use the separate path above.
         old_url_by_path = {}
         for url in old_urls:
             path = self._get_path(url)
@@ -494,6 +522,7 @@ class WebScraperStage(Stage):
         self,
         max_total_concurrency: Optional[int] = None,
         max_site_concurrency: Optional[int] = None,
+        preserve_url_identity=False,
     ):
         super().__init__()
         if max_total_concurrency is None:
@@ -522,6 +551,7 @@ class WebScraperStage(Stage):
                 min(self.MAX_PER_SITE_CONCURRENCY, int(max_site_concurrency)),
             )
 
+        self.preserve_url_identity = preserve_url_identity
         self.max_total_concurrency = total
         self.max_site_concurrency = min(per_site, total)
         # Escape hatch: set false to restore straight per-page scraping.
@@ -547,7 +577,7 @@ class WebScraperStage(Stage):
         if not urls:
             return []
 
-        from .content_fetch import ContentFetcher, _key
+        from .content_fetch import ContentFetcher
 
         root = self._root_of(urls)
         generator = None
@@ -567,7 +597,7 @@ class WebScraperStage(Stage):
                 # per-page fetching, which would only produce failures.
                 origin_reachable = False
 
-        fetcher = ContentFetcher(session)
+        fetcher = ContentFetcher(session, preserve_url_identity=self.preserve_url_identity)
         resolved = await fetcher.fetch(
             urls, root or "", generator=generator, origin_reachable=origin_reachable
         )
@@ -578,7 +608,11 @@ class WebScraperStage(Stage):
         )
         # Preserve input order and always return one WebPage per URL, so
         # downstream stages keep their positional assumptions.
-        return [resolved.get(_key(u)) or WebPage(u, "") for u in urls]
+        pages = []
+        for url in urls:
+            page = resolved.get(fetcher.key(url))
+            pages.append(page if page and page.url == url else WebPage(url, page.html if page else ""))
+        return pages
 
     async def execute(self, input: tuple[list[str], list[str]]) -> tuple[list[WebPage], list[WebPage]]:
         old_urls, new_urls = input
@@ -606,14 +640,10 @@ class WebScraperStage(Stage):
                         return await WebPage.scrape(session, url)
 
             async def gather_old():
-                return await asyncio.gather(
-                    *[scrape_with_limits(url, old_site_semaphore) for url in old_urls]
-                )
+                return await bounded_map(lambda url: scrape_with_limits(url, old_site_semaphore), old_urls, self.max_site_concurrency)
 
             async def gather_new():
-                return await asyncio.gather(
-                    *[scrape_with_limits(url, new_site_semaphore) for url in new_urls]
-                )
+                return await bounded_map(lambda url: scrape_with_limits(url, new_site_semaphore), new_urls, self.max_site_concurrency)
 
             if self.use_content_ladder:
                 # Prefer bulk CMS reads over per-page fetching: measured on a
@@ -678,8 +708,9 @@ class HtmlPruneStage(Stage):
     # Minimum HTML length to consider for matching (bytes)
     MIN_HTML_LENGTH = 100
 
-    def __init__(self):
+    def __init__(self, preserve_url_identity=False):
         super().__init__()
+        self.preserve_url_identity = preserve_url_identity
 
     async def execute(
         self,
@@ -711,7 +742,7 @@ class HtmlPruneStage(Stage):
 
         for page in valid_old_pages:
             page_hash = hash(page)
-            if page_hash in new_page_map and page_hash not in matched_new_hashes:
+            if page_hash in new_page_map and (self.preserve_url_identity or page_hash not in matched_new_hashes):
                 # Exact HTML match - highest confidence, no review needed
                 new_page = new_page_map[page_hash]
                 mappings.add(Mapping(
@@ -735,9 +766,10 @@ class HtmlPruneStage(Stage):
 class EmbedStage(Stage):
     name = "Generating embeddings"
 
-    def __init__(self, session_id: Optional[UUID] = None):
+    def __init__(self, session_id: Optional[UUID] = None, preserve_url_identity=False):
         super().__init__()
         self.session_id = session_id
+        self.resume_persisted = preserve_url_identity
         self.embedding_db = WebPageEmbeddingDB()
         self.session_db = MigrationSessionDB()
         self.openai_client: Optional[AsyncOpenAI] = None
@@ -808,8 +840,14 @@ class EmbedStage(Stage):
         return input
 
     async def _process_pages(self, pages: list[WebPage], site_type: str):
+        completed = set()
+        if self.resume_persisted:
+            completed = {row['url'] for row in self.embedding_db.iter_embeddings_by_session(self.session_id, site_type)
+                         if row.get('embedding') is not None}
+        prior = sum(page.url in completed for page in pages)
+        pages = [page for page in pages if page.url not in completed]
         batch_size = 10
-        success_count = 0
+        success_count = prior
         failure_count = 0
 
         for i in range(0, len(pages), batch_size):
@@ -881,7 +919,7 @@ class PairingStage(Stage):
     """
     name = "Pairing URLs"
 
-    def __init__(self, session_id: Optional[UUID] = None):
+    def __init__(self, session_id: Optional[UUID] = None, preserve_url_identity=False):
         """
         Initialize the PairingStage.
 
@@ -890,6 +928,7 @@ class PairingStage(Stage):
         """
         super().__init__()
         self.session_id = session_id
+        self.preserve_url_identity = preserve_url_identity
         self.embedding_db = WebPageEmbeddingDB()
         self.mapping_db = URLMappingDB()
 
@@ -919,10 +958,18 @@ class PairingStage(Stage):
         matched_new_pages = set()
         matched_new_urls = set()
         all_mappings = set(existing_mappings)
+        persisted = self.mapping_db.get_mappings_by_session(self.session_id) if self.preserve_url_identity else []
+        matched_old_pages.update(row['old_url'] for row in persisted)
+        matched_new_urls.update(row['new_url'] for row in persisted if row.get('new_url'))
+        matched_new_pages.update(matched_new_urls)
 
         # First, process existing mappings from HtmlPruneStage (exact HTML matches)
         print(f"Processing {len(existing_mappings)} exact HTML matches from HtmlPruneStage...")
-        for mapping in existing_mappings:
+        for index, mapping in enumerate(existing_mappings):
+            if index % 32 == 0:
+                await asyncio.sleep(0)
+            if mapping.old_page.url in matched_old_pages:
+                continue
             # Store in database
             self.mapping_db.insert_mapping(
                 session_id=self.session_id,
@@ -932,13 +979,13 @@ class PairingStage(Stage):
                 match_type=mapping.match_type,
                 needs_review=mapping.needs_review
             )
-            matched_old_pages.add(mapping.old_page)
-            matched_new_pages.add(mapping.new_page)
+            matched_old_pages.add(mapping.old_page.url)
+            matched_new_pages.add(mapping.new_page.url)
             matched_new_urls.add(mapping.new_page.url)
 
         # Find remaining unmatched pages
-        unmatched_old_pages = [p for p in old_pages if p not in matched_old_pages]
-        unmatched_new_pages = [p for p in new_pages if p not in matched_new_pages]
+        unmatched_old_pages = [p for p in old_pages if p.url not in matched_old_pages]
+        unmatched_new_pages = [p for p in new_pages if p.url not in matched_new_pages]
         unmatched_new_pages_by_url = {p.url: p for p in unmatched_new_pages}
 
         # Filter out root paths - homepage doesn't need redirect
@@ -960,28 +1007,26 @@ class PairingStage(Stage):
 
         print(f"Finding semantic matches for {len(unmatched_old_pages)} unmatched old pages...", flush=True)
 
-        # Fetch all old embeddings once (PERFORMANCE FIX: was fetching inside loop!)
-        old_embeddings = self.embedding_db.get_embeddings_by_session(
-            session_id=self.session_id,
-            site_type='old'
-        )
-
-        # Build a lookup dict for fast access
-        old_embeddings_by_url = {e['url']: e for e in old_embeddings}
+        # Keep only the page lookup in memory; 1536-D vectors stream in 128-row
+        # pages rather than retaining hundreds of MB of Python float objects.
+        old_pages_by_url = {page.url: page for page in unmatched_old_pages}
+        old_embeddings = self.embedding_db.iter_embeddings_for_urls(self.session_id, 'old', old_pages_by_url)
 
         # Process each unmatched old page
         total_unmatched = len(unmatched_old_pages)
         matched_count = 0
         orphaned_count = 0
 
-        for idx, old_page in enumerate(unmatched_old_pages, 1):
-            # Find the embedding for this specific old page
-            old_embedding_record = old_embeddings_by_url.get(old_page.url)
-
-            if not old_embedding_record:
-                print(f"⚠️  [{idx}/{total_unmatched}] No embedding found for {old_page.url}")
-                orphaned_count += 1
+        idx = 0
+        for old_embedding_record in old_embeddings:
+            old_page = old_pages_by_url.pop(old_embedding_record['url'], None)
+            if old_page is None:
                 continue
+            idx += 1
+            # Sync DB clients must not starve the worker lease heartbeat on
+            # long candidate sweeps. Scheduling remains bounded and sequential.
+            if idx % 32 == 0:
+                await asyncio.sleep(0)
 
             # Progress indicator every 10 pages
             if idx % 10 == 0:
@@ -995,7 +1040,8 @@ class PairingStage(Stage):
                 session_id=self.session_id,
                 site_type='new',
                 match_count=5,  # Get top 5 candidates
-                match_threshold=0.0  # We'll filter by threshold ourselves
+                match_threshold=0.0,  # We'll filter by threshold ourselves
+                pivot=self.preserve_url_identity,
             )
 
             # Filter out already matched pages and root paths
@@ -1039,8 +1085,8 @@ class PairingStage(Stage):
 
                     # Track this mapping
                     all_mappings.add(mapping)
-                    matched_old_pages.add(old_page)
-                    matched_new_pages.add(new_page)
+                    matched_old_pages.add(old_page.url)
+                    matched_new_pages.add(new_page.url)
                     matched_new_urls.add(new_page.url)
                     unmatched_new_pages_by_url.pop(new_page.url, None)
                     matched_count += 1
@@ -1050,14 +1096,19 @@ class PairingStage(Stage):
                           f"(score: {mapping.confidence_score:.3f}, type: {mapping.match_type}){review_flag}")
 
         # Identify orphaned pages (old pages with no match, excluding root paths)
-        final_orphaned = [p for p in old_pages if p not in matched_old_pages and not is_root_path(p.url)]
+        final_orphaned = [p for p in old_pages if p.url not in matched_old_pages and (self.preserve_url_identity or not is_root_path(p.url))]
+        if self.preserve_url_identity:
+            for index, page in enumerate(final_orphaned):
+                if index % 32 == 0:
+                    await asyncio.sleep(0)
+                self.mapping_db.insert_mapping(self.session_id, page.url, None, 0.0, 'unmatched', True)
         if final_orphaned:
             print(f"\nOrphaned pages (no suitable match found):")
             for page in final_orphaned:
                 print(f"  - {page.url}")
 
         # Identify new pages (new pages with no old equivalent)
-        final_new = [p for p in new_pages if p not in matched_new_pages]
+        final_new = [p for p in new_pages if p.url not in matched_new_pages]
         if final_new:
             print(f"\nNew pages (no old equivalent):")
             for page in final_new:
@@ -1202,13 +1253,13 @@ class Mapping:
 
     def __hash__(self) -> int:
         """Hash based on the old and new page combination."""
-        return hash(self.old_page) ^ hash(self.new_page)
+        return hash((self.old_page.url, self.new_page.url))
 
     def __eq__(self, other) -> bool:
         """Equality based on old and new page combination."""
         if not isinstance(other, Mapping):
             return False
-        return self.old_page == other.old_page and self.new_page == other.new_page
+        return self.old_page.url == other.old_page.url and self.new_page.url == other.new_page.url
 
     def __repr__(self) -> str:
         """String representation for debugging."""

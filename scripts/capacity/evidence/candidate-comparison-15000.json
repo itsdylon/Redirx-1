@@ -1,0 +1,27 @@
+{
+  "comparison": {
+    "match_pages": {
+      "queries": 15000,
+      "correct_targets": 14772,
+      "no_confident_candidate": 228,
+      "sql_wall_seconds": 76.777
+    },
+    "match_migration_pages": {
+      "queries": 15000,
+      "correct_targets": 15000,
+      "no_confident_candidate": 0,
+      "sql_wall_seconds": 103.974
+    }
+  },
+  "python_peak_rss_bytes": 133054464,
+  "database_child": {
+    "queries": 30157,
+    "sampled_peak_rss_bytes": 970735616,
+    "os_peak_rss_bytes": 971407360,
+    "current_rss_bytes": 450756608
+  },
+  "limitations": [
+    "same retained synthetic vectors, real SQL candidate functions",
+    "query-only comparison; excludes scraping/embedding/persistence"
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "name": "redirx-local-capacity-fixture",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@electric-sql/pglite": "0.5.8",
+    "@electric-sql/pglite-pgvector": "0.0.9"
+  }
+}

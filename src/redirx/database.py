@@ -237,6 +237,7 @@ class WebPageEmbeddingDB:
 
     def __init__(self, client: Optional[Client] = None):
         self.client = client or SupabaseClient.get_client()
+        self.engine_write_context = None
 
     def insert_embedding(
         self,
@@ -261,6 +262,15 @@ class WebPageEmbeddingDB:
         Returns:
             UUID: The created embedding ID.
         """
+        if self.engine_write_context:
+            result = self.client.rpc('persist_migration_run_embedding', {
+                'p_session_id': str(session_id),
+                **{'p_' + key: value for key, value in self.engine_write_context.items()},
+                'p_url': url, 'p_site_type': site_type, 'p_embedding': embedding.tolist(),
+                'p_extracted_text': extracted_text, 'p_title': title,
+            }).execute()
+            row = result.data if isinstance(result.data, dict) else result.data[0]
+            return UUID(row['id'])
         result = self.client.table('webpage_embeddings').insert({
             'session_id': str(session_id),
             'url': url,
@@ -278,7 +288,8 @@ class WebPageEmbeddingDB:
         session_id: UUID,
         site_type: str,
         match_count: int = 5,
-        match_threshold: float = 0.0
+        match_threshold: float = 0.0,
+        pivot: bool = False,
     ) -> List[Dict[str, Any]]:
         """
         Find similar pages using vector similarity search.
@@ -293,7 +304,7 @@ class WebPageEmbeddingDB:
         Returns:
             List of dictionaries containing matching pages with similarity scores.
         """
-        result = self.client.rpc('match_pages', {
+        result = self.client.rpc('match_migration_pages' if pivot else 'match_pages', {
             'query_embedding': query_embedding.tolist(),
             'target_site_type': site_type,
             'target_session_id': str(session_id),
@@ -302,6 +313,71 @@ class WebPageEmbeddingDB:
         }).execute()
 
         return result.data
+
+    def iter_embeddings_by_session(self, session_id: UUID, site_type: Optional[str] = None):
+        """Stream vector pages; never materialize all 1536-D Python float lists.
+
+        Keyset pagination remains bounded even under PostgREST response caps.
+        A final empty page proves exhaustion; short pages do not imply EOF.
+        """
+        import json
+        after = None
+        while True:
+            query = self.client.table('webpage_embeddings').select('id,url,embedding').eq('session_id', str(session_id))
+            if site_type:
+                query = query.eq('site_type', site_type)
+            if after:
+                query = query.gt('id', after)
+            page = query.order('id').limit(128).execute().data
+            if not page:
+                return
+            next_id = str(page[-1]['id'])
+            if after is not None and next_id <= after:
+                raise RuntimeError('Embedding cursor did not advance')
+            for row in page:
+                if isinstance(row.get('embedding'), str):
+                    row['embedding'] = json.loads(row['embedding'])
+                yield row
+            after = next_id
+
+    def iter_embeddings_for_urls(self, session_id: UUID, site_type: str, urls):
+        """Keep source order with at most 128 vectors and a bounded GET filter."""
+        import json
+        from urllib.parse import quote
+        batches = []
+        batch = []
+        encoded_size = 0
+        for url in urls:
+            size = len(quote(url, safe='')) + 8
+            if batch and (len(batch) >= 128 or encoded_size + size > 6000):
+                batches.append(batch)
+                batch = []
+                encoded_size = 0
+            batch.append(url)
+            encoded_size += size
+        if batch:
+            batches.append(batch)
+        for wanted in batches:
+            records = {}
+            after = None
+            while True:
+                query = self.client.table('webpage_embeddings').select('id,url,embedding').eq('session_id', str(session_id)).eq('site_type', site_type).in_('url', wanted)
+                if after:
+                    query = query.gt('id', after)
+                page = query.order('id').limit(128).execute().data
+                if not page:
+                    break
+                next_id = str(page[-1]['id'])
+                if after is not None and next_id <= after:
+                    raise RuntimeError('Embedding cursor did not advance')
+                for row in page:
+                    if isinstance(row.get('embedding'), str):
+                        row['embedding'] = json.loads(row['embedding'])
+                    records[row['url']] = row
+                after = next_id
+            for url in wanted:
+                if url in records:
+                    yield records.pop(url)
 
     def get_embeddings_by_session(
         self,
@@ -576,6 +652,7 @@ class URLMappingDB:
 
     def __init__(self, client: Optional[Client] = None):
         self.client = client or SupabaseClient.get_client()
+        self.engine_write_context = None
 
     def insert_mapping(
         self,
@@ -600,6 +677,16 @@ class URLMappingDB:
         Returns:
             UUID: The created mapping ID.
         """
+        if self.engine_write_context:
+            result = self.client.rpc('persist_migration_run_mapping', {
+                'p_session_id': str(session_id),
+                **{'p_' + key: value for key, value in self.engine_write_context.items()},
+                'p_old_url': old_url, 'p_new_url': new_url,
+                'p_confidence_score': confidence_score, 'p_match_type': match_type,
+                'p_needs_review': needs_review,
+            }).execute()
+            row = result.data if isinstance(result.data, dict) else result.data[0]
+            return UUID(row['id'])
         result = self.client.table('url_mappings').insert({
             'session_id': str(session_id),
             'old_url': old_url,

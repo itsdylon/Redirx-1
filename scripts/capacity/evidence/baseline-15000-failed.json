@@ -1,0 +1,19 @@
+{
+  "old_urls": 15000,
+  "new_urls": 20000,
+  "requested_html_bytes": 2048,
+  "mappings_persisted": 15000,
+  "correct_semantic_targets": 14743,
+  "explicit_unmatched": 257,
+  "semantic_recall": 0.9828666666666667,
+  "acceptance_passed": false,
+  "failure": "Semantic candidate mismatch",
+  "wall_seconds": null,
+  "python_peak_rss_bytes": null,
+  "database_child": null,
+  "limitations": [
+    "First harness asserted semantic equality before emitting timing/RSS; those full-size measurements were not retained.",
+    "Actual coverage assertion passed before semantic assertion failed.",
+    "Baseline documented match_pages HNSW SQL without052 fallback."
+  ]
+}

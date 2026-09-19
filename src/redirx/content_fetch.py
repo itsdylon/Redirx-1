@@ -38,6 +38,7 @@ import aiohttp
 
 from .rate_limit import CircuitOpen, get_limiter, parse_retry_after
 from .stages import WebPage
+from .async_batch import bounded_map
 
 logger = logging.getLogger(__name__)
 
@@ -97,8 +98,9 @@ def _page_from_parts(url: str, title: str, body_html: str) -> WebPage:
 class ContentFetcher:
     """Resolves URLs to WebPages using the cheapest tier that yields real text."""
 
-    def __init__(self, session: aiohttp.ClientSession, enable_wayback: bool = True):
+    def __init__(self, session: aiohttp.ClientSession, enable_wayback: bool = True, preserve_url_identity=False):
         self.session = session
+        self.key = (lambda url: url.split("#", 1)[0]) if preserve_url_identity else _key
         self.enable_wayback = enable_wayback
         self.stats: dict[str, int] = {
             SOURCE_PLATFORM_API: 0,
@@ -135,7 +137,7 @@ class ContentFetcher:
                     link = (item or {}).get("link")
                     if not link:
                         continue
-                    out[_key(link)] = _page_from_parts(
+                    out[self.key(link)] = _page_from_parts(
                         link,
                         ((item.get("title") or {}).get("rendered") or ""),
                         ((item.get("content") or {}).get("rendered") or ""),
@@ -167,7 +169,7 @@ class ContentFetcher:
                 if not handle:
                     continue
                 link = f"{root_url}/products/{handle}"
-                out[_key(link)] = _page_from_parts(
+                out[self.key(link)] = _page_from_parts(
                     link, item.get("title") or "", item.get("body_html") or ""
                 )
             if len(items) < SHOPIFY_PER_PAGE:
@@ -196,8 +198,8 @@ class ContentFetcher:
                 except Exception:
                     return url, None
 
-        results = await asyncio.gather(*(one(u) for u in urls))
-        return {_key(u): p for u, p in results if p is not None and p.html}
+        results = await bounded_map(one, urls, concurrency)
+        return {self.key(u): p for u, p in results if p is not None and p.html}
 
     # ---- tier 3: wayback -------------------------------------------------
 
@@ -240,8 +242,8 @@ class ContentFetcher:
             async with semaphore:
                 return url, await self._wayback_one(url)
 
-        results = await asyncio.gather(*(one(u) for u in urls))
-        return {_key(u): p for u, p in results if p is not None}
+        results = await bounded_map(one, urls, WAYBACK_CONCURRENCY)
+        return {self.key(u): p for u, p in results if p is not None}
 
     # ---- orchestration ---------------------------------------------------
 
@@ -262,7 +264,7 @@ class ContentFetcher:
                 only produce failures and deepen a ban.
         """
         resolved: dict[str, WebPage] = {}
-        wanted = {_key(u): u for u in urls}
+        wanted = {self.key(u): u for u in urls}
 
         platform = await self.fetch_platform(root_url, generator)
         for k, page in platform.items():

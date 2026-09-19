@@ -253,3 +253,18 @@ HTTP 400 / `invalid_grant`; that request used no real authorization code and is
 not evidence about the preceding consent attempt. A fresh browser attempt is
 required because the first run retained no code or tokens. No deployment or
 provider configuration changes were made for these diagnostics.
+
+Later readback: the improved probe failed specifically at **token exchange, HTTP
+500**, before provider `/user` verification. Claude's read-only Supabase auth-log
+inspection identified `HS256 is not supported for ID token signing` at
+2026-09-19T02:01:36Z (request `01a0b765-c86c-7a1b-8ad5-933aedfe8e23`) and
+01:57:27Z (request `01a0b761-fed6-7c97-b4c2-40c0788af253`). Public JWKS contained
+zero keys, consistent with the legacy signing configuration. No keys were rotated.
+
+The local diagnostic now defaults to `email profile`, omitting the OIDC `openid`
+scope because the MCP verifier consumes only an access token, not an ID token.
+Explicit OIDC testing remains available via `--scope openid email profile`.
+Strict access-token checks are unchanged; this is not proof the resource-audience
+gate passes. A live access-token-only attempt still needs a working browser
+connection/consent. Parent browser discovery currently reports none; user says an
+MCP is connected, so clarify which agent/connection before retrying.

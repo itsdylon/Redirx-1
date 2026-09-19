@@ -3,6 +3,8 @@
 Status: exercised against production after the frontend callback hotfix. Browser
 consent/callback succeeded, but the initial probe exited 1 on an upstream request;
 token verification and the production OAuth gate have **not passed**.
+The improved diagnostic identified HTTP 500 at token exchange. Provider auth logs
+then identified `HS256 is not supported for ID token signing` on both real attempts.
 This is an operator diagnostic, not app runtime code or evidence that MCP tools work.
 It does not alter the strict gateway verifier, register a client, call MCP tools,
 deploy services, or apply database migrations.
@@ -33,6 +35,12 @@ python3 -B scripts/oauth_consent_probe.py \
 ```
 
 The operator must be on the same machine as the browser (the redirect is local).
+The default scope is now `email profile`: this tests the access token the gateway
+uses, without requesting an unused OIDC ID token. This does not weaken any
+provider, issuer, subject, client, audience or expiry check. To separately test
+OIDC, add `--scope openid email profile`; that requires asymmetric signing keys
+and is currently expected to fail on this project's legacy HS256 configuration.
+Do not rotate production signing keys as part of running a diagnostic.
 The listener binds IPv4 loopback before printing the authorization URL. Open it
 in your own browser, sign in, inspect the client, and approve only if expected.
 Do not paste the callback URL, code, verifier, or bearer tokens into chat.
@@ -80,3 +88,4 @@ access is needed. They validate protocol plumbing, not production OAuth issuance
 
 Protocol references: [RFC 8252 loopback redirects](https://www.rfc-editor.org/rfc/rfc8252#section-7.3)
 and [Supabase OAuth flows](https://supabase.com/docs/guides/auth/oauth-server/oauth-flows).
+Supabase documents the [asymmetric signing requirement for ID tokens](https://supabase.com/docs/guides/auth/oauth-server/getting-started#enable-oauth-21-server).

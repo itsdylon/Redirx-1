@@ -92,12 +92,12 @@ def https_url(value):
     return value
 
 
-def new_authorization(issuer, resource, client_id):
+def new_authorization(issuer, resource, client_id, scope="email profile"):
     verifier = secrets.token_urlsafe(48)
     state = secrets.token_urlsafe(32)
     challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).decode().rstrip("=")
     query = urlencode(dict(response_type="code", client_id=client_id,
-                           redirect_uri=CALLBACK, scope="openid email profile",
+                           redirect_uri=CALLBACK, scope=scope,
                            resource=resource, state=state, code_challenge=challenge,
                            code_challenge_method="S256"))
     return issuer.rstrip("/") + "/oauth/authorize?" + query, state, verifier
@@ -231,6 +231,9 @@ def main():
     parser.add_argument("--issuer", required=True, type=https_url)
     parser.add_argument("--resource", required=True, type=https_url)
     parser.add_argument("--client-id", required=True)
+    parser.add_argument("--scope", nargs="+", choices=("openid", "email", "profile", "phone"),
+                        default=["email", "profile"],
+                        help="Default: email profile (access-token test, no OIDC ID token)")
     parser.add_argument("--timeout", type=int, default=300)
     args = parser.parse_args()
     public_key = os.environ.get("SUPABASE_ANON_KEY", "")
@@ -238,7 +241,7 @@ def main():
         parser.error("Set SUPABASE_ANON_KEY (public key), nonempty client ID, timeout 1..600")
     # URL.href in the gateway canonicalizes an origin to a trailing slash.
     resource = args.resource if urlsplit(args.resource).path else args.resource + "/"
-    url, state, verifier = new_authorization(args.issuer, resource, args.client_id)
+    url, state, verifier = new_authorization(args.issuer, resource, args.client_id, " ".join(args.scope))
     try:
         with CallbackServer(state) as listener:
             print("Open this URL in your browser and approve only the expected test client. Do not paste codes/tokens into chat:", flush=True)

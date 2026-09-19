@@ -36,8 +36,13 @@ class AuthorizationTests(unittest.TestCase):
         self.assertEqual(query["state"], [state])
         self.assertEqual(query["resource"], [RESOURCE])
         self.assertEqual(query["redirect_uri"], [probe.CALLBACK])
+        self.assertEqual(query["scope"], ["email profile"])
         self.assertNotIn(verifier, url)
         self.assertNotEqual(state, probe.new_authorization(ISSUER, RESOURCE, CLIENT)[1])
+
+    def test_oidc_scope_can_be_requested_explicitly(self):
+        url, _, _ = probe.new_authorization(ISSUER, RESOURCE, CLIENT, "openid email profile")
+        self.assertEqual(parse_qs(urlsplit(url).query)["scope"], ["openid email profile"])
 
     def test_configuration_urls(self):
         self.assertEqual(probe.https_url(ISSUER), ISSUER)
@@ -245,6 +250,8 @@ class ConsoleTests(unittest.TestCase):
         self.assertNotIn("secret-code", output)
         self.assertNotIn("public-key", output)
         self.assertEqual(json.loads(output.splitlines()[-1]), {"provider_verified": True, "resource_audience": True})
+        authorization = next(line for line in output.splitlines() if line.startswith("https://"))
+        self.assertEqual(parse_qs(urlsplit(authorization).query)["scope"], ["email profile"])
 
     def test_bad_claims_exit_nonzero(self):
         status, output = self.run_main(MagicMock(), MagicMock(return_value={"resource_audience": False}))

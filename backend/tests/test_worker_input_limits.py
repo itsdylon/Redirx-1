@@ -53,6 +53,27 @@ class WorkerInputLimitTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(str(args[1]), "permanently_failed")
         self.assertIn("content_old_url_cap_exceeded", args[2])
 
+    async def test_authorized_pivot_uses_its_cap_instead_of_legacy_cap(self):
+        job = {
+            "id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+            "mcp_run_id": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+            "old_urls": [f"https://old.example.com/{i}" for i in range(4)],
+            "new_urls": ["https://new.example.com/ok"],
+            "attempt_count": 1, "pipeline_type": "content", "user_id": "user-1",
+        }
+        with patch("backend.services.job_limits.CONTENT_MAX_OLD_URLS", 3), \
+                patch("backend.services.job_limits.PIVOT_CONTENT_MAX_OLD_URLS", 4), \
+                patch("backend.worker.MigrationRunService") as authority, \
+                patch("backend.worker.DeepPreviewService"), \
+                patch("backend.worker.Config.validate_embeddings"), \
+                patch("backend.worker.Pipeline", side_effect=RuntimeError("pipeline reached")) as pipeline, \
+                patch("backend.worker.traceback.print_exc"):
+            self.assertFalse(await self.worker.process_job(job))
+        authority.return_value.authorize_dispatch.assert_called_once_with(job, "worker-test")
+        pipeline.assert_called_once()
+        self.assertEqual(authority.return_value.finalize_session.call_args.args[2], "pending")
+        self.worker.release_lease.assert_not_awaited()
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

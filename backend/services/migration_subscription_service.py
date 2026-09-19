@@ -251,7 +251,7 @@ class MigrationSubscriptionService:
                          new_inventory_id, quote_id, idempotency_key, *, rerun_of=None):
         """Atomically reserve allowance and queue the exact native content operation."""
         import os
-        from .job_limits import CONTENT_MAX_OLD_URLS, CONTENT_MAX_NEW_URLS
+        from .job_limits import PIVOT_CONTENT_MAX_OLD_URLS, PIVOT_CONTENT_MAX_NEW_URLS
         if os.getenv('MCP_PIVOT_ENABLED', 'false').lower() != 'true' or os.getenv('MCP_PIVOT_ACTIVATION') != 'test_only':
             raise SubscriptionNotReadyError('Test-only Studio dispatch is not enabled.')
         return self._run_rpc('reserve_studio_migration_run', {
@@ -259,7 +259,7 @@ class MigrationSubscriptionService:
             'p_migration_id': _uuid(migration_id, 'migration_id'), 'p_old_inventory_id': _uuid(old_inventory_id, 'old_inventory_id'),
             'p_new_inventory_id': _uuid(new_inventory_id, 'new_inventory_id'), 'p_quote_id': _uuid(quote_id, 'quote_id'),
             'p_idempotency_key': validate_key(idempotency_key), 'p_rerun_of': _uuid(rerun_of, 'rerun_of') if rerun_of else None,
-            'p_activation': 'test_only', 'p_max_old_urls': CONTENT_MAX_OLD_URLS, 'p_max_new_urls': CONTENT_MAX_NEW_URLS,
+            'p_activation': 'test_only', 'p_max_old_urls': PIVOT_CONTENT_MAX_OLD_URLS, 'p_max_new_urls': PIVOT_CONTENT_MAX_NEW_URLS,
         })
 
     def finalize_worker_failure(self, job, worker_id, error):
@@ -287,12 +287,12 @@ class MigrationSubscriptionService:
     def select_run_subscription(self, user_id, migration_id, old_inventory_id, new_inventory_id,
                                 quote_id, idempotency_key, *, subscription_id=None):
         """Read-only selection. start_studio_run rechecks and reserves atomically."""
-        from .job_limits import CONTENT_MAX_OLD_URLS, CONTENT_MAX_NEW_URLS
+        from .job_limits import PIVOT_CONTENT_MAX_OLD_URLS, PIVOT_CONTENT_MAX_NEW_URLS
         params = {'p_user_id': _uuid(user_id, 'user_id'), 'p_migration_id': _uuid(migration_id, 'migration_id'),
             'p_old_inventory_id': _uuid(old_inventory_id, 'old_inventory_id'), 'p_new_inventory_id': _uuid(new_inventory_id, 'new_inventory_id'),
             'p_quote_id': _uuid(quote_id, 'quote_id'), 'p_key': validate_key(idempotency_key),
             'p_subscription_id': _uuid(subscription_id, 'subscription_id') if subscription_id is not None else None,
-            'p_max_old_urls': CONTENT_MAX_OLD_URLS, 'p_max_new_urls': CONTENT_MAX_NEW_URLS}
+            'p_max_old_urls': PIVOT_CONTENT_MAX_OLD_URLS, 'p_max_new_urls': PIVOT_CONTENT_MAX_NEW_URLS}
         try:
             response = self.repository.client.rpc('select_studio_run_subscription', params).execute()
             if getattr(response, 'error', None):

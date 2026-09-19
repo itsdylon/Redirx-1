@@ -580,7 +580,7 @@ class RedirxWorker:
                 return False
 
             try:
-                validate_content_job_url_counts(old_urls, new_urls, pipeline_type)
+                validate_content_job_url_counts(old_urls, new_urls, pipeline_type, pivot=pivot_service is not None)
             except ContentJobUrlCapExceeded as cap_error:
                 fail_message = cap_error.to_worker_error_message()
                 print(f"[Worker] Job {session_id} rejected before processing: {fail_message}")

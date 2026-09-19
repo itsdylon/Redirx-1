@@ -276,7 +276,7 @@ class RunDatabaseAcceptance(unittest.TestCase):
         import psycopg
         from backend.services.inventory_import_service import ImportCapacityExceededError
         f=self.fixture(501)
-        with patch('backend.services.migration_run_service.CONTENT_MAX_OLD_URLS',500), self.assertRaises(ImportCapacityExceededError):
+        with patch('backend.services.migration_run_service.PIVOT_CONTENT_MAX_OLD_URLS',500), self.assertRaises(ImportCapacityExceededError):
             self.start(f)
         self.assertEqual(self.sql("SELECT count(*) AS n FROM migration_operations WHERE migration_id=%s AND kind='run_migration'",[f['migration']])[0]['n'],0)
         for role in ('anon','authenticated'):

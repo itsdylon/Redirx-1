@@ -4,7 +4,7 @@ from __future__ import annotations
 import os
 from collections.abc import Mapping
 
-from .job_limits import CONTENT_MAX_OLD_URLS, CONTENT_MAX_NEW_URLS
+from .job_limits import PIVOT_CONTENT_MAX_OLD_URLS, PIVOT_CONTENT_MAX_NEW_URLS
 from .migration_planning_service import validate_key
 from .migration_quote_service import _ERRORS, QuoteNotReadyError
 from .migration_repository import InvalidInputError, MigrationRepository, RepositoryUnavailableError, _strict_uuid
@@ -86,8 +86,8 @@ class MigrationRunService:
             'p_quote_id': _uuid(quote_id, 'quote_id'), 'p_idempotency_key': validate_key(idempotency_key),
             'p_grant_id': _uuid(grant_id, 'grant_id') if grant_id is not None else None,
             'p_rerun_of': _uuid(rerun_of, 'rerun_of') if rerun_of is not None else None,
-            'p_activation': activation, 'p_max_old_urls': CONTENT_MAX_OLD_URLS,
-            'p_max_new_urls': CONTENT_MAX_NEW_URLS,
+            'p_activation': activation, 'p_max_old_urls': PIVOT_CONTENT_MAX_OLD_URLS,
+            'p_max_new_urls': PIVOT_CONTENT_MAX_NEW_URLS,
         })
 
     def authorize_dispatch(self, job, worker_id):

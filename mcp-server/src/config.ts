@@ -50,6 +50,9 @@ export const config = {
   // The authorization server's issuer. Confirmed shape from the spike:
   // https://<project-ref>.supabase.co/auth/v1. Only used in 'oauth' mode.
   authIssuerUrl: optional('OAUTH_ISSUER_URL'),
+  // Explicit release switch for the separate resource-bound authorization service.
+  authProvider: process.env.MCP_OAUTH_PROVIDER ?? 'supabase',
+  identityIssuer: optional('SUPABASE_AUTH_ISSUER'),
 
   posthog: {
     apiKey: optional('POSTHOG_API_KEY'),

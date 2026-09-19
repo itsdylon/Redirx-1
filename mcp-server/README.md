@@ -55,23 +55,28 @@ verification request has a ten-second timeout. Issuer discovery must match
 the configured issuer. No Supabase signing secret is copied into the gateway.
 
 `DevApiKeyAdapter` remains for local/CI use only; do not expose dev mode
-publicly. `GenericOidcAdapter` remains an unimplemented extension point.
+publicly. The approved resource-aware authorization service lives in
+[`mcp-auth-server`](../mcp-auth-server/README.md). Enable it explicitly with
+`MCP_OAUTH_PROVIDER=broker`, `OAUTH_ISSUER_URL` set to its exact HTTPS origin,
+and `SUPABASE_AUTH_ISSUER` retaining the existing Supabase identity issuer.
+`GenericOidcAdapter` then verifies RS256 `at+jwt` tokens against pinned issuer
+metadata/JWKS, exact resource audience, verified Supabase subject, client, scope and
+five-minute maximum lifetime. The original Supabase adapter is unchanged and is
+still the default; browser Supabase tokens never become an alternative audience.
 
 ### Remaining launch gates
 
-- The companion consent page now exists locally; deploy/configure and exercise
-  approve, deny, reconnect and refresh with real clients in a test environment.
-- **Existing generic-audience tokens will stop working.** Verify resource-bound
-  issuance first. Supabase documents custom access-token hooks for customized
-  audiences, but a hook is not configured by this change and must not blindly
-  grant MCP access to every browser session or unrelated OAuth client.
-- Confirm the provider validates the requested resource on authorization and
-  token exchange. If it cannot, use an authorization-server solution that can;
-  never weaken gateway validation as a fallback.
-- Run negative live tests (wrong resource, browser token, expired/tampered
-  token) and a positive refresh/reconnect flow before release.
-- Review public dynamic-client-registration exposure and client consent UX.
-  Provider settings were not read or changed in this implementation pass.
+The [local acceptance](../docs/oauth-broker-acceptance-2026-09-19.md) passed real
+Chrome/Supabase sign-in, local resource-bound token exchange, MCP initialization,
+tool listing and refresh. Protocol tests cover denial, replay, client separation
+and bad resources/tokens. The earlier direct-Supabase audience failure remains
+recorded in [live gate evidence](../docs/oauth-resource-gate-2026-09-19.md).
+
+Before switching production, complete the [authorization service release steps](../mcp-auth-server/README.md),
+repeat positive and negative acceptance on its actual HTTPS/proxy deployment, then
+verify authenticated backend `discover`, identity resolution and MCP telemetry.
+Keep auto-deploy off, deploy the compatible backend first, and keep dormant schema
+and pricing packets inactive. No production OAuth settings changed in this pass.
 
 References: [Supabase audience customization](https://supabase.com/docs/guides/auth/oauth-server/getting-started),
 [Supabase OAuth token behavior](https://supabase.com/docs/guides/auth/oauth-server/oauth-flows),
@@ -97,8 +102,10 @@ stdio wrapper. For the Claude Code CLI:
 claude mcp add --transport http redirx https://<your-mcp-server-url>/mcp
 ```
 
-The client will discover `.well-known/oauth-protected-resource/mcp`,
-follow it to Supabase's authorization server, and prompt for login. In
+The client will discover `.well-known/oauth-protected-resource`,
+follow it to the configured authorization server, and prompt for login. In broker
+mode the user signs in through existing Supabase/GitHub identity, then approves the
+MCP client separately. In
 `MCP_AUTH_MODE=dev`, skip the OAuth dance entirely and pass a Redirx API key
 as a static bearer token instead (client-specific; check your client's docs
 for how it sets a fixed `Authorization` header).
@@ -124,5 +131,6 @@ No IaC existed for any of the four before this; see
   today the entitlement check only runs where `export.ts` calls it, which is
   actually inside `v1_routes.export_migration` itself (the gateway adds no
   gate of its own), so this is not a gap specific to MCP.
-- Live deployment/configuration of the implemented `/oauth/consent` page and
-  resource-bound provider tokens — see the launch gates under "Auth" above.
+- Deployment/configuration of the new resource-aware authorization service and
+  production backend acceptance — see the launch gates under "Auth" above.
+  The companion app's `/oauth/consent` page is already deployed.

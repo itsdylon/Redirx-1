@@ -1,13 +1,21 @@
 # Local OAuth consent probe
 
-Status: exercised against production after the frontend callback hotfix. Browser
-consent/callback succeeded, but the initial probe exited 1 on an upstream request;
-token verification and the production OAuth gate have **not passed**.
-The improved diagnostic identified HTTP 500 at token exchange. Provider auth logs
-then identified `HS256 is not supported for ID token signing` on both real attempts.
+Status: the September 19 access-token-only attempt completed browser callback,
+token exchange and provider verification. **Only `resource_audience` failed; exit 1.**
+The production OAuth gate has failed for the current configuration. See
+[the live evidence](oauth-resource-gate-2026-09-19.md) for exact checks and limits.
+Earlier OIDC attempts hit HTTP 500 at token exchange; provider auth logs identified
+`HS256 is not supported for ID token signing`. Omitting `openid` avoided that
+failure without changing production signing keys.
 This is an operator diagnostic, not app runtime code or evidence that MCP tools work.
 It does not alter the strict gateway verifier, register a client, call MCP tools,
 deploy services, or apply database migrations.
+
+The approved repair now has a separate live harness in
+`mcp-auth-server/scripts/live-probe.mjs`; see
+[its acceptance evidence](oauth-broker-acceptance-2026-09-19.md). This older probe
+continues to diagnose direct Supabase issuance and is expected to fail that audience
+check with the observed configuration.
 
 ## Before running
 

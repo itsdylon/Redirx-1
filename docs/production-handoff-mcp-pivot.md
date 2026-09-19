@@ -4,6 +4,17 @@ Written 2026-09-18. No staging environment. Every step below runs against live
 `redirx.dev` infrastructure, so the order is load-bearing and each stage names its own
 way back.
 
+**Current status — September 19, 03:17 UTC:** the direct-Supabase resource gate
+failed at 02:40 UTC. Dylon approved a separate resource-aware authorization service;
+its implementation now passes the real Chrome/Supabase login path into a local MCP
+gateway, including initialization, tool listing and refresh rotation. **The production
+hold remains:** the new issuer is not deployed and backend tool execution was not
+part of this test. Read [acceptance evidence](oauth-broker-acceptance-2026-09-19.md)
+and the [new service release instructions](../mcp-auth-server/README.md) before the
+historical stages below. The new issuer setup and acceptance supersede the old
+assumption that a direct Supabase token will satisfy Step 0. Historical evidence
+and rollout restrictions remain applicable; do not loosen token validation.
+
 The shape of this handoff: one blocking test that costs nothing and can veto the whole
 plan, then a migration, then four deployments in a fixed order, then a real
 authenticated MCP call. The unfinished durable-migrations and pricing work ships as
@@ -592,7 +603,7 @@ PostHog as data rather than as silence — but it is far cheaper to fix the docs
 
 | Risk | Likelihood | What it looks like | Response |
 | --- | --- | --- | --- |
-| Supabase does not bind `aud` to the resource | **High — unproven** | Every authenticated call 401s | Section 1 catches it before you merge |
+| Supabase does not bind `aud` to the resource | **Observed in the September 19 live probe** | The existing verifier would reject the issued token; no live MCP call was attempted | Step 0 stays failed; see the resource remediation proposal |
 | `v1_routes` / `pipeline_routes` regression | Medium | Existing upload→match→results breaks | Stage C verify step 4; roll back the API alone |
 | Worker breaks on `pipeline_runner` change | Medium | Jobs claimed but never complete | Stage D; roll back the worker alone |
 | Someone activates dormant pricing later | Low | Customers quoted new bands | Gate 1 in CI |

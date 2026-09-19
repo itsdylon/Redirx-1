@@ -5,12 +5,14 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import type { RequestHandler } from 'express';
 import { DevApiKeyAdapter } from './auth/devApiKeyAdapter.js';
 import { SupabaseAuthAdapter } from './auth/supabaseAuthAdapter.js';
+import { GenericOidcAdapter } from './auth/genericOidcAdapter.js';
 import type { AuthorizationServerAdapter } from './auth/types.js';
 import { config } from './config.js';
 import { buildMcpServer } from './mcpServer.js';
 import { shutdownTelemetry } from './telemetry/posthog.js';
 
 function buildAdapter(): AuthorizationServerAdapter {
+  if (!['oauth', 'dev'].includes(config.authMode)) throw new Error('Unsupported MCP_AUTH_MODE');
   if (config.authMode === 'dev') {
     console.warn(
       '[auth] MCP_AUTH_MODE=dev — accepting raw Redirx API keys as bearer tokens. ' +
@@ -26,6 +28,11 @@ function buildAdapter(): AuthorizationServerAdapter {
         'or set MCP_AUTH_MODE=dev for local/API-key-only testing.',
     );
   }
+  if (config.authProvider === 'broker') {
+    if (!config.identityIssuer) throw new Error('SUPABASE_AUTH_ISSUER is required for broker authorization');
+    return new GenericOidcAdapter(config.authIssuerUrl, config.publicUrl, config.identityIssuer);
+  }
+  if (config.authProvider !== 'supabase') throw new Error('Unsupported MCP_OAUTH_PROVIDER');
   const anonKey = process.env.SUPABASE_ANON_KEY;
   if (!anonKey) {
     throw new Error('SUPABASE_ANON_KEY is required alongside OAUTH_ISSUER_URL in oauth mode.');
@@ -58,11 +65,12 @@ async function main() {
         oauthMetadata,
         resourceServerUrl,
         resourceName: 'RedirX',
-        scopesSupported: [],
+        scopesSupported: config.authProvider === 'broker' ? ['mcp:tools'] : [],
       }),
     );
     authMiddleware = requireBearerAuth({
       verifier: adapter,
+      requiredScopes: config.authProvider === 'broker' ? ['mcp:tools'] : [],
       resourceMetadataUrl: getOAuthProtectedResourceMetadataUrl(resourceServerUrl),
     });
   } else if (config.authMode === 'dev') {

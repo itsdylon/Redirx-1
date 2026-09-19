@@ -19,6 +19,7 @@
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@posthog/mcp": "^0.11.7",
     "express": "^5.2.1",
+    "jose": "6.2.2",
     "posthog-node": "^5.50.0",
     "zod": "^4.4.3"
   },

@@ -4,6 +4,20 @@ Date: 2026-09-17. Source execution plan: sibling landing repository,
 `docs/mcp-pivot-execution-plan.md` (P00–P19). This is **not** a completed pivot
 or a production-readiness declaration.
 
+**Latest checkpoint — September 19, 03:17 UTC:** the approved separate OAuth
+service passed a real Chrome → production Supabase identity → local issuer → local
+MCP gateway connection. `initialize`, all four existing tool listings, and refresh
+rotation succeeded. The new authorization suite passes **25 tests**; gateway suite
+passes **76**, with build and typecheck passing. See
+[acceptance evidence](oauth-broker-acceptance-2026-09-19.md) and the
+[release instructions](../mcp-auth-server/README.md).
+
+The earlier direct-Supabase test still fails resource audience binding. Its gateway
+checks were preserved. The new service is opt-in and has not been deployed; no
+production schema or settings changed. Production rollout remains held pending the
+new HTTPS authorization service and real backend acceptance. This checkpoint adds
+an authorization prerequisite, not the remaining seven target tools or migration flows.
+
 ## Implemented locally
 
 - **P00 foundation:** `contracts/pivot-v1.json` and

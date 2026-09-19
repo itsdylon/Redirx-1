@@ -4,16 +4,44 @@ Written 2026-09-18. No staging environment. Every step below runs against live
 `redirx.dev` infrastructure, so the order is load-bearing and each stage names its own
 way back.
 
-**Current status — September 19, 03:17 UTC:** the direct-Supabase resource gate
-failed at 02:40 UTC. Dylon approved a separate resource-aware authorization service;
-its implementation now passes the real Chrome/Supabase login path into a local MCP
-gateway, including initialization, tool listing and refresh rotation. **The production
-hold remains:** the new issuer is not deployed and backend tool execution was not
-part of this test. Read [acceptance evidence](oauth-broker-acceptance-2026-09-19.md)
-and the [new service release instructions](../mcp-auth-server/README.md) before the
-historical stages below. The new issuer setup and acceptance supersede the old
-assumption that a direct Supabase token will satisfy Step 0. Historical evidence
-and rollout restrictions remain applicable; do not loosen token validation.
+**Current status — September 19, 16:26 UTC: the production hold is discharged and the
+pivot's authentication path is live.** API, worker and gateway all run pinned
+`017a2dcd7f4d02f6ec51edc3f13cc7cd4518c14f` from the isolated branch
+`deploy/mcp-auth-017a2dc`. **`main` (`23fff0b7`) and `pivot/mcp-primary` (`3e124857`) are
+unchanged — nothing was merged to reach production.** Auto-deploy stays off on all services;
+every deployment was a manual act against a named commit.
+
+A new authorization issuer, `https://redirx-mcp-auth.onrender.com`, is deployed with its own
+Render PostgreSQL store and a least-privilege runtime role, and the gateway runs
+`MCP_OAUTH_PROVIDER=broker` against it. A native MCP SDK client completed consent,
+`initialize`, a real backend `discover` returning **9 URLs**, refresh rotation, reconnection,
+revocation and client `DELETE` against the live services. Restart persistence was proven
+**separately**: a refresh token issued before a Render restart was redeemed afterwards on
+instance `vzmqx` at 16:25:23 UTC, with replay and the then-current family both returning
+400 `invalid_grant`. An earlier combined run rejected a wrong resource with `invalid_target`
+but invalidated the refresh while doing so, so it is **not** persistence evidence and is not
+cited as such.
+
+**What has NOT changed, and still governs:** no application SQL was applied — migrations
+**032–048 were not run**, and **033 remains separate and pending**, to follow a verified
+deployment rather than accompany one, because its prerequisite ships in this release. Token
+validation was not loosened. The issuer origin is **permanent**, not a placeholder for
+`auth.redirx.dev` — see the acceptance record. `AUTH_TRUST_PROXY=1` is required, and the
+forwarded-host check it enables is defence in depth a caller can satisfy by forgery, which is
+documented rather than relied upon.
+
+Read [acceptance evidence](oauth-broker-acceptance-2026-09-19.md) and the
+[service release instructions](../mcp-auth-server/README.md) before the historical stages
+below. Those stages are preserved as written: Step 0's original assumption that a direct
+Supabase token would suffice is superseded, and Stage C's "merge, then deploy" instruction was
+superseded in practice by the isolated-SHA manual deploy. Historical evidence and rollout
+restrictions otherwise remain applicable.
+
+> *Superseded status, preserved.* At 03:17 UTC this header read: the direct-Supabase resource
+> gate failed at 02:40 UTC; Dylon approved a separate resource-aware authorization service whose
+> implementation passed the real Chrome/Supabase login path into a **local** MCP gateway; and the
+> production hold remained because the new issuer was not deployed and backend tool execution was
+> not part of that test. All of that was true when written.
 
 The shape of this handoff: one blocking test that costs nothing and can veto the whole
 plan, then a migration, then four deployments in a fixed order, then a real

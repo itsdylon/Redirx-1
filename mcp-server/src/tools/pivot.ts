@@ -7,6 +7,14 @@ const UUID = z.string().uuid();
 const IDEMPOTENCY = z.string().min(1).max(200).regex(/^[^\x00-\x1f\x7f]+$/);
 const PAGE = z.number().int().min(1).max(500).default(100);
 const FORMATS = ['apache', 'nginx', 'wordpress', 'vercel', 'cloudflare', 'shopify', 'csv', 'json'] as const;
+const ORIGIN = z.string().min(1).max(2048).refine(value => {
+  try {
+    const parsed = new URL(value);
+    return value === value.trim() && ['http:', 'https:'].includes(parsed.protocol)
+      && !parsed.username && !parsed.password && parsed.pathname === '/' && !parsed.search && !parsed.hash;
+  } catch { return false; }
+}, 'Use an HTTP(S) origin without credentials, path, query, or fragment.');
+const ORIGIN_REWRITES = z.record(ORIGIN, ORIGIN).refine(value => Object.keys(value).length <= 20, 'Use at most 20 origin rewrites.');
 const ACTIONS = ['accept_repair', 'set_target', 'approve', 'reject', 'defer', 'intentional_removal'] as const;
 
 type ToolResult = { content: Array<{ type: 'text'; text: string }>; isError?: boolean };
@@ -17,6 +25,10 @@ function localError(code: string, message: string, nextAction = 'none'): PivotEn
     status: 'failed', next_action: nextAction, data: {},
     error: { code, message, retryable: false, next_action: nextAction },
   };
+}
+
+function invalidInput(message: string): ToolResult {
+  return { isError: true, content: [{ type: 'text', text: stableEnvelope(localError('invalid_input', message)) }] };
 }
 
 function stableEnvelope(envelope: PivotEnvelope): string {
@@ -116,28 +128,47 @@ export function registerPivotTools(server: McpServer): void {
   }, ({ migration_id, ...args }, extra) => call(extra as ToolExtra, 'POST', `/migrations/${encodeURIComponent(migration_id)}/artifacts`, args));
 
   server.registerTool('verify_redirects', {
-    title: 'Verify redirects', description: 'Start or resume a persisted redirect verification. Deployment confirmation is advisory and server-validated.',
-    inputSchema: { migration_id: UUID, artifact_id: UUID, deployment_confirmation: z.boolean().optional(), live_origins: z.array(z.string()).max(20).optional(), idempotency_key: IDEMPOTENCY },
+    title: 'Verify redirects', description: 'Start or resume an owned artifact check. Supply an existing deployment_id, or explicitly confirm installation with live_origin and origin_rewrites ({} preserves artifact destinations).',
+    inputSchema: z.strictObject({ migration_id: UUID, artifact_id: UUID, deployment_id: UUID.optional(), deployment_confirmation: z.literal(true).optional(), live_origin: ORIGIN.optional(), origin_rewrites: ORIGIN_REWRITES.optional(), idempotency_key: IDEMPOTENCY }),
     annotations: { readOnlyHint: false, idempotentHint: true, openWorldHint: true },
-  }, ({ migration_id, ...args }, extra) => call(extra as ToolExtra, 'POST', `/migrations/${encodeURIComponent(migration_id)}/verifications`, args));
+  }, ({ migration_id, ...args }, extra) => {
+    if (args.deployment_id !== undefined) {
+      if (args.deployment_confirmation !== undefined || args.live_origin !== undefined || args.origin_rewrites !== undefined) {
+        return invalidInput('Use deployment_id or explicit installation confirmation, not both.');
+      }
+    } else if (args.deployment_confirmation !== true || args.live_origin === undefined || args.origin_rewrites === undefined) {
+      return invalidInput('Supply deployment_id, or deployment_confirmation=true with live_origin and explicit origin_rewrites.');
+    }
+    return call(extra as ToolExtra, 'POST', `/migrations/${encodeURIComponent(migration_id)}/verifications`, args);
+  });
 
   server.registerTool('manage_monitoring', {
-    title: 'Manage monitoring', description: 'Start, pause, resume, or cancel monitoring for an owned deployed artifact. Renewal consent remains explicit.',
-    inputSchema: { migration_id: UUID, action: z.enum(['start', 'pause', 'resume', 'cancel']), artifact_id: UUID.optional(), alert_email: z.string().email().optional(), idempotency_key: IDEMPOTENCY },
+    title: 'Manage monitoring', description: 'Start monitoring with an owned artifact_id and deployment_id, optionally using an existing subscription_id. Pause, resume, or cancel using monitoring_id. This does not purchase or renew a subscription.',
+    inputSchema: z.strictObject({ migration_id: UUID, action: z.enum(['start', 'pause', 'resume', 'cancel']), artifact_id: UUID.optional(), deployment_id: UUID.optional(), monitoring_id: UUID.optional(), subscription_id: UUID.optional(), alert_email: z.string().email().max(254).optional(), idempotency_key: IDEMPOTENCY }),
     annotations: { readOnlyHint: false, idempotentHint: true },
-  }, ({ migration_id, ...args }, extra) => call(extra as ToolExtra, 'POST', `/migrations/${encodeURIComponent(migration_id)}/monitoring`, args));
+  }, ({ migration_id, ...args }, extra) => {
+    if (args.action === 'start') {
+      if (!args.artifact_id || !args.deployment_id || args.monitoring_id !== undefined) {
+        return invalidInput('Start requires artifact_id and deployment_id; monitoring_id is only for an existing monitor.');
+      }
+    } else if (!args.monitoring_id || args.artifact_id !== undefined || args.deployment_id !== undefined
+        || args.subscription_id !== undefined || args.alert_email !== undefined) {
+      return invalidInput('Pause, resume, and cancel require monitoring_id and cannot change artifact, subscription, or contact.');
+    }
+    return call(extra as ToolExtra, 'POST', `/migrations/${encodeURIComponent(migration_id)}/monitoring`, args);
+  });
 
   server.registerTool('get_monitoring_status', {
-    title: 'Get monitoring status', description: 'Read monitoring coverage and issues; unchecked is not reported as healthy.',
-    inputSchema: { migration_id: UUID, cursor: z.string().max(4096).optional(), limit: PAGE },
+    title: 'Get monitoring status', description: 'Read the selected monitor, or the latest owned monitor for this migration. Unchecked coverage is not healthy.',
+    inputSchema: z.strictObject({ migration_id: UUID, monitoring_id: UUID.optional() }),
     annotations: { readOnlyHint: true, idempotentHint: true },
-  }, ({ migration_id, cursor, limit }, extra) => call(extra as ToolExtra, 'GET', query(`/migrations/${encodeURIComponent(migration_id)}/monitoring`, { cursor, limit })));
+  }, ({ migration_id, monitoring_id }, extra) => call(extra as ToolExtra, 'GET', query(`/migrations/${encodeURIComponent(migration_id)}/monitoring`, { monitoring_id })));
 
   server.registerTool('get_monitoring_fixes', {
-    title: 'Get monitoring fixes', description: 'Read evidence and ready correction artifacts. Generating a fix never marks it deployed.',
-    inputSchema: { migration_id: UUID, cursor: z.string().max(4096).optional(), limit: PAGE },
+    title: 'Get monitoring fixes', description: 'Page open monitoring findings by integer ordinal. Recovery artifacts restore the expected rules; they do not prove installation or resolution.',
+    inputSchema: z.strictObject({ migration_id: UUID, monitoring_id: UUID.optional(), after: z.number().int().min(-1).default(-1), limit: PAGE }),
     annotations: { readOnlyHint: true, idempotentHint: true },
-  }, ({ migration_id, cursor, limit }, extra) => call(extra as ToolExtra, 'GET', query(`/migrations/${encodeURIComponent(migration_id)}/monitoring/fixes`, { cursor, limit })));
+  }, ({ migration_id, monitoring_id, after, limit }, extra) => call(extra as ToolExtra, 'GET', query(`/migrations/${encodeURIComponent(migration_id)}/monitoring/fixes`, { monitoring_id, after, limit })));
 
   server.registerTool('connect_search_console', {
     title: 'Connect Search Console', description: 'Begin consent, inspect properties, sync approved data, or disconnect. Never provide Google credentials to this tool.',

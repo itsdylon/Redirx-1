@@ -237,3 +237,19 @@ stale effect settlements, including after navigation away. **44 auth/consent/rou
 tests pass; frontend build passes.** Production OAuth acceptance is still pending.
 Only the callback component and its tests change under `frontend`; all runtime
 backend/gateway behavior, SQL, pricing and auto-deploy settings remain untouched.
+
+## Consent returned; token verification still blocked
+
+Frontend hotfix `3be8a91` is live as `dep-damump6gekts73f2a8q0`; the shipped bundle
+was independently checked. User reported the fresh consent attempt worked, and
+the local probe advanced past callback receipt but exited 1 with the original
+generic `Upstream request failed (details suppressed)` error. No token claims were
+verified. This is **not** a passed OAuth gate; API/worker/gateway/SQL remain held.
+
+The probe now reports only the failed stage, HTTP status and an allowlisted error
+code, retaining credential/body redaction. **25 offline tests pass.** A single
+deliberately invalid-code request confirmed the token endpoint responds with
+HTTP 400 / `invalid_grant`; that request used no real authorization code and is
+not evidence about the preceding consent attempt. A fresh browser attempt is
+required because the first run retained no code or tokens. No deployment or
+provider configuration changes were made for these diagnostics.

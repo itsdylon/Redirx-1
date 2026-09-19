@@ -16,11 +16,18 @@ import re
 import secrets
 import time
 from urllib.parse import parse_qs, urlencode, urlsplit
+from urllib.error import HTTPError, URLError
 from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 
 
 CALLBACK = "http://127.0.0.1:8765/callback"
 MAX_RESPONSE = 65536
+SAFE_ERROR_CODES = frozenset({
+    "invalid_request", "invalid_client", "invalid_grant", "unauthorized_client",
+    "unsupported_grant_type", "invalid_scope", "invalid_target", "access_denied",
+    "server_error", "temporarily_unavailable", "bad_jwt", "no_authorization",
+    "session_not_found", "user_not_found", "insufficient_scope", "unexpected_audience",
+})
 
 
 class ProbeError(Exception):
@@ -47,6 +54,28 @@ def request_json(url, *, headers=None, form=None):
             if not isinstance(result, dict):
                 raise ProbeError("Invalid upstream response")
             return result
+    except HTTPError as error:
+        # Never emit arbitrary provider messages, URLs, headers, or descriptions.
+        code = None
+        try:
+            body = error.read(MAX_RESPONSE + 1)
+            if len(body) <= MAX_RESPONSE:
+                payload = json.loads(body)
+                if isinstance(payload, dict):
+                    candidate = payload.get("error") or payload.get("error_code") or payload.get("code")
+                    if isinstance(candidate, str) and candidate in SAFE_ERROR_CODES:
+                        code = candidate
+        except Exception:
+            pass
+        finally:
+            error.close()
+        status = error.code if type(error.code) is int and 100 <= error.code <= 599 else "unknown"
+        suffix = "; " + code if code else ""
+        raise ProbeError(f"Upstream request failed (HTTP {status}{suffix}; details suppressed)") from None
+    except URLError:
+        raise ProbeError("Upstream request failed (connection or TLS error; details suppressed)") from None
+    except TimeoutError:
+        raise ProbeError("Upstream request failed (timeout; details suppressed)") from None
     except Exception:
         # HTTPError/JSON errors can contain URLs, codes, or response bodies.
         raise ProbeError("Upstream request failed (details suppressed)") from None
@@ -179,15 +208,21 @@ def claim_checks(token, user, issuer, resource, client_id, now=None):
 
 
 def verify_code(code, verifier, issuer, resource, client_id, public_key):
-    response = request_json(issuer.rstrip("/") + "/oauth/token", form=dict(
-        grant_type="authorization_code", code=code, code_verifier=verifier,
-        client_id=client_id, redirect_uri=CALLBACK, resource=resource))
+    try:
+        response = request_json(issuer.rstrip("/") + "/oauth/token", form=dict(
+            grant_type="authorization_code", code=code, code_verifier=verifier,
+            client_id=client_id, redirect_uri=CALLBACK, resource=resource))
+    except ProbeError as error:
+        raise ProbeError("Token exchange: " + str(error)) from None
     token = response.get("access_token")
     if (not isinstance(token, str) or not token or len(token) > 16384 or
             str(response.get("token_type", "")).lower() != "bearer"):
         raise ProbeError("Token response missing a bounded Bearer access token")
-    user = request_json(issuer.rstrip("/") + "/user",
-                        headers={"Authorization": "Bearer " + token, "apikey": public_key})
+    try:
+        user = request_json(issuer.rstrip("/") + "/user",
+                            headers={"Authorization": "Bearer " + token, "apikey": public_key})
+    except ProbeError as error:
+        raise ProbeError("Provider verification: " + str(error)) from None
     return claim_checks(token, user, issuer, resource, client_id)
 
 

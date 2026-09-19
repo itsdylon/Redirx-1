@@ -1,6 +1,8 @@
 # Local OAuth consent probe
 
-Status: implemented and offline-tested, **not yet exercised against production**.
+Status: exercised against production after the frontend callback hotfix. Browser
+consent/callback succeeded, but the initial probe exited 1 on an upstream request;
+token verification and the production OAuth gate have **not passed**.
 This is an operator diagnostic, not app runtime code or evidence that MCP tools work.
 It does not alter the strict gateway verifier, register a client, call MCP tools,
 deploy services, or apply database migrations.
@@ -51,7 +53,10 @@ integration gap, not permission to accept a browser `authenticated` audience in 
 gateway. Acceptance of a `resource` query parameter alone proves nothing about the
 issued token. Never weaken `verifyAccessToken` to make this probe pass.
 
-Output contains the authorization URL and boolean checks only. Callback codes and
+Output contains the authorization URL, boolean checks, and safe failure diagnostics:
+token-exchange versus provider-verification stage, HTTP status, and a strictly
+allowlisted OAuth/provider error code. Arbitrary descriptions, bodies, headers and
+exception text remain suppressed. Callback codes and
 tokens stay in process memory, with no explicit persistence or request logging;
 Python does not guarantee secure memory erasure. Browser/provider history may still
 retain their normal navigation records. No access or refresh token is exported.

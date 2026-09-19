@@ -3,12 +3,13 @@ import base64
 from contextlib import redirect_stderr, redirect_stdout
 import hashlib
 from http.client import HTTPConnection
-from io import StringIO
+from io import BytesIO, StringIO
 import json
 import threading
 import unittest
 from unittest.mock import MagicMock, patch
 from urllib.parse import parse_qs, urlsplit
+from urllib.error import HTTPError, URLError
 
 from scripts import oauth_consent_probe as probe
 
@@ -155,9 +156,14 @@ class TokenTests(unittest.TestCase):
     @patch.object(probe, "request_json")
     def test_failed_provider_cannot_authorize(self, request, checks):
         request.side_effect = [{"access_token": token(), "token_type": "bearer"}, probe.ProbeError("Rejected")]
-        with self.assertRaises(probe.ProbeError):
+        with self.assertRaisesRegex(probe.ProbeError, "^Provider verification:"):
             probe.verify_code("code", "verifier", ISSUER, RESOURCE, CLIENT, "public-key")
         checks.assert_not_called()
+
+    @patch.object(probe, "request_json", side_effect=probe.ProbeError("Upstream request failed"))
+    def test_exchange_failure_has_stage(self, request):
+        with self.assertRaisesRegex(probe.ProbeError, "^Token exchange:"):
+            probe.verify_code("code", "verifier", ISSUER, RESOURCE, CLIENT, "public-key")
 
     @patch.object(probe, "request_json")
     def test_invalid_token_response(self, request):
@@ -169,6 +175,34 @@ class TokenTests(unittest.TestCase):
 
 
 class TransportTests(unittest.TestCase):
+    @patch.object(probe, "build_opener")
+    def test_http_failure_emits_only_status_and_allowlisted_code(self, opener):
+        for field in ["error", "error_code", "code"]:
+            stream = BytesIO(json.dumps({field: "invalid_grant", "error_description": "secret-code"}).encode())
+            opener.return_value.open.side_effect = HTTPError("https://secret-url", 400, "secret-message", {}, stream)
+            with self.assertRaises(probe.ProbeError) as caught:
+                probe.request_json(ISSUER + "/oauth/token")
+            self.assertEqual(str(caught.exception), "Upstream request failed (HTTP 400; invalid_grant; details suppressed)")
+            self.assertTrue(stream.closed)
+
+    @patch.object(probe, "build_opener")
+    def test_arbitrary_error_content_remains_redacted(self, opener):
+        for body in [b'{"error":"secret-token"}', b'{"error":["secret-token"]}',
+                     b"secret-token", b"x" * (probe.MAX_RESPONSE + 1)]:
+            opener.return_value.open.side_effect = HTTPError("https://secret", 401, "secret", {}, BytesIO(body))
+            with self.assertRaises(probe.ProbeError) as caught:
+                probe.request_json(ISSUER + "/user")
+            self.assertEqual(str(caught.exception), "Upstream request failed (HTTP 401; details suppressed)")
+
+    @patch.object(probe, "build_opener")
+    def test_network_failures_are_classified_without_raw_message(self, opener):
+        for error, label in [(URLError("secret"), "connection or TLS error"), (TimeoutError("secret"), "timeout")]:
+            opener.return_value.open.side_effect = error
+            with self.assertRaises(probe.ProbeError) as caught:
+                probe.request_json(ISSUER + "/user")
+            self.assertIn(label, str(caught.exception))
+            self.assertNotIn("secret", str(caught.exception))
+
     def test_redirect_refused(self):
         with self.assertRaises(probe.ProbeError):
             probe.NoRedirect().redirect_request(None, None, 302, "", {}, "https://evil/")

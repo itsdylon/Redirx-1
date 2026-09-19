@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, useLocation } from 'react-router-dom';
 import App from './App';
 
 const mockUseAuth = vi.fn();
@@ -174,5 +174,25 @@ describe('App routing', () => {
 
     renderAt('/account');
     expect(await screen.findByText('Quick Match Route')).toBeInTheDocument();
+  });
+});
+
+function CurrentRoute() {
+  const location = useLocation();
+  return <output aria-label="Current route">{location.pathname + location.search + location.hash}</output>;
+}
+
+describe('unauthenticated pivot deep links', () => {
+  it.each([
+    '/companion?tab=history',
+    '/migrations/migration-1?monitoring_id=monitor-1&checkout_id=oneoff-1',
+    '/billing/subscriptions/return?checkout_id=subscription-1',
+  ])('preserves %s through the actual App login redirect', async target => {
+    mockUseAuth.mockReturnValue({ user: null, loading: false });
+    render(<MemoryRouter initialEntries={[target]}><App /><CurrentRoute /></MemoryRouter>);
+    expect(await screen.findByText('Login Page')).toBeInTheDocument();
+    const current = new URL(screen.getByLabelText('Current route').textContent!, 'https://fixture.invalid');
+    expect(current.pathname).toBe('/login');
+    expect(current.searchParams.get('redirect')).toBe(target);
   });
 });

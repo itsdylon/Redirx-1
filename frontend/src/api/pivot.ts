@@ -1,15 +1,83 @@
 import { API_BASE_URL, getAuthHeaders } from './config';
-export interface PivotEnvelope<T extends Record<string, unknown> = Record<string, unknown>> { contract_version:string;migration_id:string|null;operation_id:string|null;status:string;next_action:string;data:T;error:{code:string;message:string;retryable:boolean;next_action:string}|null; }
-export interface PivotMigration {id:string;name?:string|null;old_origin?:string;new_origin?:string;status?:string;next_action?:string;run_id?:string;quote_id?:string;}
-export interface PivotMatch {mapping_id:string;old_url:string;new_url?:string|null;decision_target?:string|null;revision:number;review_status:string;traffic_observed:boolean;traffic_clicks:number|null;}
-async function request<T extends Record<string,unknown>>(path:string,init:RequestInit={}):Promise<PivotEnvelope<T>> {const r=await fetch(`${API_BASE_URL}/api/v2${path}`,{...init,headers:{...getAuthHeaders(),...init.headers}});const b=await r.json().catch(()=>null) as PivotEnvelope<T>|null;if(!b||typeof b.data!=='object'||!b.contract_version)throw new Error(r.status===401?'Sign in again to continue.':r.status===404?'This migration was not found.':'Unable to load this migration.');return b;}
-export const listPivotMigrations=(cursor?:string)=>request<{items:PivotMigration[];next_cursor?:string|null}>(`/migrations?limit=20${cursor?`&cursor=${encodeURIComponent(cursor)}`:''}`);
-export const getPivotMigration=(id:string,monitoringId?:string|null)=>request<{migration?:PivotMigration;run_id?:string;quote_id?:string}>(`/migrations/${encodeURIComponent(id)}${monitoringId?`?monitoring_id=${encodeURIComponent(monitoringId)}`:''}`);
-export const listPivotMatches=(m:string,r:string,cursor?:string)=>request<{items:PivotMatch[];next_cursor?:string|null}>(`/migrations/${m}/runs/${r}/matches?filter=needs_review&limit=20${cursor?`&cursor=${encodeURIComponent(cursor)}`:''}`);
-export const resolvePivotMatch=(m:string,r:string,d:Record<string,unknown>,idempotencyKey:string)=>request(`/migrations/${m}/runs/${r}/matches`,{method:'PATCH',body:JSON.stringify({decisions:[d],idempotency_key:idempotencyKey})});
-export const monitoring=(m:string,fixes=false,monitoringId?:string|null)=>request<{items?:Record<string,unknown>[];coverage?:Record<string,unknown>;next_cursor?:string|null}>(`/migrations/${m}/monitoring${fixes?'/fixes':''}?limit=20${monitoringId?`&monitoring_id=${encodeURIComponent(monitoringId)}`:''}`);
-export const gscAction=(d:Record<string,unknown>,idempotencyKey:string)=>request<{authorization_url?:string;connection_state?:string;properties?:Array<{site_url:string}>}>('/connections/search-console/actions',{method:'POST',body:JSON.stringify({...d,idempotency_key:idempotencyKey})});
-export const checkout=(m:string,q:string)=>request<{checkout_url?:string}>(`/migrations/${m}/quotes/${q}/checkout`,{method:'POST',body:JSON.stringify({idempotency_key:crypto.randomUUID()})});
-export interface SubscriptionCheckout { checkout_id?:string; checkout_url?:string; status?:string; monthly_disclosure?:string; availability?:string; }
-export const createSubscriptionCheckout=(body:{sku:'studio'|'monitoring';deployment_id?:string;recurring_consent:true})=>request<SubscriptionCheckout>('/billing/subscription-checkouts',{method:'POST',body:JSON.stringify({...body,idempotency_key:crypto.randomUUID()})});
-export const getSubscriptionCheckout=(id:string,returned=false)=>request<SubscriptionCheckout>(`/billing/subscription-checkouts/${encodeURIComponent(id)}${returned?'/return':''}`);
+
+export interface PivotEnvelope<T = Record<string, unknown>> {
+  contract_version: string; migration_id: string | null; operation_id: string | null;
+  status: string; next_action: string; retry_after_seconds?: number; data: T;
+  error: { code: string; message: string; retryable: boolean; next_action: string } | null;
+}
+export interface PivotMigration { id: string; name?: string | null; old_origin?: string; new_origin?: string; status?: string; }
+export interface PivotMatch {
+  mapping_id: string; old_url: string; new_url?: string | null; decision_target?: string | null;
+  revision: number; review_status: string; traffic_observed: boolean; traffic_clicks: number | null;
+}
+export interface MigrationDetail {
+  migration?: PivotMigration; summary?: string; run_id?: string; quote_id?: string;
+  run?: { status: string; progress?: { current_stage: number | null; total_stages: number | null } };
+  quote?: { amount_cents: number; currency: string; kind: string };
+  artifact?: { artifact_id: string; format: string; included_count: number; excluded_count: number };
+  deployment_id?: string; monitoring_id?: string;
+  verification?: { outcome: string; checked: number; total: number; unchecked: number };
+}
+export interface MonitoringIssue {
+  issue_id: string; source_url: string; expected_url?: string; issue?: string;
+  suggested_action?: string; evidence?: { issue?: string; measurement?: string };
+}
+export interface MonitoringData {
+  state?: string; summary?: string; items?: MonitoringIssue[]; next_cursor?: number | null;
+  coverage?: { outcome?: string; total?: number; checked?: number; unchecked?: number; failed?: number };
+}
+export interface GscData {
+  authorization_url?: string; connection_state?: string; summary?: string;
+  properties?: Array<{ site_url: string; permission_level?: string }>;
+}
+export interface SubscriptionCheckout {
+  checkout_id: string; checkout_url?: string; state: string; sku: string;
+  monthly_amount_cents: number; currency: string; interval: string;
+  subscription?: { status: string; eligible: boolean };
+}
+export class PivotRequestError extends Error {
+  constructor(message: string, public code: string, public status: number) { super(message); }
+}
+async function request<T>(path: string, init: RequestInit = {}): Promise<PivotEnvelope<T>> {
+  const response = await fetch(`${API_BASE_URL}/api/v2${path}`, {
+    ...init, headers: { ...getAuthHeaders(), ...init.headers },
+  });
+  const value = await response.json().catch(() => null) as PivotEnvelope<T> | null;
+  if (!response.ok || value?.error) {
+    throw new PivotRequestError(value?.error?.message || (response.status === 401
+      ? 'Sign in again to continue.' : response.status === 404 ? 'This record was not found.'
+      : 'The request could not finish. Try again.'), value?.error?.code || 'unavailable', response.status);
+  }
+  if (!value || !value.data || typeof value.data !== 'object' || value.contract_version !== '1.0.0') {
+    throw new PivotRequestError('The server returned an incomplete response. Try again.', 'invalid_response', response.status);
+  }
+  return value;
+}
+const part = encodeURIComponent;
+const post = (data: unknown, signal?: AbortSignal): RequestInit => ({ method: 'POST', body: JSON.stringify(data), signal });
+export const listPivotMigrations = (cursor?: string, signal?: AbortSignal) =>
+  request<{ items: PivotMigration[]; next_cursor?: string | null }>(`/migrations?limit=20${cursor ? `&cursor=${part(cursor)}` : ''}`, { signal });
+export const getPivotMigration = (id: string, signal?: AbortSignal) =>
+  request<MigrationDetail>(`/migrations/${part(id)}`, { signal });
+export const listPivotMatches = (migration: string, run: string, cursor?: string, signal?: AbortSignal) =>
+  request<{ items: PivotMatch[]; next_cursor?: string | null; selection_revision: number }>(
+    `/migrations/${part(migration)}/runs/${part(run)}/matches?filter=needs_review&limit=20${cursor ? `&cursor=${part(cursor)}` : ''}`, { signal });
+export const resolvePivotMatch = (migration: string, run: string, decision: Record<string, unknown>, key: string, signal?: AbortSignal) =>
+  request<{ outcomes: Array<{ code: string; message?: string }> }>(`/migrations/${part(migration)}/runs/${part(run)}/matches`,
+    { ...post({ decisions: [decision], idempotency_key: key }, signal), method: 'PATCH' });
+export const monitoring = (migration: string, fixes = false, id?: string | null, after = -1, signal?: AbortSignal) => {
+  const query = new URLSearchParams();
+  if (id) query.set('monitoring_id', id);
+  if (fixes) { query.set('after', String(after)); query.set('limit', '20'); }
+  return request<MonitoringData>(`/migrations/${part(migration)}/monitoring${fixes ? '/fixes' : ''}${query.size ? `?${query}` : ''}`, { signal });
+};
+export const gscAction = (data: Record<string, unknown>, key?: string, signal?: AbortSignal) =>
+  request<GscData>('/connections/search-console/actions', post({ ...data, ...(key ? { idempotency_key: key } : {}) }, signal));
+export const checkout = (migration: string, quote: string, key: string, signal?: AbortSignal) =>
+  request<{ checkout_url?: string; state?: string }>(`/migrations/${part(migration)}/quotes/${part(quote)}/checkout`, post({ idempotency_key: key }, signal));
+export const createSubscriptionCheckout = (data: { sku: 'studio' | 'monitoring'; deployment_id?: string; recurring_consent: true }, key: string, signal?: AbortSignal) =>
+  request<SubscriptionCheckout>('/billing/subscription-checkouts', post({ ...data, idempotency_key: key }, signal));
+export const getSubscriptionCheckout = (id: string, returned = false, signal?: AbortSignal) =>
+  request<SubscriptionCheckout>(`/billing/subscription-checkouts/${part(id)}${returned ? '/return' : ''}`, { signal });
+export const downloadArtifact = (migration: string, artifact: string, signal?: AbortSignal) =>
+  request<{ content: string; format: string; artifact_id: string }>(`/migrations/${part(migration)}/artifacts/${part(artifact)}`, { signal });

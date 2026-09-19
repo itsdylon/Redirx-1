@@ -47,7 +47,7 @@ export function ToolLayout({ title, children }: ToolLayoutProps) {
     location.pathname === '/quick-match' ||
     location.pathname.startsWith('/review/') ||
     location.pathname.startsWith('/pricing');
-  const isCompanionActive = location.pathname.startsWith('/companion');
+  const isCompanionActive = ['/companion', '/migrations/', '/billing/subscriptions/'].some(path => location.pathname.startsWith(path));
   const isProjectHistoryActive = location.pathname === '/projects';
   const showBreadcrumb =
     location.pathname.startsWith('/review/') ||
@@ -62,7 +62,7 @@ export function ToolLayout({ title, children }: ToolLayoutProps) {
     navigate('/login');
   };
 
-  const handlePrimaryNavigate = (path: '/quick-match' | '/projects') => {
+  const handlePrimaryNavigate = (path: '/quick-match' | '/projects' | '/companion') => {
     setMobileNavOpen(false);
     navigate(path);
   };
@@ -103,7 +103,7 @@ export function ToolLayout({ title, children }: ToolLayoutProps) {
                     >
                       Quick Match
                     </Button>
-                    {MCP_PIVOT_ENABLED && <Button variant="ghost" size="sm" className={navButtonClass(isCompanionActive)} aria-current={isCompanionActive ? 'page' : undefined} onClick={() => handlePrimaryNavigate('/companion' as '/quick-match')}>
+                    {MCP_PIVOT_ENABLED && <Button variant="ghost" size="sm" className={navButtonClass(isCompanionActive)} aria-current={isCompanionActive ? 'page' : undefined} onClick={() => handlePrimaryNavigate('/companion')}>
                       Migration companion
                     </Button>}
                     <Button
@@ -161,6 +161,10 @@ export function ToolLayout({ title, children }: ToolLayoutProps) {
                         </SheetDescription>
                       </SheetHeader>
                       <nav aria-label="Primary mobile" className="flex flex-col gap-1 px-4">
+                        {MCP_PIVOT_ENABLED && <Button variant="ghost" className={cn('justify-start', navButtonClass(isCompanionActive))}
+                          aria-current={isCompanionActive ? 'page' : undefined} onClick={() => handlePrimaryNavigate('/companion')}>
+                          Migration companion
+                        </Button>}
                         <Button
                           variant="ghost"
                           className={cn('justify-start', navButtonClass(isQuickMatchActive))}

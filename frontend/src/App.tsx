@@ -42,6 +42,7 @@ export default function App() {
     ? pendingReturn : authedHome;
   const pricingSourceSessionId = new URLSearchParams(location.search).get('source_session_id');
   const reviewLayoutVariant = isEnterprisePlan(user?.plan) ? 'dashboard' : 'tool';
+  const loginWithReturn = `${ROUTES.login}?redirect=${encodeURIComponent(location.pathname + location.search)}`;
 
   // Show loading state while checking authentication
   if (loading) {
@@ -80,8 +81,11 @@ export default function App() {
             : <QuickMatchLandingPage />
         }
       />
-      <Route path={ROUTES.companion} element={user ? (MCP_PIVOT_ENABLED ? <PivotCompanionPage /> : <Navigate to={ROUTES.quickMatch} replace />) : <Navigate to={ROUTES.login} replace />} />
-      <Route path={ROUTES.migration} element={user ? (MCP_PIVOT_ENABLED ? <PivotMigrationDetail /> : <Navigate to={ROUTES.quickMatch} replace />) : <Navigate to={ROUTES.login} replace />} />
+      <Route path={ROUTES.companion} element={user ? (MCP_PIVOT_ENABLED ? <PivotCompanionPage /> : <Navigate to={ROUTES.quickMatch} replace />) : <Navigate to={loginWithReturn} replace />} />
+      <Route path={ROUTES.migration} element={user ? (MCP_PIVOT_ENABLED ? <PivotMigrationDetail /> : <Navigate to={ROUTES.quickMatch} replace />) : <Navigate to={loginWithReturn} replace />} />
+      <Route path="/billing/subscriptions/return" element={user
+        ? (MCP_PIVOT_ENABLED ? <PivotCompanionPage /> : <Navigate to={authedHome} replace />)
+        : <Navigate to={loginWithReturn} replace />} />
       <Route
         path={ROUTES.demo}
         element={<DemoPage />}

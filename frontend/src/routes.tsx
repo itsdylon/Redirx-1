@@ -17,6 +17,8 @@ export const ROUTES = {
   demo: '/demo',
   watch: '/watch/:watchId',
   apiKeys: '/api-keys',
+  companion: '/companion',
+  migration: '/migrations/:migrationId',
 } as const;
 
 export function getAuthedHomeRoute(plan?: string): string {

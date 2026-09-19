@@ -29,6 +29,7 @@ import {
 } from './ui/dropdown-menu';
 import { cn } from './ui/utils';
 import { isAgencyPlan } from '../lib/plans';
+import { MCP_PIVOT_ENABLED } from '../api/config';
 
 interface ToolLayoutProps {
   title: string;
@@ -46,6 +47,7 @@ export function ToolLayout({ title, children }: ToolLayoutProps) {
     location.pathname === '/quick-match' ||
     location.pathname.startsWith('/review/') ||
     location.pathname.startsWith('/pricing');
+  const isCompanionActive = location.pathname.startsWith('/companion');
   const isProjectHistoryActive = location.pathname === '/projects';
   const showBreadcrumb =
     location.pathname.startsWith('/review/') ||
@@ -101,6 +103,9 @@ export function ToolLayout({ title, children }: ToolLayoutProps) {
                     >
                       Quick Match
                     </Button>
+                    {MCP_PIVOT_ENABLED && <Button variant="ghost" size="sm" className={navButtonClass(isCompanionActive)} aria-current={isCompanionActive ? 'page' : undefined} onClick={() => handlePrimaryNavigate('/companion' as '/quick-match')}>
+                      Migration companion
+                    </Button>}
                     <Button
                       variant="ghost"
                       size="sm"

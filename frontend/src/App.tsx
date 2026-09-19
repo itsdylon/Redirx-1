@@ -16,6 +16,9 @@ import { DemoPage } from './components/DemoPage';
 import { QuickMatchLandingPage } from './components/QuickMatchLandingPage';
 import { WatchPage } from './components/WatchPage';
 import { ApiKeysPage } from './components/ApiKeysPage';
+import { PivotCompanionPage } from './components/PivotCompanionPage';
+import { PivotMigrationDetail } from './components/PivotMigrationDetail';
+import { MCP_PIVOT_ENABLED } from './api/config';
 import { Toaster } from './components/ui/sonner';
 import { isEnterprisePlan } from './lib/plans';
 import {
@@ -31,7 +34,7 @@ import {
 export default function App() {
   const { user, loading } = useAuth();
   const location = useLocation();
-  const authedHome = getAuthedHomeRoute(user?.plan);
+  const authedHome = MCP_PIVOT_ENABLED ? ROUTES.companion : getAuthedHomeRoute(user?.plan);
   const pendingReturn = sanitizeRedirectPath(new URLSearchParams(location.search).get('redirect')) || getAuthRedirect();
   // A session may already exist when an MCP client opens the login URL.
   // Preserve its consent target without allowing login/signup redirect loops.
@@ -77,6 +80,8 @@ export default function App() {
             : <QuickMatchLandingPage />
         }
       />
+      <Route path={ROUTES.companion} element={user ? (MCP_PIVOT_ENABLED ? <PivotCompanionPage /> : <Navigate to={ROUTES.quickMatch} replace />) : <Navigate to={ROUTES.login} replace />} />
+      <Route path={ROUTES.migration} element={user ? (MCP_PIVOT_ENABLED ? <PivotMigrationDetail /> : <Navigate to={ROUTES.quickMatch} replace />) : <Navigate to={ROUTES.login} replace />} />
       <Route
         path={ROUTES.demo}
         element={<DemoPage />}

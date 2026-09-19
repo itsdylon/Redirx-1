@@ -30,6 +30,9 @@ export const CONTENT_MAX_URLS_PER_SITE =
 export const RISK_PLACEMENT: 'screen' | 'inline' =
   import.meta.env.VITE_RISK_PLACEMENT === 'inline' ? 'inline' : 'screen';
 
+/** Proposed v2 companion UI. Off until browser endpoints are integrated. */
+export const MCP_PIVOT_ENABLED = import.meta.env.VITE_MCP_PIVOT_ENABLED === 'true';
+
 /**
  * Get authorization headers for authenticated requests.
  */

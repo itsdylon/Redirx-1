@@ -302,3 +302,97 @@ test('native Studio runs and immutable failure receipts cascade on account delet
  assert.equal((await one('SELECT count(*)::int n FROM migration_run_failure_receipts WHERE run_id=$1',[queued.run_id])).n,0);
  assert.equal((await one('SELECT count(*)::int n FROM migration_runs WHERE user_id=$1',[owner])).n,0);
 });
+
+test('048 applies actual043/045 and preserves mutually exclusive verification authorities',async()=>{
+ for(const [env,file] of [['SUBSCRIPTION_VERIFICATION_MIGRATION','043_included_verification.sql'],['SUBSCRIPTION_MONITORING_MIGRATION','045_recurring_monitoring.sql']])
+  await query(process.env[env]?await readFile(process.env[env],'utf8'):await read(`../migrations/${file}`));
+ await query(await read('../migrations/048_studio_included_verification.sql'));
+});
+async function deployedArtifact(s,run){
+ const entries=[0,1].map(i=>({mapping_id:`mapping${i}`,source_url:`https://old.example/${i}`,expected_url:`https://live${serial}.example/${i}`}));
+ const inputs={artifact_content_hash:'b'.repeat(64),decision_revision:'r1',redirects:entries};
+ const art=await one(`INSERT INTO migration_artifacts(migration_id,user_id,run_id,decision_revision,format,content_hash,storage_key,included_count,verification_inputs)
+ VALUES($1,$2,$3,'r1','csv',repeat('b',64),'fixture',2,$4) RETURNING id`,[s.f.id,s.f.user,run.run_id,inputs]);
+ const dep=await one(`INSERT INTO artifact_deployments(migration_id,user_id,artifact_id,live_origin,status,artifact_content_hash,
+ decision_revision,format,included_count,excluded_count,target_origins,destination_mapping,verification_inputs,installation_reported_at)
+ VALUES($1,$2,$3,$4,'installation_reported',repeat('b',64),'r1','csv',2,0,'[]','{}',$5,now()) RETURNING id`,
+ [s.f.id,s.f.user,art.id,`https://live${++serial}.example`,inputs]);return {art:art.id,dep:dep.id,s,run};
+}
+async function completedStudio(suffix,owner=A){
+ const sub=await event(suffix,{user:owner});const s=await scope(501,await fixture(501,2,owner));const native=await studioJob(sub,s);
+ await rpc('finalize_migration_run_session',[native.job.id,native.job.mcp_run_id,'studio-native',native.job.attempt_count,'completed',null]);
+ assert.equal((await rpc('studio_run_entitlement',[owner,s.f.id,native.queued.run_id])).eligible,true);
+ return {sub,...await deployedArtifact(s,native.queued)};
+}
+const verify=(a,key=`verify${++serial}`,client=db)=>rpc('reserve_included_verification',[a.s.f.user,a.s.f.id,a.art,a.dep,key],client);
+const record=(batch,item,state='passed')=>rpc('complete_verification_item',[batch.verification_id,item.ordinal,'included-worker',item.attempt,state,{measurement:state==='unchecked'?'unavailable':'observed',issue:state==='unchecked'?'timeout':null}]);
+
+test('completed Studio artifact gets one included check after lapse and measured observations survive partial retry',async()=>{
+ const a=await completedStudio('verifyStudio');await event('verifyStudio',{status:'canceled',event:'evt_verifyStudioCanceled',at:stamp(0)});
+ const authority=await rpc('studio_artifact_entitlement',[A,a.s.f.id,a.art]);assert.equal(authority.eligible,true);
+ const job=await verify(a,'verifyStudio');assert.equal(job.grant_id,null);assert.equal(job.studio_reservation_id,a.run.studio_reservation_id);assert.equal(job.studio_slot_id,authority.slot_id);
+ const batch=await rpc('claim_verification_batch',['included-worker',50]);assert.equal(batch.verification_id,job.id);
+ assert.equal(await record(batch,batch.items[0]),true);assert.equal(await record(batch,batch.items[1],'unchecked'),true);
+ const partial=await one('SELECT status,passed,unchecked FROM migration_verifications WHERE id=$1',[job.id]);assert.deepEqual(partial,{status:'partial',passed:1,unchecked:1});
+ const retry=await verify(a,'verifyStudioAlias');assert.equal(retry.id,job.id);assert.equal(retry.passed,1);assert.equal(retry.status,'queued');
+ const next=await rpc('claim_verification_batch',['included-worker',50]);assert.equal(next.items.length,1);assert.equal(next.items[0].ordinal,1);
+ assert.equal(await record(next,{...next.items[0],attempt:next.items[0].attempt-1}),false);
+ assert.equal(await record(next,next.items[0]),true);
+ assert.equal((await one('SELECT status FROM migration_verifications WHERE id=$1',[job.id])).status,'succeeded');
+ assert.equal((await one('SELECT status FROM artifact_deployments WHERE id=$1',[a.dep])).status,'live_verified');
+ assert.equal((await rpc('get_migration_test_subscription',[A,a.sub.subscription_id])).migrations_reserved,1);
+});
+test('one Studio verification allowance is shared across rerun artifacts; concurrent aliases dedupe',async()=>{
+ const a=await completedStudio('verifyConcurrent');await query('BEGIN');const job=await verify(a,'verifyConcurrent');
+ const retry=verify(a,'verifyConcurrentOther',second);await query('COMMIT');assert.equal((await retry).id,job.id);
+ const batch=await rpc('claim_verification_batch',['included-worker',50]);for(const item of batch.items)await record(batch,item);
+ const rerun=await scope(501,a.s.f);const native=await studioJob(a.sub,rerun);
+ await rpc('finalize_migration_run_session',[native.job.id,native.job.mcp_run_id,'studio-native',native.job.attempt_count,'completed',null]);
+ const other=await deployedArtifact(rerun,native.queued);
+ await assert.rejects(verify(other,'verifyRerun'),/allowance_exhausted/);
+ await assert.rejects(verify(other,'verifyConcurrent'),/operation_conflict/);
+ assert.equal((await one('SELECT count(*)::int n FROM migration_verifications WHERE studio_slot_id=$1',[job.studio_slot_id])).n,1);
+});
+test('Studio revocation rejects new claims and in-flight publications without inventing measurements',async()=>{
+ const a=await completedStudio('verifyRevoke');const job=await verify(a);const batch=await rpc('claim_verification_batch',['included-worker',50]);
+ await event('verifyRevoke',{status:'revoked',event:'evt_verifyRevokeNow',at:stamp(0)});
+ assert.equal(await record(batch,batch.items[0]),false);
+ const stopped=await one('SELECT status,passed,failed,unchecked FROM migration_verifications WHERE id=$1',[job.id]);
+ assert.deepEqual(stopped,{status:'partial',passed:0,failed:0,unchecked:2});
+ await assert.rejects(verify(a,'verifyRevokeRetry'),/payment_required/);
+ assert.equal((await rpc('studio_artifact_entitlement',[A,a.s.f.id,a.art])).eligible,false);
+ const queued=await completedStudio('verifyClaimRevoke');await verify(queued);await event('verifyClaimRevoke',{status:'revoked',event:'evt_verifyClaimRevokeNow',at:stamp(0)});
+ assert.equal(await rpc('claim_verification_batch',['included-worker',50]),null);
+});
+test('Studio included authority cannot be forged across owners or changed after reservation',async()=>{
+ const a=await completedStudio('verifyBinding');const job=await verify(a);
+ assert.equal((await rpc('studio_artifact_entitlement',[B,a.s.f.id,a.art])).eligible,false);
+ await assert.rejects(rpc('reserve_included_verification',[B,a.s.f.id,a.art,a.dep,'foreign']),/not_found/);
+ await assert.rejects(query('UPDATE migration_verifications SET studio_reservation_id=gen_random_uuid() WHERE id=$1',[job.id]),/immutable/);
+ await assert.rejects(query('UPDATE migration_verifications SET studio_slot_id=NULL WHERE id=$1',[job.id]),/immutable/);
+ for(const name of ['anon','authenticated'])await role(name,A,()=>assert.rejects(verify(a),/permission denied/));
+ const batch=await rpc('claim_verification_batch',['included-worker',50]);for(const item of batch.items)await record(batch,item);
+});
+test('036 free and paid included checks still complete through048 and recurring claims stay separate',async()=>{
+ for(const count of [2,501]){
+ const s=await scope(count);if(count>500){await paid(s.f,s.q,'includedLegacyPaid');s.op=await rpc('reserve_migration_run',s.args);}assert.ok(s.op.run_id);const job=await one("SELECT * FROM claim_next_job('studio-native',now()+interval '10 minutes')");assert.equal(job.id,s.op.session_id);
+ await rpc('authorize_migration_run_dispatch',[job.id,job.mcp_run_id,'studio-native',job.attempt_count,'test_only']);
+ await rpc('finalize_migration_run_session',[job.id,job.mcp_run_id,'studio-native',job.attempt_count,'completed',null]);
+ const a=await deployedArtifact(s,s.op);const included=await verify(a);assert.ok(included.grant_id);assert.equal(included.studio_slot_id,null);
+ const batch=await rpc('claim_verification_batch',['included-worker',50]);for(const item of batch.items)await record(batch,item);
+ }
+ const studio=await completedStudio('verifyMonitor');
+ const monitor=await rpc('manage_migration_monitor',[A,studio.s.f.id,'start',studio.art,studio.dep,null,studio.sub.subscription_id,null,'verifyMonitorStart',30]);
+ assert.equal(monitor.state,'active');assert.equal(await rpc('schedule_monitor_sweeps',[20]),1);
+ assert.equal(await rpc('claim_verification_batch',['included-worker',50]),null);
+ const recurring=await rpc('claim_monitoring_batch',['included-worker',50]);assert.equal(recurring.monitoring_id,monitor.id);
+ for(const item of recurring.items)assert.equal(await rpc('record_monitoring_item',[recurring.verification_id,item.ordinal,'included-worker',item.attempt,'passed',{measurement:'observed'}]),true);
+ assert.equal((await one('SELECT status FROM migration_verifications WHERE id=$1',[recurring.verification_id])).status,'succeeded');
+});
+test('048 preserves Studio included history on reapply and actual account deletion cascades',async()=>{
+ const owner='10000000-0000-0000-0000-000000000007';await query('INSERT INTO auth.users(id) VALUES($1)',[owner]);await query('INSERT INTO user_profiles(id) VALUES($1)',[owner]);
+ const a=await completedStudio('verifyDelete',owner);const job=await verify(a);await query(await read('../migrations/048_studio_included_verification.sql'));
+ assert.equal((await verify(a)).id,job.id);await query('DELETE FROM auth.users WHERE id=$1',[owner]);
+ assert.equal((await one('SELECT count(*)::int n FROM migration_verifications WHERE id=$1',[job.id])).n,0);
+ assert.equal((await one('SELECT count(*)::int n FROM migration_verification_items WHERE verification_id=$1',[job.id])).n,0);
+});

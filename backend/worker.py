@@ -15,6 +15,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any
 import json
 import time
+from contextlib import ExitStack
 
 # Add project root to path for imports
 _BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -32,6 +33,7 @@ from backend.services.deep_preview_service import DeepPreviewService
 from backend.services.migration_run_service import MigrationRunService
 from backend.services.migration_subscription_service import MigrationSubscriptionService
 from backend.services.pivot_background import PivotBackgroundRunner
+from backend.services.pivot_resource_budget import reserve_pivot_temporary_capacity
 from backend.services.match_repair_service import MatchRepairService
 from backend.services.job_limits import (
     ContentJobUrlCapExceeded,
@@ -563,6 +565,7 @@ class RedirxWorker:
         # Start lease extension task
         lease_extension_task = asyncio.create_task(self._lease_extension_loop(session_id))
         preview_service = DeepPreviewService()
+        resource_reservations = ExitStack()
 
         try:
             if pivot_service is not None:
@@ -590,6 +593,9 @@ class RedirxWorker:
                 return False
 
             print(f"[Worker] Processing {len(old_urls)} old URLs and {len(new_urls)} new URLs (pipeline: {pipeline_type})")
+
+            if pivot_service is not None:
+                resource_reservations.enter_context(reserve_pivot_temporary_capacity(len(old_urls), len(new_urls)))
 
             # Only validate OpenAI key for content pipeline (url_only doesn't need it)
             if pipeline_type == 'content':
@@ -783,6 +789,7 @@ class RedirxWorker:
             return False
 
         finally:
+            resource_reservations.close()
             # Cancel lease extension task
             lease_extension_task.cancel()
             try:

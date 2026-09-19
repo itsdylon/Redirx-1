@@ -4,9 +4,38 @@ from contextlib import ExitStack
 from unittest.mock import AsyncMock, Mock, patch
 
 from backend.worker import RedirxWorker, WORKER_MAX_ATTEMPTS
+from backend.services.pivot_resource_budget import PivotResourceUnavailable
 
 
 class PivotWorkerTests(unittest.IsolatedAsyncioTestCase):
+    async def test_temporary_storage_shortage_retries_without_starting_content_work(self):
+        for attempt in (1, WORKER_MAX_ATTEMPTS):
+            with self.subTest(attempt=attempt), ExitStack() as stack:
+                worker = RedirxWorker.__new__(RedirxWorker)
+                worker.worker_id = 'fixture-worker'
+                worker.release_lease = AsyncMock()
+                worker._lease_extension_loop = AsyncMock()
+                job = {'id': 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+                       'mcp_run_id': 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
+                       'old_urls': ['https://old.example/a'], 'new_urls': ['https://new.example/a'],
+                       'attempt_count': attempt, 'pipeline_type': 'content'}
+                authority = stack.enter_context(patch('backend.worker.MigrationRunService')).return_value
+                subscriptions = stack.enter_context(patch('backend.worker.MigrationSubscriptionService')).return_value
+                stack.enter_context(patch('backend.worker.DeepPreviewService'))
+                stack.enter_context(patch('backend.worker.traceback.print_exc'))
+                stack.enter_context(patch('backend.services.pivot_resource_budget.shutil.disk_usage', return_value=Mock(free=0)))
+                pipeline = stack.enter_context(patch('backend.worker.Pipeline'))
+                self.assertFalse(await worker.process_job(job))
+                pipeline.assert_not_called()
+                worker.release_lease.assert_not_awaited()
+                if attempt == WORKER_MAX_ATTEMPTS:
+                    failure = subscriptions.finalize_worker_failure.call_args.args[2]
+                    self.assertIsInstance(failure, PivotResourceUnavailable)
+                    authority.finalize_session.assert_not_called()
+                else:
+                    self.assertEqual(authority.finalize_session.call_args.args[2], 'pending')
+                    subscriptions.finalize_worker_failure.assert_not_called()
+
     async def test_only_terminal_pivot_failure_reaches_capacity_classifier(self):
         for pivot, attempt in ((True, 1), (True, WORKER_MAX_ATTEMPTS),
                                (False, WORKER_MAX_ATTEMPTS)):

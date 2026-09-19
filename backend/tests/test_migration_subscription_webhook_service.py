@@ -142,6 +142,8 @@ class StudioRuntimeServiceTest(unittest.TestCase):
     with self.assertRaises(RepositoryUnavailableError):self.start()
     self.result[key]=old
  def test_only_concrete_infrastructure_exceptions_qualify(self):
+  from backend.services.pivot_resource_budget import PivotResourceUnavailable
+  self.assertEqual(classify_migration_infrastructure_error(PivotResourceUnavailable(required_bytes=1024,available_bytes=0)),'storage_unavailable')
   request=httpx.Request('POST','https://api.openai.com/v1/responses')
   self.assertEqual(classify_migration_infrastructure_error(openai.APITimeoutError(request)),'provider_timeout')
   self.assertEqual(classify_migration_infrastructure_error(openai.APIConnectionError(request=request)),'provider_unavailable')

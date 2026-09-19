@@ -330,6 +330,9 @@ class MigrationSubscriptionService:
 
 def classify_migration_infrastructure_error(error):
     """Closed allowlist of infrastructure types, not text or generic timeouts."""
+    from .pivot_resource_budget import PivotResourceUnavailable
+    if isinstance(error, PivotResourceUnavailable):
+        return 'storage_unavailable'
     import openai
     if isinstance(error, openai.APITimeoutError):
         return 'provider_timeout'

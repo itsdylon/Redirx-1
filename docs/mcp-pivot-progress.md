@@ -159,7 +159,8 @@ to a fresh admin client; that code must reach API and worker **before** applying
 No production schema or service was changed by this packet. See
 `plans/2026-09-18-internal-billing-security.md` and the 033 migration notes.
 Validation: **143 backend tests, 33 SQL tests passed**; pricing remains test_only.
-Render auto-deploy is still On Commit per user and Claude's read-only verification.
+That checkpoint's Render auto-deploy state was On Commit; it is superseded by
+the later settings verification below.
 
 1. P04 durable discovery/preflight and P05 quote/grant workflows against the
    P01 records; complete transactional run/grant/usage links with P06–P07.
@@ -192,3 +193,26 @@ Third pass reused the same two Herdr helpers for separate schema/repository
 work, with parent review and SQL acceptance tests. No additional agents were
 created. Unrelated edits in the original app and landing repositories were
 left untouched; implementation and tests ran in isolated worktrees.
+
+## OAuth consent probe and rollout checkpoint (September 18, later session)
+
+The parent published only `deploy/consent-frontend-8e6ad72`, pinned to
+`8e6ad72b420c70fd54cee5a6355e85c980f001a5`. Neither `main` nor the remote pivot
+branch moved. Frontend build and 41 auth/consent/routing tests passed for that
+tree. This ref must remain pinned; subsequent local diagnostics do not change it.
+
+Claude's subsequent read-only Render check through Herdr confirmed auto-deploy
+**off for frontend, API, worker and MCP** (settings updates through September 19
+01:15:15 UTC). Frontend still tracks `main`. The remaining dashboard action is
+to select `deploy/consent-frontend-8e6ad72` for frontend before its manual deploy.
+No service deploy or SQL application was performed in this checkpoint.
+
+Added `scripts/oauth_consent_probe.py`, a stdlib-only local PKCE callback and
+token-verification diagnostic, plus operator instructions in
+`docs/oauth-consent-probe.md`. **21 offline tests passed** with provider calls
+mocked and callback tests on IPv4 loopback. It checks state/replay/Host/path,
+resource on authorize and exchange, provider identity before token claims,
+strict gateway-compatible claims and credential-free console output. No live
+consent/token exchange was run. This does not satisfy the production OAuth gate
+or prove authenticated MCP tool execution. It introduces no production imports,
+new dependencies, pricing activation or schema changes.

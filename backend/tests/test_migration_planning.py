@@ -88,8 +88,13 @@ class Query:
                 stmt = sql.SQL('SELECT * FROM {}').format(sql.Identifier(self.table_name))
                 args = []
                 if self.filters:
+                    def column(name):
+                        if '->>' in name:
+                            field, key = name.split('->>', 1)
+                            return sql.SQL('{}->>{}').format(sql.Identifier(field), sql.Literal(key))
+                        return sql.Identifier(name)
                     stmt += sql.SQL(' WHERE ') + sql.SQL(' AND ').join(
-                        sql.SQL('{} = %s').format(sql.Identifier(k)) for k, _ in self.filters)
+                        sql.SQL('{} = %s').format(column(k)) for k, _ in self.filters)
                     args = [v for _, v in self.filters]
                 if self.orders:
                     stmt += sql.SQL(' ORDER BY ') + sql.SQL(',').join(

@@ -15,6 +15,7 @@ from backend.services.migration_planning_service import MigrationPlanningService
 from backend.services.migration_planning_service import validate_key
 from backend.services.migration_quote_service import MigrationQuoteService
 from backend.services.migration_run_service import MigrationRunService
+from backend.services.migration_discovery_workflow import plan_and_start_discovery, migration_discovery_summary
 
 v2_blueprint = Blueprint('v2', __name__)
 
@@ -103,7 +104,24 @@ def body(allowed=None):
 @authenticated
 @limiter.limit('30 per minute', key_func=account_limit_key)
 def plan_migration():
-    return jsonify(MigrationPlanningService().plan(request.api_user_id, body()))
+    service = MigrationPlanningService()
+    return jsonify(plan_and_start_discovery(request.api_user_id, body(), repository=service.repository))
+
+
+@v2_blueprint.get('/migrations')
+@authenticated
+@limiter.limit('120 per minute', key_func=account_limit_key)
+def list_migrations():
+    raw_limit = request.args.get('limit', '20')
+    if not raw_limit.isascii() or not raw_limit.isdecimal() or len(raw_limit) > 3:
+        raise InvalidInputError('limit must be an integer from 1 to 500.')
+    page = MigrationPlanningService().repository.list_migrations(
+        request.api_user_id, request.args.get('cursor') or None, int(raw_limit))
+    # Expose only useful account history; request hashes and internal policy
+    # metadata belong to the service, not the browser list contract.
+    fields = ('id', 'name', 'old_origin', 'new_origin', 'status', 'created_at', 'updated_at')
+    page['items'] = [{key: row.get(key) for key in fields} for row in page['items']]
+    return jsonify(envelope(status='succeeded', next_action='none', data=page))
 
 
 @v2_blueprint.get('/migrations/<migration_id>')
@@ -113,7 +131,7 @@ def get_migration(migration_id):
     service = MigrationPlanningService()
     if request.args.get('operation_id'):
         return jsonify(service.operation(request.api_user_id, request.args['operation_id'], migration_id))
-    return jsonify(service.get(request.api_user_id, migration_id))
+    return jsonify(migration_discovery_summary(request.api_user_id, migration_id, repository=service.repository))
 
 
 @v2_blueprint.post('/migrations/<migration_id>/inventories')

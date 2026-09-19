@@ -108,9 +108,21 @@ class MigrationPlanningService:
         operation = self.repository.get_operation(user_id, operation_id, migration_id)
         migration_id = operation['migration_id']
         if operation['kind'] == 'plan_migration':
-            result = self.get(user_id, migration_id)
+            from .migration_discovery_workflow import migration_discovery_summary
+            result = migration_discovery_summary(user_id, migration_id, repository=self.repository)
             result['operation_id'] = operation['id']
             return result
+        if operation['kind'] == 'discover_inventory':
+            from .migration_discovery_service import MigrationDiscoveryService
+            return MigrationDiscoveryService(self.repository).get(user_id, migration_id, operation['id'])
+        if operation['kind'] == 'resolve_matches':
+            saved = operation.get('result') or {}
+            outcomes = saved.get('outcomes', [])
+            applied = sum(item.get('code') == 'ok' for item in outcomes)
+            failed = len(outcomes) - applied
+            return envelope(migration_id, operation['id'], status='partial' if failed else 'succeeded',
+                next_action='resolve_matches', data={'run_id': saved.get('run_id'), 'outcomes': outcomes,
+                    'applied': applied, 'not_applied': failed, 'replayed': True})
         if operation['kind'] == 'import_inventory':
             result = operation.get('result') or {}
             inventory = self.repository.get_inventory(user_id, migration_id, result.get('inventory_id'))

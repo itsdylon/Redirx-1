@@ -141,7 +141,7 @@ export function registerPivotTools(server: McpServer): void {
 
   server.registerTool('connect_search_console', {
     title: 'Connect Search Console', description: 'Begin consent, inspect properties, sync approved data, or disconnect. Never provide Google credentials to this tool.',
-    inputSchema: { action: z.enum(['connect', 'status', 'properties', 'disconnect', 'sync']), migration_id: UUID.optional(), property: z.string().max(2048).optional(), window_days: z.number().int().min(1).max(540).optional(), idempotency_key: IDEMPOTENCY.optional() },
+    inputSchema: { action: z.enum(['connect', 'status', 'properties', 'disconnect', 'sync']), migration_id: UUID.optional(), property: z.string().max(2048).optional(), start_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(), end_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(), idempotency_key: IDEMPOTENCY.optional() },
     annotations: { readOnlyHint: false, idempotentHint: true, openWorldHint: true },
   }, (args, extra) => {
     if (['connect', 'disconnect', 'sync'].includes(args.action) && !args.idempotency_key) {

@@ -14,7 +14,7 @@ from backend.services.migration_repository import InvalidInputError, MigrationRe
 from backend.services.migration_planning_service import MigrationPlanningService, envelope
 from backend.services.migration_planning_service import validate_key
 from backend.services.migration_quote_service import MigrationQuoteService
-from backend.services.migration_run_service import MigrationRunService
+from backend.services.migration_run_service import MigrationRunService, FreeMigrationRateLimitedError
 from backend.services.migration_discovery_workflow import plan_and_start_discovery, migration_discovery_summary
 from backend.services.migration_status_service import MigrationStatusService
 
@@ -65,6 +65,11 @@ def authenticated(fn):
 
 @v2_blueprint.errorhandler(MigrationRepositoryError)
 def repository_error(exc):
+    if isinstance(exc, FreeMigrationRateLimitedError):
+        payload = envelope((request.view_args or {}).get('migration_id'), status='failed', next_action='retry',
+            error={'code': 'rate_limited', 'message': str(exc), 'retryable': True, 'next_action': 'retry'})
+        payload['retry_after_seconds'] = exc.retry_after_seconds
+        return jsonify(payload), 429, {'Retry-After': str(exc.retry_after_seconds)}
     code = 'operation_conflict' if exc.code == 'inventory_busy' else exc.code
     http_status = {'not_found': 404, 'invalid_input': 400, 'operation_conflict': 409,
                    'capacity_exceeded': 413, 'quote_expired': 409,

@@ -2,12 +2,13 @@
 from __future__ import annotations
 
 import os
+import json
 from collections.abc import Mapping
 
 from .job_limits import PIVOT_CONTENT_MAX_OLD_URLS, PIVOT_CONTENT_MAX_NEW_URLS
 from .migration_planning_service import validate_key
 from .migration_quote_service import _ERRORS, QuoteNotReadyError
-from .migration_repository import InvalidInputError, MigrationRepository, RepositoryUnavailableError, _strict_uuid
+from .migration_repository import InvalidInputError, MigrationRepository, MigrationRepositoryError, RepositoryUnavailableError, _strict_uuid
 from .inventory_import_service import ImportCapacityExceededError
 
 
@@ -20,6 +21,16 @@ def _activation():
 
 def _uuid(value, name):
     return _strict_uuid(value, name)[1]
+
+
+class FreeMigrationRateLimitedError(MigrationRepositoryError):
+    code = 'rate_limited'
+    retryable = True
+    next_action = 'retry'
+
+    def __init__(self, retry_after_seconds):
+        self.retry_after_seconds = retry_after_seconds
+        super().__init__('Five new free migrations per rolling 24 hours are available. Retry after the allowance window.')
 
 
 class MigrationRunService:
@@ -35,6 +46,16 @@ class MigrationRunService:
         except Exception as exc:
             message = str(getattr(exc, 'message', '') or str(exc)).strip()
             if str(getattr(exc, 'code', '')) == 'P0001':
+                if message == 'free_migration_rate_limited':
+                    detail = getattr(exc, 'details', None) or getattr(getattr(exc, 'diag', None), 'message_detail', None)
+                    try:
+                        data = json.loads(detail)
+                        wait = data['retry_after_seconds']
+                        if type(wait) is not int or not 1 <= wait <= 86400:
+                            raise ValueError('Invalid retry timing')
+                    except (TypeError, ValueError, KeyError):
+                        raise RepositoryUnavailableError('Migration allowance timing is temporarily unavailable.') from None
+                    raise FreeMigrationRateLimitedError(wait) from None
                 if message == 'capacity_exceeded':
                     raise ImportCapacityExceededError('The inventory exceeds the configured content processing capacity.') from None
                 if message in _ERRORS:

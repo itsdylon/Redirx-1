@@ -102,10 +102,24 @@ class MigrationArtifactReaders:
                 revision = row.get("revision")
                 if isinstance(revision, bool) or not isinstance(revision, int) or revision < 0:
                     raise RepositoryUnavailableError("Migration selection is temporarily unavailable.")
-                row["old_url"] = row.get("old_url")
-                if row.get("decision_action") in {"set_target", "accept_repair"}:
-                    row["new_url"] = row.get("decision_target")
-                row["action"] = row.get("decision_action")
+                # 038 exposes the audited action as `decision`; decision_action
+                # is only an internal SQL alias. Engine evidence stays immutable,
+                # so project the current decision into this export-only copy.
+                decision = row.get("decision")
+                if decision is not None and decision not in {
+                    "approve", "set_target", "accept_repair", "reject", "defer", "intentional_removal",
+                }:
+                    raise RepositoryUnavailableError("Migration selection is temporarily unavailable.")
+                if decision in {"approve", "set_target", "accept_repair"}:
+                    target = row.get("decision_target")
+                    if (revision == 0 or row.get("review_status") != decision
+                            or not isinstance(target, str) or not target.strip()):
+                        raise RepositoryUnavailableError("Migration selection is temporarily unavailable.")
+                    row["new_url"] = target
+                    # Only the superseded matcher hold is cleared. Independent
+                    # held/rejected states and URL safety checks still apply.
+                    row["needs_review"] = False
+                row["action"] = decision
                 items.append(row)
             if self._selection_revision(owner, migration, run) != initial_revision:
                 raise RepositoryUnavailableError("Migration selection changed while it was being read.")

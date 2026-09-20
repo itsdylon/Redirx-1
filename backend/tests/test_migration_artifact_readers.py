@@ -50,9 +50,9 @@ class TestMigrationArtifactReaders(unittest.TestCase):
     def test_038_pages_are_bounded_and_revision_bound(self):
         pages = [
             {"selection_revision": 2},
-            {"items": [{"mapping_id": "00000000-0000-0000-0000-000000000010", "old_url": "https://old.example/a", "new_url": "https://new.example/a", "revision": 2, "decision_action": None, "decision_target": None}], "next_cursor": {"observed": False, "clicks": -1, "id": "00000000-0000-0000-0000-000000000010"}},
+            {"items": [{"mapping_id": "00000000-0000-0000-0000-000000000010", "old_url": "https://old.example/a", "new_url": "https://new.example/a", "revision": 2, "decision": None, "decision_target": None}], "next_cursor": {"observed": False, "clicks": -1, "id": "00000000-0000-0000-0000-000000000010"}},
             {"selection_revision": 2},
-            {"items": [{"mapping_id": "00000000-0000-0000-0000-000000000011", "old_url": "https://old.example/b", "new_url": "https://new.example/b", "revision": 2, "decision_action": "approve", "decision_target": None}], "next_cursor": None},
+            {"items": [{"mapping_id": "00000000-0000-0000-0000-000000000011", "old_url": "https://old.example/b", "new_url": "https://new.example/b", "revision": 2, "decision": "approve", "decision_target": "https://new.example/b", "review_status": "approve"}], "next_cursor": None},
             {"selection_revision": 2},
             {"selection_revision": 2},
         ]
@@ -61,6 +61,65 @@ class TestMigrationArtifactReaders(unittest.TestCase):
         self.assertEqual(len(value["mappings"]), 2)
         self.assertEqual([call["p_limit"] for call in client.calls if "p_limit" in call], [500, 500])
         self.assertEqual(value["target_origins"], ["https://new.example"])
+
+    def selection(self, **changes):
+        # Public 038 RPC shape: decision, not its internal SQL decision_action alias.
+        row = {"mapping_id": "00000000-0000-0000-0000-000000000010",
+               "old_url": "https://old.example/", "new_url": None,
+               "needs_review": True, "revision": 1, "decision": "set_target",
+               "decision_target": "https://new.example/", "review_status": "set_target"}
+        row.update(changes)
+        client = Client([{"selection_revision": 1}, {"items": [row], "next_cursor": None},
+                         {"selection_revision": 1}, {"selection_revision": 1}])
+        result = MigrationArtifactReaders(Repo(client)).get_export_selection(OWNER, MIGRATION, RUN, "1")
+        return row, result
+
+    def test_audited_target_supersedes_only_original_matcher_hold(self):
+        from backend.services.redirect_export import select_export_mappings, build_export
+        for action in ("set_target", "accept_repair", "approve"):
+            with self.subTest(action=action):
+                # SQL approve requires an already confident non-NULL target;
+                # target replacement/repair may resolve the NULL matcher hold.
+                baseline = ({"new_url": "https://new.example/", "needs_review": False}
+                            if action == "approve" else {})
+                original, selection = self.selection(decision=action, review_status=action, **baseline)
+                self.assertEqual(original["new_url"], baseline.get("new_url"))
+                self.assertEqual(original["needs_review"], action != "approve",
+                                 "the engine evidence must remain untouched")
+                result = select_export_mappings(selection["mappings"])
+                self.assertEqual(result["included_count"], 1)
+                self.assertEqual(result["excluded_count"], 0)
+                self.assertEqual(selection["target_origins"], ["https://new.example"])
+                self.assertIn('location = "/" { return 301 "https://new.example/"; }',
+                              build_export(selection["mappings"], "nginx"))
+
+    def test_negative_decisions_and_undecided_matcher_holds_still_exclude(self):
+        from backend.services.redirect_export import select_export_mappings
+        for action in ("reject", "defer", "intentional_removal", None):
+            for needs_review in (True, False):
+                if action is None and not needs_review:
+                    continue
+                with self.subTest(action=action, needs_review=needs_review):
+                    _, selection = self.selection(decision=action, review_status=action or "needs_review",
+                        revision=1 if action else 0, decision_target=None,
+                        new_url="https://new.example/", needs_review=needs_review)
+                    result = select_export_mappings(selection["mappings"])
+                    self.assertEqual(result["included_count"], 0)
+                    self.assertEqual(result["excluded_count"], 1)
+
+    def test_positive_decision_does_not_override_other_export_guards(self):
+        from backend.services.redirect_export import select_export_mappings
+        for extra in ({"status": "held"}, {"state": "rejected"}, {"approved": False},
+                      {"validated": False}, {"decision_target": "javascript:alert(1)"}):
+            with self.subTest(extra=extra):
+                _, selection = self.selection(**extra)
+                self.assertEqual(select_export_mappings(selection["mappings"])["included_count"], 0)
+
+    def test_malformed_positive_decisions_fail_closed(self):
+        for extra in ({"revision": 0}, {"decision_target": None}, {"decision_target": ""},
+                      {"review_status": "defer"}, {"decision": "unrecognized"}):
+            with self.subTest(extra=extra), self.assertRaises(RepositoryUnavailableError):
+                self.selection(**extra)
 
     def test_revision_mismatch_fails_closed(self):
         client = Client([{"selection_revision": 2}])

@@ -27,6 +27,7 @@ sys.path.insert(0, os.path.join(_BASE_DIR, "src"))
 
 from src.redirx.database import MigrationSessionDB, SupabaseClient, URLMappingDB, UserQuotaDB
 from src.redirx.lib import Pipeline
+from src.redirx.rate_limit import close_limiter_pools
 from uuid import UUID
 from src.redirx.config import Config
 from backend.services.deep_preview_service import DeepPreviewService
@@ -1187,6 +1188,9 @@ class RedirxWorker:
             traceback.print_exc()
         finally:
             await pivot_runner.stop()
+            # This loop owns its own limiter pool, distinct from the one the
+            # pivot runner's thread owns; each closes the one it opened.
+            await close_limiter_pools()
             print(f"[Worker] Total jobs processed: {self.jobs_processed}")
 
 

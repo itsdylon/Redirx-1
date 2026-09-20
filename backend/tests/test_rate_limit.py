@@ -186,7 +186,9 @@ class TestUnreachableDatabaseCooldown(unittest.TestCase):
         """
         attempts = []
 
-        async def fake_get_pool():
+        async def fake_get_pool(dsn=None):
+            # Signature follows the real one: _call passes the limiter's DSN
+            # through, because pools are keyed per (event loop, dsn).
             return object()  # a pool that is never actually used
 
         async def fake_execute(pool, sql, params):

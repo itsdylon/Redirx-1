@@ -23,12 +23,18 @@ pooler (port 6543) so scaling workers cannot exhaust connections. Transaction
 mode is safe here because these calls rely only on ON CONFLICT row locks,
 which are transaction-scoped — the limiter never takes a session-scoped
 advisory lock (which silently does nothing in transaction mode).
+
+The psycopg pool is owned by the event loop that opened it, not by the process
+— see the ownership note above _pools. Tokens are not: they are the host's row
+in Postgres, shared by every loop, thread and process alike.
 """
 from __future__ import annotations
 
 import asyncio
 import logging
 import os
+import sys
+import threading
 import time
 from dataclasses import dataclass
 from email.utils import parsedate_to_datetime
@@ -168,8 +174,38 @@ POOL_OPEN_TIMEOUT = float(os.getenv("CRAWL_LIMITER_OPEN_TIMEOUT", "5"))
 POOL_RETRY_COOLDOWN = float(os.getenv("CRAWL_LIMITER_RETRY_COOLDOWN", "60"))
 POOL_CLOSE_TIMEOUT = float(os.getenv("CRAWL_LIMITER_CLOSE_TIMEOUT", "2"))
 
-_pool = None
-_pool_lock = asyncio.Lock()
+# Pool ownership is per event loop, not per process.
+#
+# psycopg_pool runs an AsyncConnectionPool's workers and scheduler as tasks on
+# the loop that opened it and guards it with asyncio primitives bound to that
+# loop. This process has more than one loop: the worker's matching loop, the
+# dedicated thread the pivot background runner starts alongside it
+# (backend/services/pivot_background.py), and a fresh loop per asyncio.run()
+# cycle on the legacy Flask async path. One module-global pool was therefore
+# shared by loops that cannot safely share it.
+#
+# The single module-global asyncio.Lock was the sharper edge: it is not a
+# cross-thread mutex. Loop A takes it uncontended, which binds nothing; loop B
+# then contends, binds the lock to *its* loop and waits on a future created
+# there; loop A's release() resolves that future from the wrong thread without
+# waking loop B's selector, and loop B waits forever. Measured 8/8 against real
+# Postgres: acquire() never returned, never raised, and so never reached the
+# fail-open path that exists precisely to stop a limiter fault wedging a crawl.
+#
+# So: one pool per (loop, dsn); a plain threading.Lock around the registry,
+# held only across dict access and never across an await; and an open-once
+# asyncio.Lock per loop, so contention is only ever between tasks that already
+# share a loop.
+#
+# None of this touches where the tokens live. Authority is still the single
+# host_buckets row in Postgres keyed by host, so same-host token totals stay
+# atomic across loops, threads and processes exactly as before.
+_pools: dict[tuple[object, str], object] = {}
+_open_locks: dict[object, asyncio.Lock] = {}
+_registry_guard = threading.Lock()
+# The fail-open cooldown stays process-wide. Every loop resolves the same DSN,
+# so an outage is an outage for all of them, and a per-loop cooldown would let
+# each new loop pay the open timeout the cooldown exists to avoid.
 _pool_failed_at: float | None = None
 
 
@@ -203,26 +239,70 @@ def _in_failure_cooldown() -> bool:
     )
 
 
-async def _get_pool():
+def _discard_stranded(pool) -> None:
     """
-    Lazily open one shared async pool per process.
+    Reclaim a pool whose loop died without closing it.
+
+    close() is a coroutine that takes the pool's own asyncio.Lock, so only the
+    owning loop can run it; once that loop is gone, the sockets can only be
+    released through libpq directly. Best effort, and a backstop only — the
+    loops we own close their own pools on the way out.
+    """
+    try:
+        idle = list(pool._pool)
+        pool._pool.clear()
+    except Exception:
+        return
+    for conn in idle:
+        try:
+            conn.pgconn.finish()
+        except Exception:
+            pass
+
+
+def _reap_closed_loops() -> None:
+    """Drop registry entries for loops that have shut down. Caller holds the guard."""
+    for key in [k for k in _pools if k[0].is_closed()]:
+        _discard_stranded(_pools.pop(key))
+        _open_locks.pop(key[0], None)
+    for loop in [dead for dead in _open_locks if dead.is_closed()]:
+        _open_locks.pop(loop, None)
+
+
+async def _get_pool(dsn: Optional[str] = None):
+    """
+    Lazily open one async pool per (running event loop, dsn).
 
     Returns None when no database is configured or a recent open failed, so
     callers fail open immediately instead of blocking on a dead host.
     """
-    global _pool, _pool_failed_at
-    if _pool is not None:
-        return _pool
-    if _in_failure_cooldown():
+    global _pool_failed_at
+    loop = asyncio.get_running_loop()
+    dsn = dsn or limiter_dsn()
+    if not dsn:
         return None
-    async with _pool_lock:
-        if _pool is not None:
-            return _pool
+    key = (loop, dsn)
+
+    with _registry_guard:
+        _reap_closed_loops()
+        pool = _pools.get(key)
+        if pool is not None:
+            return pool
         if _in_failure_cooldown():
             return None
-        dsn = limiter_dsn()
-        if not dsn:
-            return None
+        lock = _open_locks.get(loop)
+        if lock is None:
+            # Created while this loop is running, and only ever awaited from
+            # it, so the loop it binds to on first contention is its own.
+            lock = _open_locks[loop] = asyncio.Lock()
+
+    async with lock:
+        with _registry_guard:
+            pool = _pools.get(key)
+            if pool is not None:
+                return pool
+            if _in_failure_cooldown():
+                return None
         from psycopg_pool import AsyncConnectionPool
 
         pool = AsyncConnectionPool(
@@ -248,18 +328,50 @@ async def _get_pool():
             except Exception:
                 pass
             raise
-        _pool = pool
-        _pool_failed_at = None
-    return _pool
+        with _registry_guard:
+            _pools[key] = pool
+            _pool_failed_at = None
+    return pool
 
 
 async def close_pool() -> None:
-    """Close the shared pool (tests, worker shutdown)."""
-    global _pool, _pool_failed_at
+    """
+    Close the pools this event loop owns (tests, worker and background-runner
+    shutdown).
+
+    Only the owning loop can close a pool, so every loop that used the limiter
+    calls this before it goes away; a loop that dies without doing so is reaped
+    on the next _get_pool(). Bounded for the same reason the failed-open path
+    is: shutdown is exactly where waiting forever on a dead host costs most.
+    """
+    global _pool_failed_at
     _pool_failed_at = None
-    if _pool is not None:
-        await _pool.close()
-        _pool = None
+    loop = asyncio.get_running_loop()
+    with _registry_guard:
+        _reap_closed_loops()
+        mine = [_pools.pop(key) for key in [k for k in _pools if k[0] is loop]]
+        _open_locks.pop(loop, None)
+    for pool in mine:
+        try:
+            await asyncio.wait_for(pool.close(), timeout=POOL_CLOSE_TIMEOUT)
+        except Exception as exc:
+            logger.debug("limiter pool close failed: %s", exc)
+
+
+async def close_limiter_pools() -> None:
+    """
+    Close this loop's limiter pools in every loaded copy of this module.
+
+    `redirx.rate_limit` and `src.redirx.rate_limit` are distinct module objects
+    in the worker and the API — both spellings are deliberately importable (see
+    the sys.path note in backend/worker.py) — so each copy keeps its own
+    registry. A loop shutting down has to close whichever copies it opened
+    pools in, and it does not know which those were.
+    """
+    for name in ("redirx.rate_limit", "src.redirx.rate_limit"):
+        module = sys.modules.get(name)
+        if module is not None:
+            await module.close_pool()
 
 
 class HostRateLimiter:
@@ -275,6 +387,8 @@ class HostRateLimiter:
     ):
         """
         Args:
+            dsn: Limiter database override. Defaults to limiter_dsn(), which is
+                what every caller in the tree uses; a pool is opened per DSN.
             namespace: Bucket key prefix. Discovery (a handful of static,
                 usually CDN-cached sitemap/robots requests) and content
                 scraping (sustained page fetches) impose very different loads
@@ -304,7 +418,10 @@ class HostRateLimiter:
         global _pool_failed_at
         if _in_failure_cooldown():
             raise RuntimeError("limiter database unavailable (cooldown)")
-        pool = await _get_pool()
+        # Passing the instance DSN through is what makes an explicit
+        # HostRateLimiter(dsn=...) mean anything: pools are keyed by it, so an
+        # override gets its own pool instead of silently reusing the ambient one.
+        pool = await _get_pool(self._dsn)
         if pool is None:
             raise RuntimeError("no limiter database configured")
         # A pool with min_size=0 opens instantly, so an unreachable database

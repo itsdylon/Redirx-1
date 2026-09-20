@@ -4,12 +4,19 @@ Root owns start/stop. Each runner has a dedicated thread/event loop so discovery
 synchronous repository calls cannot block the matching engine's asyncio loop.
 Stop cancels async probes, then awaits loop/executor shutdown. SQL leases recover
 unfinished work after restart; completed observations are already persisted.
+
+A dedicated loop also owns whatever loop-bound resources its stages open. The
+crawl limiter's Postgres pool is one: it belongs to the loop that opened it and
+can only be closed there, so every loop this module starts closes its own before
+it dies rather than leaving connections and pool workers stranded.
 """
 import asyncio
 import logging
 import os
 import threading
 from uuid import uuid4
+
+from src.redirx.rate_limit import close_limiter_pools
 
 log = logging.getLogger(__name__)
 
@@ -86,6 +93,13 @@ class PivotBackgroundRunner:
         self.last_results = dict(zip(stages, results))
         return self.last_results
 
+    async def _owned_cycle(self):
+        """One cycle plus teardown of everything this loop alone can close."""
+        try:
+            return await self._cycle()
+        finally:
+            await close_limiter_pools()
+
     async def run_once(self):
         """A standalone bounded cycle, isolated from the caller's event loop.
 
@@ -93,7 +107,7 @@ class PivotBackgroundRunner:
         """
         if self._thread is not None:
             raise RuntimeError('runner already started')
-        work = asyncio.create_task(asyncio.to_thread(lambda: asyncio.run(self._cycle())))
+        work = asyncio.create_task(asyncio.to_thread(lambda: asyncio.run(self._owned_cycle())))
         try:
             return await asyncio.shield(work)
         except asyncio.CancelledError:
@@ -119,6 +133,12 @@ class PivotBackgroundRunner:
                         await asyncio.sleep(self.interval)
                 except asyncio.CancelledError:
                     pass
+                finally:
+                    # stop() cancels this task once; the CancelledError above is
+                    # already absorbed, so this is the last thing to run on the
+                    # loop that owns these pools. close_limiter_pools bounds
+                    # itself, so a dead database cannot hang the join in stop().
+                    await close_limiter_pools()
             asyncio.run(main())
         self._thread = threading.Thread(target=target, name=self.worker_id, daemon=True)
         self._thread.start()

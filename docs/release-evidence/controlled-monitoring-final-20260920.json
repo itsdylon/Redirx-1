@@ -1,0 +1,124 @@
+{
+  "captured_at": "2026-09-20 05:21:53 UTC",
+  "scope": "Controlled501 monitoring baseline, single wrong-target alert, exact artifact restoration, measured recovery and cancellation.",
+  "baseline_sweep": "25ee63bb-eae8-481f-9e0e-189475d62f57",
+  "fault_sweep": "600cdb5d-57f7-405f-89d6-24f77227de54",
+  "fault_counts": {
+    "passed": 500,
+    "failed": 1,
+    "unchecked": 0
+  },
+  "issue_id": "c4db72f2-24fd-43b8-8696-c5bcbd0ba4fe",
+  "issue_state_verified": "resolved",
+  "resolved_at": "2026-09-20T04:55:06.811166+00:00",
+  "alert": {
+    "id": "fc7841cf-66de-413e-9239-fac793e92f05",
+    "state": "sent",
+    "attempt": 1,
+    "provider_message_id": "01a0bd1b-79d8-726f-ab92-ab3831d58f3d",
+    "inbox_receipt_verified": false
+  },
+  "recovery": {
+    "contract_version": "1.0.0",
+    "migration_id": "789f477b-4361-4665-b984-1ee5184c02d7",
+    "operation_id": null,
+    "status": "succeeded",
+    "next_action": "none",
+    "data": {
+      "activation_deadline": "2026-12-19T03:25:48.084999+00:00",
+      "alerts": {
+        "contact_verified": true,
+        "delivery_uncertain": 0,
+        "leased": 0,
+        "pending": 0,
+        "sent": 1,
+        "suppressed": 0
+      },
+      "artifact_id": "7d45ac17-655c-465d-8603-6562e916c29f",
+      "cadence_hours": 24,
+      "coverage": {
+        "artifact_id": "7d45ac17-655c-465d-8603-6562e916c29f",
+        "checked": 501,
+        "complete": true,
+        "deployment_id": "4e1cb4ae-0b34-4805-b649-0493f1bc9a86",
+        "failed": 0,
+        "included": true,
+        "outcome": "passed",
+        "passed": 501,
+        "pending": 0,
+        "summary": "501 of 501 redirects checked; 0 issues; 0 unchecked.",
+        "total": 501,
+        "unavailable": 0,
+        "unchecked": 0,
+        "verification_id": "ca3837cc-7433-4bf5-96d4-75263b3b025b"
+      },
+      "deployment_confirmed_at": "2026-09-20T04:04:54.199598+00:00",
+      "deployment_id": "4e1cb4ae-0b34-4805-b649-0493f1bc9a86",
+      "expires_at": "2026-10-20T04:04:54.199598+00:00",
+      "last_complete_sweep_at": "2026-09-20T04:55:06.811166+00:00",
+      "live_origin": "https://vampire-released-fur-lake.trycloudflare.com/",
+      "monitoring_id": "5aefe17e-6853-49c4-ad64-6068be0e5653",
+      "next_check_at": "2026-09-21T04:55:06.811166+00:00",
+      "renewal": "explicit_purchase_required",
+      "source": "included_paid",
+      "state": "active",
+      "state_reason": null,
+      "summary": "Scheduled artifact checks; coverage and freshness describe measured results. Starting monitoring does not purchase renewal."
+    },
+    "error": null
+  },
+  "cancellation": {
+    "contract_version": "1.0.0",
+    "migration_id": "789f477b-4361-4665-b984-1ee5184c02d7",
+    "operation_id": null,
+    "status": "succeeded",
+    "next_action": "none",
+    "data": {
+      "activation_deadline": "2026-12-19T03:25:48.084999+00:00",
+      "alerts": {
+        "contact_verified": true,
+        "delivery_uncertain": 0,
+        "leased": 0,
+        "pending": 0,
+        "sent": 1,
+        "suppressed": 0
+      },
+      "artifact_id": "7d45ac17-655c-465d-8603-6562e916c29f",
+      "cadence_hours": 24,
+      "coverage": {
+        "artifact_id": "7d45ac17-655c-465d-8603-6562e916c29f",
+        "checked": 501,
+        "complete": true,
+        "deployment_id": "4e1cb4ae-0b34-4805-b649-0493f1bc9a86",
+        "failed": 0,
+        "included": true,
+        "outcome": "passed",
+        "passed": 501,
+        "pending": 0,
+        "summary": "501 of 501 redirects checked; 0 issues; 0 unchecked.",
+        "total": 501,
+        "unavailable": 0,
+        "unchecked": 0,
+        "verification_id": "ca3837cc-7433-4bf5-96d4-75263b3b025b"
+      },
+      "deployment_confirmed_at": "2026-09-20T04:04:54.199598+00:00",
+      "deployment_id": "4e1cb4ae-0b34-4805-b649-0493f1bc9a86",
+      "expires_at": "2026-10-20T04:04:54.199598+00:00",
+      "last_complete_sweep_at": "2026-09-20T04:55:06.811166+00:00",
+      "live_origin": "https://vampire-released-fur-lake.trycloudflare.com/",
+      "monitoring_id": "5aefe17e-6853-49c4-ad64-6068be0e5653",
+      "next_check_at": null,
+      "renewal": "explicit_purchase_required",
+      "source": "included_paid",
+      "state": "cancelled",
+      "state_reason": null,
+      "summary": "Scheduled artifact checks; coverage and freshness describe measured results. Starting monitoring does not purchase renewal."
+    },
+    "error": null
+  },
+  "limitations": [
+    "Native provider acknowledgement is not inbox delivery proof.",
+    "Seven transport-failed writes recovered after15minute leases, maxattempt2; no manual reset.",
+    "No elapsed24hour cadence or30day expiry test in this production run; those have native fixture receipts."
+  ]
+}

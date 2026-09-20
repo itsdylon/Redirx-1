@@ -104,6 +104,44 @@ class LongURLStorage(cleanup.PivotParentCleanup):
 
     # ---- storage shape -------------------------------------------------
 
+    def test_flags_off_preserves_durable_queue_and_same_key_resumes_after_enable(self):
+        """Safe disable closes ingress, retains authority, then reuses the queued run.
+
+        Workers are drained before disabling in the release procedure. This does
+        not claim that an old worker can safely process a marked pivot job.
+        """
+        from backend.app import create_app
+        from backend.services.migration_quote_service import QuoteNotReadyError
+        mid, inventories, _ = self.plan_import_long(2, seed='rollback')
+        args = {'migration_id': mid, 'old_inventory_id': inventories['old'],
+                'new_inventory_id': inventories['new'], 'idempotency_key': 'rollback-' + mid}
+        queued = self.tool('run_migration', args)
+        self.assertEqual(queued['status'], 'queued', queued)
+
+        def snapshot():
+            return {table: self.sql(f'SELECT to_jsonb(t) AS row FROM {table} t WHERE migration_id=%s ORDER BY id', [mid])
+                    for table in ('inventory_snapshots', 'migration_price_quotes', 'migration_purchase_grants',
+                                  'migration_operations', 'migration_runs')}
+
+        before = snapshot()
+        with patch.dict(os.environ, {'MCP_PIVOT_ENABLED': 'false'}):
+            disabled = create_app().test_client()
+            self.assertEqual(disabled.post('/api/v2/migrations').status_code, 404)
+            self.assertEqual(disabled.post('/api/internal/mcp/resolve').status_code, 401)
+            with self.assertRaises(QuoteNotReadyError):
+                self.runs.start_run(A, mid, inventories['old'], inventories['new'],
+                                    queued['data']['quote_id'], args['idempotency_key'])
+            self.assertEqual(snapshot(), before)
+
+        replay = self.tool('run_migration', args)
+        self.assertEqual(replay['data']['run_id'], queued['data']['run_id'])
+        self.assertEqual(replay['data']['session_id'], queued['data']['session_id'])
+        self.assertEqual(replay['data']['grant_id'], queued['data']['grant_id'])
+        self.assertTrue(replay['data']['replayed'])
+        self.assertEqual(snapshot(), before)
+        job = self.claim_and_authorize('rollback-resume-worker')
+        self.assertEqual(str(job['id']), queued['data']['session_id'])
+
     def test_056_replaced_every_wide_url_key_and_left_the_cursor_index(self):
         indexes = {r['indexname']: r['indexdef'] for r in self.sql(
             "SELECT indexname,indexdef FROM pg_indexes WHERE schemaname='public' AND tablename IN "

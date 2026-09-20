@@ -667,7 +667,7 @@ class URLMappingDB:
         self,
         session_id: UUID,
         old_url: str,
-        new_url: str,
+        new_url: Optional[str],
         confidence_score: float,
         match_type: str,
         needs_review: bool = False
@@ -678,7 +678,7 @@ class URLMappingDB:
         Args:
             session_id: Migration session ID.
             old_url: Old site URL.
-            new_url: New site URL.
+            new_url: New site URL, or None for an unresolved mapping.
             confidence_score: Similarity/confidence score.
             match_type: Type of match ('exact_url', 'exact_html', 'semantic', 'manual').
             needs_review: Whether the mapping needs human review.

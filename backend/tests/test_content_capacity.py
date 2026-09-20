@@ -69,6 +69,30 @@ class ContentCapacityTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(original, {page.url for page in aliases+[unavailable]})
         self.assertEqual(rows[-1].args[2:], (None,0.0,'unmatched',True))
 
+    async def test_healthy_homepage_remains_explicit_unmatched_without_changing_root_policy(self):
+        # Different markup prevents exact-HTML pruning even though extraction
+        # yields the same healthy content; this matches the public fixture.
+        old_root = WebPage('https://old.example/', '<main><p>' + 'Unique home semantic content ' * 20 + '</p></main>')
+        new_root = WebPage('https://new.example/', '<article><div>' + 'Unique home semantic content ' * 20 + '</div></article>')
+        old_page = WebPage('https://old.example/before', '<main><p>' + 'Unique page semantic content ' * 20 + '</p></main>')
+        new_page = WebPage('https://new.example/after', '<article><div>' + 'Unique page semantic content ' * 20 + '</div></article>')
+        self.assertEqual(old_root.extract_text(), new_root.extract_text())
+        self.assertIsNone(old_root.content_error)
+        state = await HtmlPruneStage(preserve_url_identity=True).execute(([old_root, old_page], [new_root, new_page]))
+        self.assertEqual(len(state[2]), 0)
+        embeddings = Mock()
+        embeddings.iter_embeddings_for_urls.return_value = iter([{'url': old_page.url, 'embedding': [1.0, 0.0]}])
+        embeddings.find_similar_pages.return_value = [{'url': new_page.url, 'similarity': 1.0}]
+        mappings = Mock(); mappings.get_mappings_by_session.return_value = []
+        with patch('src.redirx.stages.WebPageEmbeddingDB', return_value=embeddings), patch('src.redirx.stages.URLMappingDB', return_value=mappings):
+            await PairingStage(uuid4(), preserve_url_identity=True).execute(state)
+        rows = mappings.insert_mapping.call_args_list
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[0].kwargs['old_url'], old_page.url)
+        self.assertEqual(rows[0].kwargs['new_url'], new_page.url)
+        self.assertEqual(rows[1].args[1:], (old_root.url, None, 0.0, 'unmatched', True))
+        self.assertEqual(embeddings.find_similar_pages.call_count, 1)
+
     async def test_vector_stream_handles_server_short_pages_and_propagates_failure(self):
         records = [{'id': f'{n:032x}', 'url': f'https://old.example/{n}', 'embedding':'[1,0]'} for n in range(301)]
         class Query:

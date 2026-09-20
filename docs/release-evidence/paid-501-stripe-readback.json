@@ -1,0 +1,21 @@
+{
+  "session": {
+    "id": "cs_test_a1eJfPZgm7mDnhvnzFcCinXDifT18zr5ImKm3rCSFeGdXJX43jM8LTzjGM",
+    "status": "complete",
+    "payment_status": "paid",
+    "amount_total": 4900,
+    "currency": "usd",
+    "livemode": false,
+    "payment_intent": "pi_3UHbNtReyTnSoYHg0W4HekuE"
+  },
+  "checkout_id": "4095d82b-6bbd-4c3e-8c64-10e1f98a606d",
+  "events": [
+    {
+      "id": "evt_1UHbNuReyTnSoYHgCYxWgGfK",
+      "type": "checkout.session.completed",
+      "livemode": false,
+      "pending_webhooks": 0,
+      "created": 1789874746
+    }
+  ]
+}

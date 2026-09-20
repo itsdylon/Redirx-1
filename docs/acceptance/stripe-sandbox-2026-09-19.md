@@ -167,3 +167,37 @@ failure/refund disputes, and production paid activation remain separate release
 acceptance. Existing unit/native tests cover additional adverse cases but do not
 turn them into observed external Stripe outcomes in this report. Sandbox cleanup
 also does not erase successful payments, consent, or period history.
+
+
+## Production-hosted 501-page checkout — September 20
+
+This later observation is separate from the disposable database / CLI-forwarded
+September 19 run above. The operator completed hosted Checkout from the deployed
+companion for migration `789f477b-4361-4665-b984-1ee5184c02d7`, whose controlled
+inventories contain 501 old and 601 new pages. Commercial activation remained
+`test_only`; no live-mode charge is claimed.
+
+The [sanitized independent Stripe readback](../release-evidence/paid-501-stripe-readback.json)
+records application checkout `4095d82b-6bbd-4c3e-8c64-10e1f98a606d`, provider
+Checkout `status=complete`, `payment_status=paid`, USD 4,900 cents and
+`livemode=false`. Its `checkout.session.completed` event is a genuine provider
+event with `livemode=false` and `pending_webhooks=0`. The evidence includes the
+provider object IDs for correlation, but no hosted Checkout URL, customer
+personal data, key, or signature secret.
+
+Zero pending webhooks is provider delivery state; alone it does not prove the
+application's grant accounting or duplicate-delivery behavior. Separately, the
+operator reports the paid work used its existing grant, and the explicit
+post-057 rerun uses the same grant and quote without repurchase. The first
+paid content job failed after five attempts at unmatched-row persistence.
+That failure is retained: payment success did not make the matching job succeed.
+The first free content job also failed after five attempts.
+
+After the single metadata-only 057 migration and independent readback, the
+operator dispatched explicit reruns with existing authority. Paid run
+`e8171cd9-a5cb-4f80-9f4e-7cc967487068` and free run
+`20a0d858-4ac7-4e69-9bbb-8a2c3851a9b4` were queued at that observation. Neither
+is reported complete. See [current activation and preserved historical evidence](../release-evidence/product-activation-20260920.json).
+This record closes the deployed hosted one-off sandbox purchase observation;
+content completion, production duplicate handling, recurring production
+journeys, installation and verification still need their own evidence.

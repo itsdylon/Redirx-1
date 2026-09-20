@@ -1,33 +1,187 @@
 {
-  "observed_at": "2026-09-20T03:12:00Z",
-  "product_sha": "5d0117bda961603987a6e5d212c38191ba61edc3",
+  "recorded_on": "2026-09-20",
+  "evidence_source": "Operator report after the single 057 apply and fresh-process readback; sanitized journals linked below. Rerun states are dispatch observations, not completion claims.",
   "billing_mode": "test_only",
-  "deployments": {
-    "worker": "dep-dankfqmgekts739946ng",
-    "api": "dep-dankgpf40ujc73c8fu80",
-    "gateway": "dep-dankhun40ujc73c8iuq0",
-    "companion": "dep-dankhuijnfac738uo4j0"
+  "service_pins": {
+    "api": {
+      "sha": "c9b15eff725b39f083c7330ed7660f316f8811bb",
+      "deployment": "dep-danl8brtqb8s73c9osd0",
+      "status": "live"
+    },
+    "companion": {
+      "sha": "a7813658273fc9323015e4cd2e81eda75d247413",
+      "deployment": "dep-danl6jjm8hqs73bmgm20",
+      "status": "live"
+    },
+    "worker": {
+      "sha": "5d0117bda961603987a6e5d212c38191ba61edc3",
+      "deployment": "dep-dankfqmgekts739946ng",
+      "status": "unchanged"
+    },
+    "gateway": {
+      "sha": "5d0117bda961603987a6e5d212c38191ba61edc3",
+      "deployment": "dep-dankhun40ujc73c8iuq0",
+      "status": "unchanged"
+    },
+    "broker": {
+      "sha_prefix": "017a2dc",
+      "status": "unchanged"
+    }
   },
-  "worker_configuration": {"instances": 1, "memory_limit_bytes": 536870912, "cpu_quota": "50000 100000", "concurrency": 2, "plan_change_approved": false},
-  "oauth": {"native_sdk_initialize": "passed", "subject": "existing GitHub-authenticated owner", "fresh_email_consent": "failed: legacy session absent from Supabase SDK; fix pending deployment"},
-  "live_tools": ["connect_search_console", "export_redirects", "get_migration", "get_monitoring_fixes", "get_monitoring_status", "list_matches", "manage_monitoring", "plan_migration", "resolve_matches", "run_migration", "verify_redirects"],
+  "worker_configuration": {
+    "instances": 1,
+    "memory_limit_bytes": 536870912,
+    "cpu_quota": "50000 100000",
+    "concurrency": 2,
+    "plan_change_approved": false
+  },
+  "schema_057": {
+    "journal": "057-apply-journal.json",
+    "source_commit": "3fe801e0537db105da026de5f8bdcda9dc3b5e2a",
+    "apply_count": 1,
+    "fresh_process_readback": "exact history and nullable target confirmed",
+    "preservation_scope": "9424 whole rows, table and column ACLs, RLS, policies, trigger definitions and enablement, mapping RPC body and ACL unchanged; operator verified"
+  },
   "controlled_paid_journey": {
     "migration_id": "789f477b-4361-4665-b984-1ee5184c02d7",
-    "old_origin": "https://kentucky-pace-recommend-bestsellers.trycloudflare.com",
-    "new_origin": "https://vampire-released-fur-lake.trycloudflare.com",
-    "old_inventory_id": "adcbe208-4bf5-4efb-a277-c26c0afa732a",
-    "new_inventory_id": "d37c3989-89bc-4106-890e-349761344c35",
-    "discovery": {"status": "succeeded", "old_pages": 501, "new_pages": 601, "scope": "declared_sources", "site_coverage_claimed": false},
-    "run_admission": {"status": "payment_required", "activation": "test_only", "amount_cents": 4900, "currency": "usd", "operation_id": "0f438185-21a2-40d8-8f73-bc85cde6843c", "quote_id": "0d8e030f-1dce-43a4-a8ac-a03b33ab5125", "run_id": null},
-    "companion_checkout": "failed before checkout creation: operation_id must be a UUID; frontend fix pending",
-    "content_run_started": false,
-    "payment_created": false
+    "quote_id": "0d8e030f-1dce-43a4-a8ac-a03b33ab5125",
+    "discovery": {
+      "status": "succeeded",
+      "old_pages": 501,
+      "new_pages": 601,
+      "scope": "declared_sources",
+      "site_coverage_claimed": false
+    },
+    "stripe_readback": "paid-501-stripe-readback.json",
+    "hosted_test_checkout": "complete and paid, USD 4900 cents, livemode false",
+    "genuine_event": "checkout.session.completed, livemode false, pending_webhooks 0",
+    "delivery_limit": "Provider readback alone does not prove every handler outcome or duplicate delivery idempotency.",
+    "grant_reuse": "Operator reports rerun uses the existing grant and quote, without repurchase"
   },
-  "live_observer_spot_sample": {
-    "instance": "jpfpb", "pid": 40, "samples_so_far": 16,
-    "memory_current_bytes": 179699712, "daemon_rss_bytes": 160727040,
-    "temporary_available_bytes": 42442412032, "oom_kill": 0,
-    "scope": "one sample during controlled discovery, not a peak or full-job capacity result; observer remains running"
+  "historical_content_attempts": {
+    "free500": "terminal failed after five attempts",
+    "paid501": "terminal failed after five attempts",
+    "failure": "Legacy url_mappings.new_url NOT NULL prevented explicit unmatched target persistence; 057 removes the constraint without fabricating targets. Failed attempts remain historical failures."
   },
-  "remaining": ["fresh email OAuth after fix", "hosted test checkout and genuine webhook", "500-page free content journey", "paid content journey", "real artifact installation and verification", "realistic full-capacity deployed jobs", "remaining governing-plan journeys"]
+  "explicit_reruns": {
+    "free500": {
+      "run_id": "20a0d858-4ac7-4e69-9bbb-8a2c3851a9b4",
+      "operation_id": "1c7265db-1723-42bb-aaf7-0d0fb9828097",
+      "session_id": "b3c33132-838e-4cf5-ac78-e5ffa48646fd",
+      "status_at_dispatch": "queued"
+    },
+    "paid501": {
+      "run_id": "e8171cd9-a5cb-4f80-9f4e-7cc967487068",
+      "operation_id": "9ab5efed-520c-4704-87bd-72d80c7def1e",
+      "session_id": "1dd6cf1c-a78c-4e4a-8f85-0a63ca3ef0f3",
+      "status_at_dispatch": "queued"
+    },
+    "repurchase": false,
+    "acceptance_complete": false
+  },
+  "remaining": [
+    "Fresh email OAuth/session recovery verification after deployed fixes",
+    "Successful free500 and paid501 content reruns with correct matched/unmatched coverage",
+    "Production duplicate webhook handling evidence",
+    "Actual artifact installation and verification",
+    "Bounded realistic full-capacity deployed job",
+    "Remaining governing-plan journeys"
+  ],
+  "historical_observations": [
+    {
+      "observed_at": "2026-09-20T03:12:00Z",
+      "product_sha": "5d0117bda961603987a6e5d212c38191ba61edc3",
+      "billing_mode": "test_only",
+      "deployments": {
+        "worker": "dep-dankfqmgekts739946ng",
+        "api": "dep-dankgpf40ujc73c8fu80",
+        "gateway": "dep-dankhun40ujc73c8iuq0",
+        "companion": "dep-dankhuijnfac738uo4j0"
+      },
+      "worker_configuration": {
+        "instances": 1,
+        "memory_limit_bytes": 536870912,
+        "cpu_quota": "50000 100000",
+        "concurrency": 2,
+        "plan_change_approved": false
+      },
+      "oauth": {
+        "native_sdk_initialize": "passed",
+        "subject": "existing GitHub-authenticated owner",
+        "fresh_email_consent": "failed: legacy session absent from Supabase SDK; fix pending deployment"
+      },
+      "live_tools": [
+        "connect_search_console",
+        "export_redirects",
+        "get_migration",
+        "get_monitoring_fixes",
+        "get_monitoring_status",
+        "list_matches",
+        "manage_monitoring",
+        "plan_migration",
+        "resolve_matches",
+        "run_migration",
+        "verify_redirects"
+      ],
+      "controlled_paid_journey": {
+        "migration_id": "789f477b-4361-4665-b984-1ee5184c02d7",
+        "old_origin": "https://kentucky-pace-recommend-bestsellers.trycloudflare.com",
+        "new_origin": "https://vampire-released-fur-lake.trycloudflare.com",
+        "old_inventory_id": "adcbe208-4bf5-4efb-a277-c26c0afa732a",
+        "new_inventory_id": "d37c3989-89bc-4106-890e-349761344c35",
+        "discovery": {
+          "status": "succeeded",
+          "old_pages": 501,
+          "new_pages": 601,
+          "scope": "declared_sources",
+          "site_coverage_claimed": false
+        },
+        "run_admission": {
+          "status": "payment_required",
+          "activation": "test_only",
+          "amount_cents": 4900,
+          "currency": "usd",
+          "operation_id": "0f438185-21a2-40d8-8f73-bc85cde6843c",
+          "quote_id": "0d8e030f-1dce-43a4-a8ac-a03b33ab5125",
+          "run_id": null
+        },
+        "companion_checkout": "failed before checkout creation: operation_id must be a UUID; frontend fix pending",
+        "content_run_started": false,
+        "payment_created": false
+      },
+      "live_observer_spot_sample": {
+        "instance": "jpfpb",
+        "pid": 40,
+        "samples_so_far": 16,
+        "memory_current_bytes": 179699712,
+        "daemon_rss_bytes": 160727040,
+        "temporary_available_bytes": 42442412032,
+        "oom_kill": 0,
+        "scope": "one sample during controlled discovery, not a peak or full-job capacity result; observer remains running"
+      },
+      "remaining": [
+        "fresh email OAuth after fix",
+        "hosted test checkout and genuine webhook",
+        "500-page free content journey",
+        "paid content journey",
+        "real artifact installation and verification",
+        "realistic full-capacity deployed jobs",
+        "remaining governing-plan journeys"
+      ]
+    }
+  ],
+  "deployed_auth_isolation": {
+    "api_sha": "c9b15eff725b39f083c7330ed7660f316f8811bb",
+    "evidence_source": "Operator production observation after API deployment",
+    "identities": "Existing GitHub SDK session and isolated existing free-account SDK session, distinct expected user IDs",
+    "temporary_session": "One new email-login session for the existing free account; neither existing SDK session overwritten",
+    "alternating_me_requests": 6,
+    "all_status_200": true,
+    "all_expected_identities": true,
+    "logout": "API logout called with only the new temporary session JWT; HTTP 200",
+    "existing_sessions_after_logout": "Both original tokens still returned HTTP 200 with the correct distinct identities",
+    "limits": "Observed sequence proves profile isolation and no disruption of the two existing identities. Access JWT validity means post-logout HTTP 200 does not prove refresh-token revocation.",
+    "new_accounts_created": false,
+    "credentials_in_evidence": false
+  }
 }

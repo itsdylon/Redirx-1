@@ -1,19 +1,56 @@
 # MCP product activation packet
 
-Application schema032/034–056 is deployed;033 remains protected. API, worker,
-gateway and companion run `5d0117b` with the product flags enabled and billing
-set to `test_only` (2026-09-20 02:50 UTC). The broker remains pinned at017.
-The current worker is one 512 MiB /0.5 CPU instance with concurrency two.
+Application schema 032/034–057 is deployed; 033 remains protected. Billing is
+`test_only`; no real paid launch is claimed. The API now runs `c9b15ef`
+(`dep-danl8brtqb8s73c9osd0`) and the companion runs `a781365`
+(`dep-danl6jjm8hqs73bmgm20`). Worker and gateway remain at `5d0117b`, and the
+broker remains pinned at `017a2dc`. These are the operator's post-057 deployment
+observations on September 20, 2026.
+
+The worker remains one 512 MiB / 0.5 CPU instance with concurrency two.
 Dylon has not approved a compute upgrade or concurrency change; the earlier
 8 GB/$135 recommendation is withdrawn pending realistic deployed measurements.
 
-At03:10 UTC native OAuth and the actual eleven-tool list passed. Controlled
-network discovery completed at501old/601new pages; run admission returned a
-$49 test-only payment requirement with no run created. Full free/paid content,
-checkout, installation and capacity acceptance remain open. The fresh email
-account exposed missing SDK-session hydration at consent, and the companion
-checkout omitted the required operation ID. Both are being fixed before the
-journey is rerun. See `release-evidence/product-activation-20260920.json`.
+Native OAuth and the actual eleven-tool list passed at 03:10 UTC. Controlled
+paid discovery completed at 501 old / 601 new pages. The real production-hosted
+Stripe **test** Checkout subsequently completed at $49 USD; independent provider
+readback shows `paid`, `livemode=false`, and a genuine `checkout.session.completed`
+event with zero pending webhooks. See the [Stripe evidence](release-evidence/paid-501-stripe-readback.json)
+and [production checkout record](acceptance/stripe-sandbox-2026-09-19.md#production-hosted-501-page-checkout--september-20).
+This does not establish content completion or production duplicate-delivery handling.
+
+The first free and paid content jobs both failed after five attempts. The legacy
+`url_mappings.new_url NOT NULL` constraint rejected the existing explicit-unmatched
+representation. Migration 057 was applied **once**, recording exact history
+`20260920033557`; a fresh process confirmed that history and nullable targets.
+The 9,424 existing rows retained SHA-256
+`b632302d6298d8a1bb790687bd97f6f145d51a6dc79f2316431062a517e5e9ce`.
+The operator also verified unchanged table/column ACLs, RLS, policies, trigger
+definitions/enablement, and the mapping RPC body/ACL. No user-row value changed.
+See the [sanitized apply journal](release-evidence/057-apply-journal.json).
+Do not restore NOT NULL after unmatched rows exist or rewrite them to fake targets.
+
+Explicit free/paid reruns are **queued at the recorded dispatch observation**,
+using the same existing grants and quote, without repurchase. Their run,
+operation and session IDs are in the [current activation record](release-evidence/product-activation-20260920.json),
+which preserves the earlier 03:12 observation intact as historical evidence.
+Neither rerun is claimed complete here. Content quality, artifacts, installation,
+verification and full-capacity acceptance remain open. The deployed frontend
+fixes preserve sessions through profile outages; the API isolates session-changing
+auth clients from privileged profile reads. The shared-client contamination
+mechanism was verified in source and installed-SDK tests, but is not asserted to
+be the proven cause of every earlier live profile failure.
+
+The operator subsequently verified the deployed API with two distinct existing
+identities: the GitHub SDK session and isolated free-account SDK session. After
+creating one temporary email-login session for the existing free account without
+overwriting either SDK session, six alternating `/api/auth/me` requests all
+returned 200 with the expected identities. Logging out only the temporary
+session returned 200; both original tokens still returned the correct profiles.
+This proves profile isolation for that observed sequence, with no new account
+creation. It does **not** prove refresh-token revocation: an access JWT can remain
+valid after logout. Fresh email OAuth and full browser recovery remain separate
+from this API isolation check.
 
 The earlier `qzbfx` idle observation (175,509,504 bytes sampled maximum) is
 historical, before the product-flag deployment. It is not a full-job measurement.
@@ -92,13 +129,15 @@ signature verification and provider retrieval. Both destinations receive some
 of the same event types; foreign-family delivery must return200 without creating
 rights. Malformed owned metadata, invalid signatures, missing owned rows and
 missing recurring consent continue to fail. Root independently passed67 targeted
-tests; genuine external delivery is still a separate acceptance step.
+tests. A genuine one-off Checkout event is now recorded above; production
+subscription delivery and duplicate handling remain separate acceptance checks.
 
 ## Cutover and acceptance order
 
-1. **Done for all four product services:** reviewed code deployed from
-   `deploy/mcp-product-5d0117b` at the exact SHA. Keep future pins explicit and
-   auto-deploy off. Preserve existing legacy environment values.
+1. **Initial activation done for all four product services:** `5d0117b` was
+   deployed from `deploy/mcp-product-5d0117b`; API and companion subsequently
+   advanced to the explicit pins above. Keep future pins explicit and auto-deploy
+   off. Preserve existing legacy environment values.
 2. **Configuration and enablement done:** scoped API/worker product variables, with worker support ready
    before new work is admitted. Enable the two test destinations only when the
    matching API revision and both secrets are installed. Verify actual signed
@@ -108,13 +147,16 @@ tests; genuine external delivery is still a separate acceptance step.
    purchased artifacts and existing history survive.
 4. Run OAuth free500 and paid501 acceptance on controlled origins/accounts,
    including real content work, exception decisions, artifacts, installation and
-   verification. Use sandbox payment and resume the same pending operation once.
+   verification. Checkout passed; the first jobs failed and explicit reruns now
+   reuse existing authority. Preserve those failures and do not repurchase.
 5. Use a read-only cgroup sampler around the actual daemon for deployed capacity.
    Do not run the local concurrency harness in Render: it starts a second worker
    plus1.58GB PGlite children. Bound fixture tokens, provider calls, database
    storage and rate-limited duration before full-size jobs. Local RSS alone is
    not the container-memory bound; filesystem cache and later sklearn loading
-   matter. Keep the least expensive configuration supported by the evidence.
+   matter. The [one-job preparation envelope](acceptance/deployed-full-job-preparation.md)
+   bounds the next proposed fixture; it is not a dispatched full job. Keep the
+   least expensive configuration supported by the evidence.
 6. Complete the remaining governing-plan journeys, publish only verified
    tool/auth/price/format claims, and record unsupported client/platform cases.
    Roll back by closing new admission and draining compatible workers; retain

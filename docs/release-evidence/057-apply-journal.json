@@ -1,0 +1,14 @@
+{
+  "name": "057_nullable_unmatched_mapping_targets",
+  "sha256": "7cf90fcaafbc898bf9f9439fda45cf3288117e993e4820e2c349d858b7c71994",
+  "version": "20260920033557",
+  "state_before": "pending",
+  "not_null_before": true,
+  "apply": true,
+  "row_count": 9424,
+  "rows_sha256_unchanged": "b632302d6298d8a1bb790687bd97f6f145d51a6dc79f2316431062a517e5e9ce",
+  "acl_rls_policies_triggers_rpc_unchanged": true,
+  "committed": true,
+  "independent_history_exact": true,
+  "not_null_after": false
+}

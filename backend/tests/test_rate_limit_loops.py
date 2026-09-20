@@ -19,8 +19,10 @@ Buckets here are frozen (refill_rate ~= 0) so a host's *lifetime* token total is
 exactly its capacity, which makes "did more tokens come out than the bucket ever
 held" a direct assertion rather than a timing estimate.
 
-Requires PREFLIGHT_TEST_DATABASE_URL pointing at a disposable loopback cluster;
-only migration 025 is needed.
+Requires PREFLIGHT_TEST_DATABASE_URL pointing at a disposable loopback cluster.
+Like the other native fixtures this creates its own database on that cluster and
+drops it afterwards, so the supplied catalog is never written to; only migration
+025 is applied.
 """
 import asyncio
 import os
@@ -29,9 +31,11 @@ import threading
 import time
 import unittest
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 from uuid import uuid4
 
 import psycopg
+from psycopg import sql
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
@@ -54,9 +58,22 @@ COLD_OPEN_SECONDS = 0.4
 class LimiterPoolOwnership(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.dsn = os.environ["PREFLIGHT_TEST_DATABASE_URL"]
+        cls.admin_dsn = os.environ["PREFLIGHT_TEST_DATABASE_URL"]
+        parsed = urlsplit(cls.admin_dsn)
+        if parsed.hostname not in ("127.0.0.1", "localhost", "::1"):
+            raise RuntimeError("Acceptance requires a local disposable PostgreSQL instance.")
+        cls.database = "redirx_preflight_test_" + uuid4().hex
+        with psycopg.connect(cls.admin_dsn, autocommit=True) as conn:
+            conn.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(cls.database)))
+        cls.dsn = urlunsplit(parsed._replace(path="/" + cls.database))
+        cls.addClassCleanup(cls.cleanup_db)
         with psycopg.connect(cls.dsn, autocommit=True) as conn:
             conn.execute((ROOT / "database/migrations/025_add_host_rate_limiting.sql").read_text())
+
+    @classmethod
+    def cleanup_db(cls):
+        with psycopg.connect(cls.admin_dsn, autocommit=True) as conn:
+            conn.execute(sql.SQL("DROP DATABASE {} WITH (FORCE)").format(sql.Identifier(cls.database)))
 
     def setUp(self):
         self.addCleanup(os.environ.pop, "CRAWL_LIMITER_DATABASE_URL", None)
@@ -251,6 +268,46 @@ class LimiterPoolOwnership(unittest.TestCase):
 
         self.assertEqual(self.settled_connections(baseline), baseline)
         self.assertEqual(rate_limit._pools, {})
+
+    def test_one_loop_ending_cannot_clear_another_loop_s_outage_cooldown(self):
+        """
+        Teardown is not evidence the database came back.
+
+        The cooldown is process-wide on purpose: every loop resolves the same
+        DSN, so one loop's discovery that the limiter database is unreachable
+        has to hold for all of them. close_pool() now runs far more often than
+        it used to — the background runner closes after every standalone cycle
+        — so a teardown that reset it would hand the next cycle the full open
+        timeout again, which is the stall POOL_RETRY_COOLDOWN exists to stop.
+        """
+        host = self.frozen_host("cooldown")
+
+        async def touch():
+            return await self.limiter().try_acquire(host)
+
+        # One loop has a pool open; then the database goes away.
+        self.on_own_loop(touch, close=False)
+        self.assertEqual(len(rate_limit._pools), 1)
+        rate_limit._pool_failed_at = time.monotonic()
+        self.assertTrue(rate_limit._in_failure_cooldown())
+
+        # A sibling loop ends, tearing down its own pools and reaping that one.
+        async def idle():
+            return None
+        self.on_own_loop(idle)
+        self.assertTrue(rate_limit._in_failure_cooldown(), "a sibling teardown cleared the cooldown")
+
+        # The sweep across both module copies must not clear it either.
+        async def sweep():
+            await rate_limit.close_limiter_pools()
+        asyncio.run(sweep())
+        self.assertTrue(rate_limit._in_failure_cooldown(), "close_limiter_pools cleared the cooldown")
+
+        # And the limiter is still failing open fast instead of dialling out.
+        async def still_short_circuited():
+            with self.assertRaises(RuntimeError):
+                await self.limiter().try_acquire(host)
+        asyncio.run(still_short_circuited())
 
     def test_a_loop_that_ends_without_closing_is_reaped_by_the_next_one(self):
         """The backstop for a cycle that dies before its teardown runs."""

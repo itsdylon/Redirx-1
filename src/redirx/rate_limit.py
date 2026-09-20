@@ -343,9 +343,12 @@ async def close_pool() -> None:
     calls this before it goes away; a loop that dies without doing so is reaped
     on the next _get_pool(). Bounded for the same reason the failed-open path
     is: shutdown is exactly where waiting forever on a dead host costs most.
+
+    The outage cooldown is deliberately left alone. Closing a pool says nothing
+    about whether the database came back, and run_once() closes after every
+    standalone cycle — clearing it there would make each cycle pay the open
+    timeout again, which is the stall POOL_RETRY_COOLDOWN exists to prevent.
     """
-    global _pool_failed_at
-    _pool_failed_at = None
     loop = asyncio.get_running_loop()
     with _registry_guard:
         _reap_closed_loops()

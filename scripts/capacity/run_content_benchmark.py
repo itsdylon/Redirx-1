@@ -32,6 +32,33 @@ from src.redirx.lib import Pipeline
 from src.redirx.database import URLMappingDB
 
 
+class BoundedLog:
+    """Keep benchmark stdout diagnostic without writing a 560 MB artifact.
+
+    Per-page pipeline prints scale with inventory size; a full two-job run
+    produced 560 MB of repetitive progress. Keep a bounded prefix and count
+    the rest so the suppression is reported rather than silent.
+    """
+
+    def __init__(self, stream, keep_bytes=512 * 1024):
+        self.stream, self.keep_bytes = stream, keep_bytes
+        self.written = self.suppressed = 0
+
+    def write(self, text):
+        data = text if isinstance(text, str) else str(text)
+        room = self.keep_bytes - self.written
+        if room > 0:
+            self.stream.write(data[:room])
+            self.written += len(data[:room])
+            if len(data) > room:
+                self.stream.write(f'\n[bounded log: further stdout suppressed after {self.keep_bytes} bytes]\n')
+        self.suppressed += max(0, len(data) - max(0, room))
+        return len(data)
+
+    def flush(self):
+        self.stream.flush()
+
+
 ACTIVE_CLIENT = ContextVar('capacity_client')
 ACTIVE_PROVIDER = ContextVar('capacity_provider')
 FIXTURE_ROOTS = set()
@@ -251,14 +278,20 @@ def main():
     parser.add_argument('--url-bytes',type=int,default=0)
     parser.add_argument('--dense-html',action='store_true');parser.add_argument('--worker-process',action='store_true')
     args = parser.parse_args()
-    assert args.url_bytes in (0,8192)
+    # 128 is the realistic launch shape; 8192 is the policy maximum, which
+    # no full-size inventory can carry through the import gate (see
+    # measure_inventory_gate.py). 0 leaves URLs unpadded.
+    assert args.url_bytes in (0,128,8192)
     process = subprocess.Popen(['node',str(Path(__file__).with_name('vector_fixture_server.mjs'))], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     try:
         line = process.stdout.readline()
         if not line: raise RuntimeError(process.stderr.read())
         client = LocalClient(json.loads(line)['port'])
-        with args.output.with_suffix('.log').open('w') as logs, redirect_stdout(logs):
-            result = asyncio.run(measure(args, client))
+        with args.output.with_suffix('.log').open('w') as logs:
+            bounded = BoundedLog(logs)
+            with redirect_stdout(bounded):
+                result = asyncio.run(measure(args, client))
+        result['stdout_bytes_suppressed'] = bounded.suppressed
         assert len(json.dumps(result)) < 8192, 'Benchmark summary must remain bounded'
         args.output.write_text(json.dumps(result, indent=2)+'\n')
         print(json.dumps(result))

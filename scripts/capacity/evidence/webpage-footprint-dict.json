@@ -1,0 +1,16 @@
+{
+  "slotted": false,
+  "pages": 35000,
+  "sizeof_instance_bytes": 48,
+  "sizeof_instance_dict_bytes": 296,
+  "sizeof_total_per_page_bytes": 344,
+  "rss_before_bytes": 120291328,
+  "rss_after_bytes": 130580480,
+  "rss_delta_bytes": 10289152,
+  "rss_bytes_per_page": 293.98,
+  "limitations": [
+    "macOS CPython 3.13 process, not a Linux cgroup measurement",
+    "empty html: this isolates object overhead and the URL string, not page content",
+    "RSS delta includes the list and the URL strings, which both tree states share"
+  ]
+}

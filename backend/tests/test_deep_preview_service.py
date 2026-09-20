@@ -1,7 +1,10 @@
+import json
 import os
+import subprocess
 import sys
 import unittest
-from unittest.mock import Mock
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 from uuid import uuid4
 
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
@@ -9,7 +12,7 @@ sys.path.insert(0, BASE_DIR)
 sys.path.insert(0, os.path.join(BASE_DIR, "backend"))
 sys.path.insert(0, os.path.join(BASE_DIR, "src"))
 
-from backend.services.deep_preview_service import DeepPreviewService
+from backend.services.deep_preview_service import CandidateRow, DeepPreviewService
 
 
 class DeepPreviewServiceTests(unittest.TestCase):
@@ -159,6 +162,50 @@ class DeepPreviewServiceTests(unittest.TestCase):
         convincing = service._build_convincing_fixes(source_session_id, preview_session_id)
 
         self.assertEqual(len(convincing), 9)
+
+
+class DeepPreviewSklearnImportTests(unittest.TestCase):
+    """scikit-learn must stay out of the worker until a preview needs it."""
+
+    def test_importing_the_service_does_not_import_sklearn(self):
+        # A fresh interpreter, so no earlier test in this process can hide a
+        # module-level sklearn import that the worker would pay for at startup.
+        probe = (
+            "import sys;"
+            "import backend.services.deep_preview_service as service;"
+            "print(sys.modules.get('sklearn') is None and sys.modules.get('scipy') is None)"
+        )
+        completed = subprocess.run(
+            [sys.executable, '-c', probe], cwd=BASE_DIR, capture_output=True, text=True,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertEqual(completed.stdout.strip().splitlines()[-1], 'True')
+
+    def test_subset_selection_loads_sklearn_and_ranks_the_matching_target(self):
+        service = DeepPreviewService.__new__(DeepPreviewService)
+        candidates = [
+            CandidateRow(
+                old_url='https://old.example.com/pricing/agency',
+                quick_new_url='https://new.example.com/contact',
+                quick_confidence=0.5,
+                needs_review=True,
+                path_similarity_normalized=0.2,
+                risk_score=0.9,
+            )
+        ]
+        new_urls = [f'https://new.example.com/filler-{index}' for index in range(6)]
+        new_urls.append('https://new.example.com/pricing/agency')
+        new_urls.append('https://new.example.com/contact')
+
+        with patch('backend.services.deep_preview_service.Config', SimpleNamespace(
+            PREVIEW_MAX_NEW_URLS_FULL_SCAN=4, PREVIEW_MAX_NEW_URLS_CAPPED=3,
+        )):
+            selected = service._select_new_url_subset(new_urls, candidates)
+
+        self.assertIn('sklearn.feature_extraction.text', sys.modules)
+        self.assertEqual(selected[0], 'https://new.example.com/contact')
+        self.assertIn('https://new.example.com/pricing/agency', selected)
+        self.assertEqual(len(selected), 3)
 
 
 if __name__ == '__main__':

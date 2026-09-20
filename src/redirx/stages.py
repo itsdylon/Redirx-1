@@ -1290,6 +1290,17 @@ class Mapping:
 
 
 class WebPage:
+    # A full pivot job holds 35,000 of these at once. Fixed slots drop the
+    # per-instance __dict__; every attribute this class has ever carried is
+    # listed here, so an accidental new one fails loudly instead of quietly
+    # reintroducing a dict per page. copy.copy (see with_url) and the
+    # __hash__/__eq__ pair below work unchanged on a slotted class.
+    __slots__ = (
+        'url', 'html', '__html_cache', '_extracted_text', '_title',
+        '_compacted', '_original_html_length', '_content_digest',
+        '_content_store', '_text_reference', 'content_error',
+    )
+
     def __init__(self, url: str, html: str):
         self.url = url
         self.html = html

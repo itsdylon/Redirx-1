@@ -1,0 +1,40 @@
+{
+  "measurement": "fully imported idle worker, fresh process, measure_worker_budget.py --mode idle",
+  "before": {
+    "tree": "integration 2357ac4, eager sklearn import in deep_preview_service",
+    "peak_rss_bytes": [
+      210386944,
+      208683008,
+      208945152
+    ],
+    "mean_peak_rss_bytes": 209338368
+  },
+  "after": {
+    "tree": "lean-worker, sklearn imported on first use and WebPage slotted",
+    "peak_rss_bytes": [
+      136036352,
+      136052736,
+      135888896
+    ],
+    "mean_peak_rss_bytes": 135992661
+  },
+  "mean_saving_bytes": 73345707,
+  "mean_saving_fraction": 0.3504,
+  "modules_removed_from_worker_startup": {
+    "sklearn_submodules": 139,
+    "scipy_submodules": 490,
+    "also_dropped": [
+      "joblib",
+      "threadpoolctl"
+    ],
+    "still_imported": [
+      "numpy",
+      "rapidfuzz"
+    ]
+  },
+  "limitations": [
+    "macOS CPython 3.13 process, not a Linux cgroup measurement",
+    "idle worker only: four background services plus SDK/client construction, no job running",
+    "WebPage slotting does not change this number; an idle worker holds no pages"
+  ]
+}

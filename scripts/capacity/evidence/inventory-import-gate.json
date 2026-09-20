@@ -1,0 +1,79 @@
+{
+  "policy_max_url_characters": 8192,
+  "full_side_row_counts": {
+    "old": 15000,
+    "new": 20000
+  },
+  "shapes": [
+    {
+      "url_characters": 128,
+      "side": "old",
+      "rows": 15000,
+      "method": "materialised the full inventory and measured it",
+      "request_body_bytes": 1965126,
+      "request_body_limit_bytes": 26214400,
+      "request_body_fits": true,
+      "policy_json_bytes": 9300412,
+      "policy_json_limit_bytes": 33554432,
+      "policy_json_fits": true,
+      "importable_in_one_request": true,
+      "max_rows_per_request": 54119,
+      "binding_gate": "policy"
+    },
+    {
+      "url_characters": 128,
+      "side": "new",
+      "rows": 20000,
+      "method": "materialised the full inventory and measured it",
+      "request_body_bytes": 2620126,
+      "request_body_limit_bytes": 26214400,
+      "request_body_fits": true,
+      "policy_json_bytes": 12400412,
+      "policy_json_limit_bytes": 33554432,
+      "policy_json_fits": true,
+      "importable_in_one_request": true,
+      "max_rows_per_request": 54119,
+      "binding_gate": "policy"
+    },
+    {
+      "url_characters": 8192,
+      "side": "old",
+      "rows": 15000,
+      "method": "linear model fitted and verified on smaller samples",
+      "request_body_bytes": 122925126,
+      "request_body_limit_bytes": 26214400,
+      "request_body_fits": false,
+      "policy_json_bytes": 493140408,
+      "policy_json_limit_bytes": 33554432,
+      "policy_json_fits": false,
+      "importable_in_one_request": false,
+      "max_rows_per_request": 1020,
+      "binding_gate": "policy"
+    },
+    {
+      "url_characters": 8192,
+      "side": "new",
+      "rows": 20000,
+      "method": "linear model fitted and verified on smaller samples",
+      "request_body_bytes": 163900126,
+      "request_body_limit_bytes": 26214400,
+      "request_body_fits": false,
+      "policy_json_bytes": 657520408,
+      "policy_json_limit_bytes": 33554432,
+      "policy_json_fits": false,
+      "importable_in_one_request": false,
+      "max_rows_per_request": 1020,
+      "binding_gate": "policy"
+    }
+  ],
+  "realistic_full_inventory_importable": true,
+  "maximum_length_full_inventory_importable": false,
+  "discovery_rows_per_checkpoint": 500,
+  "notes": [
+    "request body limit is backend/app.py MAX_CONTENT_LENGTH (25 MiB default)",
+    "policy JSON limit is octet_length(p_inventory::text) in migrations 034 and 056 (32 MiB)",
+    "each side is imported by its own request, so the caps apply per side, not to the combined 35,000",
+    "network discovery is NOT bounded by these caps: checkpoint_inventory_discovery accepts 500 rows per call and accumulates up to the count limit, so a long-URL inventory can still reach a worker that way",
+    "these are input-gate byte bounds only; they are not a memory measurement"
+  ]
+}

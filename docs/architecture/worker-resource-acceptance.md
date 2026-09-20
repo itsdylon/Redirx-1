@@ -31,13 +31,51 @@ The current Render worker allocation reported by the release owner is 0.5 CPU,
 512 MB, one instance, with `WORKER_MAX_CONCURRENT=2` and scraper limits of 12 total
 and 8 per site. This packet does not change Render settings or enable features.
 
-**The 512 MB allocation is insufficient for all valid full-size inventories.**
-A local, fully imported worker containing 15,000 old and 20,000 new original URLs
-of the contract's permitted 8,192-character length peaked at 582,139,904 bytes
-before any pipeline started. Resident memory while retaining those originals
-was 555,565,056 bytes. The original URL strings contain 286,720,000 UTF-8 bytes.
-The 8,192-character contract and independent 15,000/20,000 count limits remain
-unchanged; this is a deployment-capacity finding, not an input-policy rejection.
+**A full-size job at the realistic inventory shape fits the current 512 MB
+allocation; a full-size job at the maximum permitted URL length does not, and
+cannot be imported through the explicit-import API either.** Two concurrent
+15,000/20,000 pipelines with 128-character original URLs, dense 64 KiB pages and
+streamed discovery running alongside peaked at 239,910,912 bytes in a fully
+imported worker. The same benchmark with 8,192-character original URLs peaked at
+1,266,171,904 bytes. The difference is the URL strings, not the pipeline.
+
+An earlier revision of this document stated without qualification that 512 MB is
+insufficient for all valid full-size inventories, and recommended a 2c-8g plan.
+Both claims rested on a probe that allocated 35,000 URLs of 8,192 characters
+directly in the process. That array is not reachable through the import API (see
+*What can actually be imported* below), so it cannot size a tier on its own. The
+8,192-character contract and the independent 15,000/20,000 count limits are
+unchanged; nothing here narrows a promised limit.
+
+## What can actually be imported
+
+Count and per-URL maxima are independent limits, and satisfying both does not
+make a workload deliverable. Each side is imported by its own request, so two
+byte gates apply per side: `MAX_CONTENT_LENGTH` in `backend/app.py`, 25 MiB by
+default, and `octet_length(p_inventory::text) > 33554432` in migrations 034 and
+056, 32 MiB. `scripts/capacity/measure_inventory_gate.py` measures both against
+the real policy code and the real serialization.
+
+| Shape | Request body, bytes | Policy JSON, bytes | Importable in one request |
+| --- | ---: | ---: | --- |
+| 128 characters × 15,000 old | 1,965,126 | 9,300,412 | yes |
+| 128 characters × 20,000 new | 2,620,126 | 12,400,412 | yes |
+| 8,192 characters × 15,000 old | 122,925,126 | 493,140,408 | no |
+| 8,192 characters × 20,000 new | 163,900,126 | 657,520,408 | no |
+
+The 128-character rows are materialised and measured exactly. The 8,192-character
+rows use a linear fit over smaller samples, verified to within 2 bytes on a third
+sample size, rather than building a 165 MB array to watch it fail a 25 MiB check.
+The binding gate is the policy JSON: **at most 1,020 maximum-length URLs per
+import request.** Individual 8,192-character URLs are still accepted; they simply
+cannot all arrive together.
+
+This does not make long URLs unreachable. `checkpoint_inventory_discovery`
+accepts 500 rows of up to 8,192 characters per call and accumulates to the count
+limit, so network discovery can still assemble a long-URL inventory across many
+checkpoints. What the gates establish is narrower and sufficient: a memory tier
+cannot be sized from a single-process URL array that no import can deliver, and
+the realistic launch shape is comfortably deliverable.
 
 ## Measured local process results
 
@@ -48,7 +86,12 @@ no remote database, provider, billing or email call occurs.
 
 | Measurement | Peak process RSS, bytes | Scope |
 | --- | ---: | --- |
-| Fully imported idle worker | 211,664,896 | Four background services and SDK/client construction |
+| Fully imported idle worker, before this packet | 209,338,368 | Mean of three runs; eager sklearn import |
+| Deployed idle worker, before this packet | 214,392,832 | Release owner's cgroup sample; see *Deployed observation* |
+| Fully imported idle worker, after this packet | 135,992,661 | Mean of three runs; same services constructed |
+| Worker plus one full 15k/20k pipeline, realistic URLs | 198,541,312 | 128-character URLs, dense 64 KiB HTML, streamed discovery alongside |
+| Worker plus two full 15k/20k pipelines, realistic URLs | 239,910,912 | Same, two concurrent jobs |
+| Worker plus two full 15k/20k pipelines, maximum URLs | 1,266,171,904 | Prior run; 8,192-character URLs, otherwise identical |
 | Earlier full 15k/20k engine benchmark | 156,663,808 | Bare engine, short URLs, 64 KiB HTML, deterministic provider |
 | Earlier dense near-2 MiB scraper | 300,400,640 | Bare scraper, 32 short-URL pages |
 | Worker plus one dense scraper | 376,766,464 | Real HTTP, 32 near-2 MiB pages |
@@ -56,40 +99,105 @@ no remote database, provider, billing or email call occurs.
 | Worker plus original discovery crawler | 498,827,264 | One permitted 8 MiB decoded document, full DOM |
 | Worker plus streaming discovery crawler | 227,819,520 | Same document and links, no retained DOM |
 | Worker plus scraper and streaming discovery | 364,593,152 | Actual overlapping work; 32 near-2 MiB pages plus 8 MiB discovery |
-| Worker plus maximum-size original URL arrays | 582,139,904 | 35,000 × 8,192 characters; no pipeline started |
-| Worker plus full 500/600 pipeline | 257,835,008 | 8,192-character URLs, dense 64 KiB HTML, actual vector SQL |
-| Worker plus two full 15k/20k pipelines and discovery | 1,266,171,904 | Maximum observed RSS (sampled final exceeds OS peak slightly); 8,192 ASCII characters, dense 64 KiB HTML |
-| Worker holding two full Unicode URL inventories | 3,568,058,368 | 70,000 URLs of 8,192 characters, four-byte code points; no pipeline started |
+| Worker plus maximum-size original URL arrays | 582,139,904 | 35,000 × 8,192 characters; no pipeline started, not importable |
+| Worker holding two full Unicode URL inventories | 3,568,058,368 | 70,000 URLs of 8,192 characters, four-byte code points; no pipeline started, not importable |
 
-The two full pipelines completed in 2,825.622 seconds (47.1 minutes) and persisted
-all 30,000 expected semantic targets. Each made 35,002 real loopback HTTP requests,
-35,000 deterministic embedding calls and 15,000 actual vector SQL queries. There
-were 45 concurrent discovery-parser cycles. Each spool held 1,120,000,000 bytes
-and closed after completion; neither pipeline retained HTML or extracted text in
-page objects. Separate database child peaks were 1,663,516,672 and 1,575,534,592
-bytes; those children are not part of the deployed worker process.
+The two realistic pipelines completed in 2,843.823 seconds (47.4 minutes) and
+persisted all 30,000 expected semantic targets. Each made 35,002 real loopback
+HTTP requests, 35,000 deterministic embedding calls and 15,000 actual vector SQL
+queries against the documented HNSW `match_pages` plan. There were 45 concurrent
+discovery-parser cycles. Each spool held 1,120,000,000 bytes and closed after
+completion; neither pipeline retained HTML or extracted text in page objects.
+Separate database child peaks were 1,521,156,096 and 1,628,028,928 bytes; those
+children are not part of the deployed worker process and would not run inside it.
+The single realistic pipeline completed in 1,393.148 seconds with all 15,000
+targets correct, 22 discovery cycles and one 1,120,000,000-byte spool closed.
 
-This benchmark uses the actual pipeline inside a fully imported worker process,
-not the complete dispatch/lease loop. Its SQL adapter uses the legacy storage
-fixture, so it does not measure the final 050/056 write guards. Those guards and
-the actual worker wiring have separate native acceptance. Monitoring/watch
-services were imported but did not perform concurrent probes. The maximum dense
-2 MiB response case has scraper-only evidence, not a full 70,000-page run.
+Two variables separate the 239,910,912-byte realistic run from the
+1,266,171,904-byte maximum-URL run, so the gap is a decomposition rather than a
+controlled attribution. Original URL strings account for most of it: 70,000
+one-byte-ASCII strings cost 49 bytes of header each, so one copy of the arrays is
+about 577,010,000 bytes at 8,192 characters against 12,390,000 at 128, and the
+pipeline holds more than one copy at points. The import reductions below account
+for roughly 76 MB of the remainder.
 
-The Unicode inventory probe retains two separate sets of 15,000 old and 20,000
-new originals. Representative boundary URLs pass the actual identity validator;
-their total UTF-8 payload is 2,286,963,320 bytes. It measures an allocation lower
-bound for allowed URL shapes, not successful import of that total payload or a
-completed Unicode pipeline. Input document and checkpoint byte limits still
-apply. Its 3.57 GB observation rules out treating the 1.27 GB ASCII run as a
-worst-case memory bound.
+## Deployed observation
 
-Allocator and scheduling variation means component peaks cannot be added or
-subtracted as exact budgets. The small combined test does not establish full-job
-memory, repeated-job steady state, or all background workloads. The calibrated
-500/600 pipeline found every expected target in 36.276 seconds. Its separate
-PGlite process peaked at 1,610,252,288 bytes; that database process is not part of
-the worker RSS and would not run inside the deployed worker.
+The release owner ran the committed sampler 916c703, copied to the deployed
+worker by SHA256 and confirmed to be PID 40 in the same cgroup, on worker t49lj
+revision 0be. Over one 10-second window of 11 samples it reported
+`memory.current` peaking at 214,392,832 bytes against a `memory.max` of
+536,870,912, with no OOM deltas, CPU quota 50000/100000, and a minimum observed
+temporary-filesystem free space of 69,969,846,272 bytes. This measurement is not
+mine and is not reproduced here; it is cited as reported.
+
+It is an idle observation on the pre-lean revision, not capacity acceptance. No
+job ran during the window. Two things follow from it and nothing else does.
+
+First, it cross-checks the local method. Deployed idle `memory.current` of
+214,392,832 bytes and local idle peak RSS of 209,338,368 bytes on the same
+pre-lean code differ by 2.4%, which is the first evidence that these local macOS
+numbers track the deployed cgroup at all. They are still different metrics on
+different kernels; agreement at idle is not agreement under load.
+
+Second, it removes the temporary-disk unknown for this shape. 69,969,846,272
+bytes of free space is 31 times the 2,240,000,000 bytes two full spools require,
+so temporary space is not the binding constraint the RAM discussion needs to
+resolve. It is one minimum over ten seconds, not a quota guarantee.
+
+Arithmetic that follows, clearly marked as projection and not measurement: the
+local realistic two-job run added 105,447,424 bytes over its local idle baseline.
+If that delta carried to the deployed cgroup unchanged, a pre-lean deployed
+worker running the same two jobs would sit near 319,840,256 bytes against the
+536,870,912-byte cap, and a post-lean one near 246,494,549. Both are under the
+cap; the first leaves 40% headroom and the second 54%. Neither number has been
+observed. The delta is the part most likely not to transfer, because it is where
+allocator behaviour, page cache and the 0.5 CPU pacing all differ.
+
+## Import and per-page reductions in this packet
+
+`backend/services/deep_preview_service.py` imported scikit-learn at module scope
+for a TF-IDF path heuristic that only runs when a free `url_only` session queues
+a preview whose new-URL list exceeds `PREVIEW_MAX_NEW_URLS_FULL_SCAN`. The worker
+imports that module at startup, so every worker process paid for 139 sklearn and
+490 scipy submodules, plus joblib and threadpoolctl, for work most jobs never do.
+The import now happens on first use. A missing dependency still raises rather
+than being absorbed by the heuristic's existing fallback. Mean idle worker RSS
+fell from 209,338,368 to 135,992,661 bytes, a saving of 73,345,707 bytes or 35.0%
+of the idle footprint, measured over three fresh processes each way. numpy and
+rapidfuzz are still imported at startup; they are used outside the heuristic.
+
+`WebPage` in `src/redirx/stages.py` now declares `__slots__`. A full job holds
+35,000 of these at once. Instance plus instance dictionary was 344 bytes by
+`sys.getsizeof`; the slotted instance is 120 bytes with no dictionary. Measured
+against resident memory, 35,000 pages cost 293.98 bytes each before and 245.29
+after, so a full job's page objects save about 1,704,000 bytes and two concurrent
+jobs about 3,408,000. That is a small saving, and it is reported as such. The
+class had no dynamic attributes to lose: only `url` and `content_error` are ever
+assigned from outside it, and the codebase contains no `__dict__`, `vars`,
+`setattr`, pickle or weakref use against it. `copy.copy` in `with_url` and the
+`__hash__`/`__eq__` pair work unchanged on a slotted class.
+
+Both reductions are covered by tests that fail against the previous behaviour:
+`backend/tests/test_deep_preview_service.py` spawns a fresh interpreter and
+asserts sklearn and scipy are absent after importing the service, then drives
+`_select_new_url_subset` to prove the heuristic still loads and still ranks the
+matching target; `tests/stage_tests/test_webpage_slots.py` covers the absent
+instance dictionary, the rejected dynamic attribute, and the `copy.copy` and
+`with_url` round trips.
+
+## Benchmark changes
+
+`run_worker_concurrency_benchmark.py` and `run_content_benchmark.py` accept
+`--url-bytes 128` alongside the 8,192-character maximum, and the summary records
+which shape ran. Benchmark stdout is now written through a bounded writer that
+keeps a 512 KiB prefix and reports the suppressed byte count: the realistic
+two-job run wrote a 527,633-byte log and reported 10,380,994 suppressed bytes,
+against the 560 MB raw log the earlier maximum-URL run produced. Acceptance is
+unchanged and still hard-asserted: every expected mapping persisted, the tail
+mapping verified, query/case/slash variants distinct, no retained HTML or
+extracted text, every temporary content store closed, and each database child's
+memory reported separately from the worker's.
 
 ## Shared concurrency
 
@@ -107,6 +215,17 @@ The 51 figure describes socket admission, not a measured memory bound. Legacy
 watch loads approved mapping/traffic metadata before selecting its 2,000 URLs;
 its whole metadata footprint is not bounded by the probe count. The worker's
 0.5 CPU allocation also prevents extrapolating local elapsed times to production.
+
+`WORKER_MAX_CONCURRENT=1` is worth considering as a configuration change. It is a
+recommendation only, it is not approved, and this packet changed no live
+environment. The two-job
+realistic run is the measured argument for keeping the option open rather than
+the argument for taking it. One job peaked at 198,541,312 bytes and two at
+239,910,912, so concurrency 2 is affordable at the realistic shape; but two full
+jobs also hold two 1,120,000,000-byte spools at once, and the deployed worker's
+0.5 CPU makes their 47.4-minute local wall time optimistic. Concurrency 1 halves
+the temporary-disk requirement and removes the interaction entirely, at the cost
+of queueing the second job.
 
 ## Changes and runtime admission
 
@@ -134,30 +253,62 @@ is not evidence of the Render filesystem's available space or quota. Integration
 as temporary worker pressure. Intermediate attempts return to pending; final
 storage failure releases the Studio reservation through the existing authority.
 It does not record a paid success or classify the shortage as a customer failure.
-External processes may consume
-space after admission; existing spool write failures therefore still fail
-explicitly. This helper does not claim to reserve RAM or disk across instances.
+External processes may consume space after admission; existing spool write
+failures therefore still fail explicitly. This helper does not claim to reserve
+RAM or disk across instances.
 
 ## Release recommendation
 
-Do not activate unrestricted full-size content work on the current 512 MB worker.
+This packet does not recommend a compute tier. The measurements below are what is
+known; the plan decision is account-owned and belongs to the user, and no plan
+change has been performed here. On 2026-09-20 at 00:14 UTC the actual Render
+dashboard offered 0.5c-512mb for $7/month, 1c-2g for $25, 2c-4g for $85 and
+2c-8g for $135.
+
+What the evidence supports:
+
+- Two concurrent full-size jobs at the realistic inventory shape peaked at
+  239,910,912 bytes in a fully imported worker, with streamed discovery running
+  alongside and all 30,000 mappings correct. That is 44.7% of the deployed
+  worker's observed 536,870,912-byte `memory.max`.
+- A full-size inventory of maximum-length URLs cannot be imported in one request
+  through the explicit-import API. The 582,139,904 and 3,568,058,368-byte
+  allocation probes describe shapes that path cannot deliver.
+- Network discovery can still accumulate long-URL inventories across checkpoints.
+  No benchmark in this packet ran a discovered long-URL inventory end to end, so
+  the worker footprint for that case is measured only by the 1,266,171,904-byte
+  maximum-URL run, which remains the relevant upper observation for it.
+
+What the evidence does not support, and what would settle it:
+
+- The benchmarks are not Linux cgroup measurements, a deployed dispatch/lease
+  run, or a live-provider timing result. Local wall time is not a throughput
+  promise for a 0.5 CPU allocation. The deployed observation above covers idle
+  on the pre-lean revision only; no job has run under the real cgroup.
+- Temporary disk is a separate constraint from RAM. Two full spools need
+  2,240,000,000 bytes plus margin against a reported 69,969,846,272 bytes free,
+  so this is no longer the open question, but that figure is one ten-second
+  minimum rather than a quota.
+- Database memory, provider spend and background workloads are separate again.
+  The database child peaks near 1.6 GB belong to the local fixture, not to any
+  deployed worker.
+- The minimum test that would settle the tier is a deployed full-size job at the
+  realistic shape, under the real cgroup, with the real dispatch loop and guarded
+  SQL, sampling `memory.current` against `memory.max` throughout. The sampler
+  that produced the idle observation already does this; it needs a job under it.
+  Until that runs, raising the plan buys headroom against an unmeasured
+  deployment, not against a demonstrated failure at the realistic shape.
+
 Do not silently shorten valid original URLs or lower the advertised count limits
-to disguise deployment capacity. On 2026-09-20 at 00:14 UTC the actual Render
-dashboard offered 0.5c-512mb for $7/month, 1c-2g for $25, 2c-4g for $85 and 2c-8g
-for $135. Root recommends **2c-8g, one instance, for deployed acceptance**; the
-user has been asked to apply this account-owned plan change. This recommendation
-provides headroom above measured allocations, not a verified 8 GB upper bound.
-No plan change has been performed by this packet.
+to disguise deployment capacity. The 8,192-character URL contract and the
+15,000/20,000 count limits are unchanged by this packet.
 
-Before enabling full-capacity work, verify actual Linux/cgroup memory and temp
-filesystem capacity, exercise deployed worker dispatch/provider/guarded SQL,
-and measure overlapping background workloads and repeated jobs. Local wall time
-is not a throughput promise for the Render CPU allocation. Preserve limits and
-retry semantics if the deployed evidence requires further work.
-
-Bounded evidence is under `scripts/capacity/evidence/worker-*.json`; raw benchmark
-logs are kept in the isolated task directory and are not release artifacts.
+Bounded evidence is under `scripts/capacity/evidence/worker-*.json`,
+`inventory-import-gate.json` and `webpage-footprint-*.json`; raw benchmark logs
+are kept in the isolated task directory and are not release artifacts.
 Reproduce process measurements with `measure_worker_budget.py`; the concurrent
-full engine uses `run_worker_concurrency_benchmark.py`. Native discovery acceptance
-passed 13 existing real HTTP/PostgreSQL tests plus one new exact gzip-boundary
-case; two parser and three disk-admission tests passed independently.
+full engine uses `run_worker_concurrency_benchmark.py`; the import gates use
+`measure_inventory_gate.py` and the per-page footprint
+`measure_webpage_footprint.py`. Native discovery acceptance passed 13 existing
+real HTTP/PostgreSQL tests plus one new exact gzip-boundary case; two parser and
+three disk-admission tests passed independently.

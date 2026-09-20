@@ -1,0 +1,106 @@
+{
+  "jobs": 1,
+  "original_url_bytes_each": 128,
+  "worker_baseline": {
+    "current_rss_bytes": 127516672,
+    "peak_rss_bytes": 127385600
+  },
+  "worker_final": {
+    "current_rss_bytes": 99483648,
+    "peak_rss_bytes": 198541312
+  },
+  "wall_seconds": 1393.148,
+  "jobs_completed": [
+    {
+      "old_urls": 15000,
+      "new_urls": 20000,
+      "requested_html_bytes": 65536,
+      "original_url_bytes_each": 128,
+      "dense_html": true,
+      "worker_baseline": null,
+      "wall_seconds": 1392.76,
+      "stage_timings": [
+        {
+          "stage": "Filtering URLs",
+          "seconds": 0.171
+        },
+        {
+          "stage": "Matching exact URLs",
+          "seconds": 2.644
+        },
+        {
+          "stage": "Scraping webpages",
+          "seconds": 682.463
+        },
+        {
+          "stage": "Matching HTML content",
+          "seconds": 0.006
+        },
+        {
+          "stage": "Generating embeddings",
+          "seconds": 546.29
+        },
+        {
+          "stage": "Pairing URLs",
+          "seconds": 159.913
+        }
+      ],
+      "python_peak_rss_bytes": 198541312,
+      "candidate_query_plan": {
+        "Node Type": "Subquery Scan",
+        "Plans": [
+          {
+            "Node Type": "Limit",
+            "Plans": [
+              {
+                "Node Type": "Index Scan",
+                "Index Name": "webpage_embeddings_embedding_idx",
+                "Relation Name": "webpage_embeddings"
+              }
+            ]
+          }
+        ]
+      },
+      "retained_html_characters": 0,
+      "retained_text_heap_bytes": 0,
+      "temporary_content_bytes": 1120000000,
+      "content_stores_closed": true,
+      "database_child": {
+        "queries": 65673,
+        "sampled_peak_rss_bytes": 1578352640,
+        "os_peak_rss_bytes": 1578795008,
+        "current_rss_bytes": 898367488
+      },
+      "http_requests": 35002,
+      "peak_observed_http_handlers": 8,
+      "embedding_provider_calls": 35000,
+      "dimensions": 1536,
+      "candidate_sql_queries": 15000,
+      "vector_read_pages": 511,
+      "max_vector_page_rows": 97,
+      "mappings_persisted": 15000,
+      "correct_semantic_targets": 15000,
+      "semantic_recall": 1.0,
+      "acceptance_passed": true,
+      "tail_verified": true,
+      "query_case_slash_variants_verified": true,
+      "provider": "deterministic injected embeddings; no LLM exists in this content pipeline",
+      "database": "real PGlite PostgreSQL + pgvector + documented HNSW match_pages SQL",
+      "limitations": [
+        "loopback pacing disabled",
+        "synthetic content and embeddings",
+        "not a live provider/deployed worker benchmark"
+      ]
+    }
+  ],
+  "discovery_background_cycles": 22,
+  "limitations": [
+    "macOS local process, not Render Linux cgroup",
+    "deterministic embedding provider; no live provider rate/latency proof",
+    "real concurrent pipelines and real HTTP/vector SQL; each database child measured separately",
+    "background runs actual streamed discovery parser; monitoring/watch services imported but not actively probing",
+    "dense 64 KiB content; not 35k maximum 2 MiB dense documents",
+    "original URL length is a benchmark parameter: 128 characters is the realistic full-inventory shape, 8192 the per-URL policy maximum that no full inventory can carry through the import gate"
+  ],
+  "stdout_bytes_suppressed": 4928353
+}

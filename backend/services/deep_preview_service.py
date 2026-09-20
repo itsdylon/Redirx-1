@@ -8,8 +8,6 @@ from uuid import UUID
 
 import numpy as np
 from rapidfuzz import fuzz, process as rf_process
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
 
 from backend.services.results_formatter import calculate_path_similarity
 from src.redirx.config import Config
@@ -20,6 +18,26 @@ from src.redirx.database import (
     UserQuotaDB,
     WebPageEmbeddingDB,
 )
+
+
+_SKLEARN_PATH_SIMILARITY: Optional[tuple[Any, Any]] = None
+
+
+def _sklearn_path_similarity() -> tuple[Any, Any]:
+    """Load scikit-learn the first time a preview actually ranks new URLs.
+
+    The worker imports this module at startup, but the TF-IDF heuristic below
+    only runs when a free url_only session queues a preview whose new-URL list
+    is larger than PREVIEW_MAX_NEW_URLS_FULL_SCAN. Importing sklearn eagerly
+    pulled scipy into every worker process for work most jobs never do.
+    A missing dependency still raises loudly, as the module-level import did.
+    """
+    global _SKLEARN_PATH_SIMILARITY
+    if _SKLEARN_PATH_SIMILARITY is None:
+        from sklearn.feature_extraction.text import TfidfVectorizer
+        from sklearn.metrics.pairwise import cosine_similarity
+        _SKLEARN_PATH_SIMILARITY = (TfidfVectorizer, cosine_similarity)
+    return _SKLEARN_PATH_SIMILARITY
 
 
 INTENT_KEYWORDS = (
@@ -317,6 +335,7 @@ class DeepPreviewService:
         new_url_set = set(new_urls)
         new_paths = [self._normalize_path(url) for url in new_urls]
         url_scores: dict[str, float] = defaultdict(float)
+        TfidfVectorizer, cosine_similarity = _sklearn_path_similarity()
 
         for candidate in candidates:
             if candidate.quick_new_url in new_url_set:

@@ -15,7 +15,7 @@ import sys
 import time
 from types import SimpleNamespace
 
-from run_content_benchmark import LocalClient, measure, fixture_patches
+from run_content_benchmark import BoundedLog, LocalClient, measure, fixture_patches
 
 
 async def run(args, clients):
@@ -58,13 +58,14 @@ async def run(args, clients):
         if background_task:await background_task
         await provider.close()
     assert all(result['acceptance_passed'] for result in results)
-    return {'jobs':args.jobs,'worker_baseline':baseline,'worker_final':memory(),
+    return {'jobs':args.jobs,'original_url_bytes_each':args.url_bytes,'worker_baseline':baseline,'worker_final':memory(),
             'wall_seconds':round(time.perf_counter()-started,3),'jobs_completed':results,
             'discovery_background_cycles':cycles,
             'limitations':['macOS local process, not Render Linux cgroup','deterministic embedding provider; no live provider rate/latency proof',
                           'real concurrent pipelines and real HTTP/vector SQL; each database child measured separately',
                           'background runs actual streamed discovery parser; monitoring/watch services imported but not actively probing',
-                          'dense64KiB content and8192-character original URLs; not35k maximum2MiB dense documents']}
+                          'dense 64 KiB content; not 35k maximum 2 MiB dense documents',
+                          'original URL length is a benchmark parameter: 128 characters is the realistic full-inventory shape, 8192 the per-URL policy maximum that no full inventory can carry through the import gate']}
 
 
 def main():
@@ -73,7 +74,10 @@ def main():
     parser.add_argument('--html-bytes',type=int,default=65536);parser.add_argument('--url-bytes',type=int,default=8192)
     parser.add_argument('--background',action='store_true');parser.add_argument('--output',type=Path,required=True)
     args=parser.parse_args();args.dense_html=True;args.worker_process=False
-    assert 1<=args.jobs<=2 and args.url_bytes==8192
+    # 128 characters is the realistic inventory shape that actually fits the
+    # 25 MiB Flask request and 32 MiB policy-JSON import gates at full size;
+    # 8192 is the per-URL policy maximum and is retained for comparison only.
+    assert 1<=args.jobs<=2 and args.url_bytes in (128,8192)
     children=[];clients=[]
     try:
         for _ in range(args.jobs):
@@ -81,7 +85,10 @@ def main():
             children.append(child);line=child.stdout.readline()
             if not line:raise RuntimeError(child.stderr.read())
             clients.append(LocalClient(json.loads(line)['port']))
-        with args.output.with_suffix('.log').open('w') as log,redirect_stdout(log):result=asyncio.run(run(args,clients))
+        with args.output.with_suffix('.log').open('w') as log:
+            bounded=BoundedLog(log)
+            with redirect_stdout(bounded):result=asyncio.run(run(args,clients))
+        result['stdout_bytes_suppressed']=bounded.suppressed
         assert len(json.dumps(result))<16384
         args.output.write_text(json.dumps(result,indent=2)+'\n');print(json.dumps(result))
     finally:

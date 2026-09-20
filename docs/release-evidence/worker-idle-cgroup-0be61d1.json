@@ -1,0 +1,71 @@
+{
+  "first": {
+    "state": "running",
+    "worker": {
+      "VmHWM_bytes": 230096896,
+      "VmRSS_bytes": 180174848,
+      "Threads": 9
+    },
+    "memory_current_bytes": 214302720,
+    "memory_peak_bytes": 292831232,
+    "memory_max": "536870912",
+    "memory_events": {
+      "low": 0,
+      "high": 0,
+      "max": 0,
+      "oom": 0,
+      "oom_kill": 0,
+      "oom_group_kill": 0
+    },
+    "cpu_max": "50000 100000",
+    "temporary_available_bytes": 69970006016,
+    "temporary_free_bytes": 69986783232,
+    "type": "sample",
+    "elapsed_seconds": 0.001
+  },
+  "summary": {
+    "type": "summary",
+    "state": "duration_complete",
+    "samples": 11,
+    "elapsed_seconds": 10.001,
+    "sampled_max_memory_current_bytes": 214392832,
+    "minimum_temporary_available_bytes": 69969846272,
+    "memory_events_delta": {
+      "low": 0,
+      "high": 0,
+      "max": 0,
+      "oom": 0,
+      "oom_kill": 0,
+      "oom_group_kill": 0
+    },
+    "cpu_stat_delta": {
+      "usage_usec": 98044,
+      "user_usec": 82437,
+      "system_usec": 15608,
+      "core_sched.force_idle_usec": 0,
+      "nr_periods": 23,
+      "nr_throttled": 1,
+      "throttled_usec": 31162,
+      "nr_bursts": 0,
+      "burst_usec": 0
+    },
+    "pressure_total_usec_delta": {
+      "memory.some": 0,
+      "memory.full": 0,
+      "cpu.some": 15505,
+      "cpu.full": 15505,
+      "io.some": 0,
+      "io.full": 0
+    }
+  },
+  "observation": {
+    "service": "redirx-worker",
+    "instance": "t49lj",
+    "revision": "0be61d18327cd94ca2fe4a7886f416596f8e7c8b",
+    "worker_pid": 40,
+    "scope": "10-second idle observation before lean deployment; not workload acceptance",
+    "same_cgroup_verified": true,
+    "sampler_sha256": "366e73135bcbaa9f0e73efc7e8052071da29eba0daff20fc32d6a25930ab5d0a",
+    "remote_output": "/tmp/redirx-capacity-idle-202609200229.jsonl"
+  }
+}

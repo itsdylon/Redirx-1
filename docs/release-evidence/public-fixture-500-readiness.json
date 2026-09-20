@@ -1,0 +1,25 @@
+{
+  "fixture_revision": "d1eec6784f59a0840cc0aa57c58bfc4d720441c1",
+  "generated": true,
+  "old_origin": "https://stuart-ourselves-lexmark-cod.trycloudflare.com",
+  "new_origin": "https://outcomes-efforts-highway-appendix.trycloudflare.com",
+  "old_sitemap_urls": 500,
+  "new_sitemap_urls": 600,
+  "homepage_included_once": true,
+  "public_first_and_last_page_bytes_each": 65536,
+  "sitemap_content_type": "application/xml",
+  "private_sibling_requests": {"estimates.json": 404, "expected-mappings.json": 404},
+  "dot_env_request": 403,
+  "embedding_calls_without_retries": 1100,
+  "extracted_text_bytes": 533487,
+  "raw_float32_vector_bytes": 6758400,
+  "provider_calls_made": 0,
+  "production_jobs_dispatched": 0,
+  "hosting": "Task-only Nginx and two temporary Cloudflare QuickTunnels; no paid service or DNS/account settings",
+  "limits": [
+    "Public checks sampled first and last HTML pages; local tests verified generated document and sitemap totals",
+    "Generated imports passed Python inventory policy and size estimates, not a live SQL import",
+    "Short extracted text limits test costs but does not establish maximum spool or deployed memory capacity",
+    "Temporary tunnel origins exist only while their task processes remain running"
+  ]
+}

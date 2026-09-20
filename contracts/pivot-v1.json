@@ -17,6 +17,13 @@
     "paid_rerun_days": 30,
     "rerun_anchor": "first_successful_paid_run_at",
     "included_verifications": 1,
+    "free_usage": {
+      "new_runs_per_account": 5,
+      "rolling_window_hours": 24,
+      "same_operation_replay_counts_again": false,
+      "worker_retry_counts_again": false
+    },
+    "verification_retry_policy": "resume_unchecked_same_artifact_without_new_allowance",
     "paid_monitoring_days": 30,
     "monitoring_anchor": "deployment_confirmed_at",
     "monitoring_activation_max_delay_days": 90,
@@ -32,8 +39,7 @@
     },
     "agency": { "pricing": "custom_grant" },
     "unresolved_launch_choices": [
-      "Set validated new-site technical capacity independently of price",
-      "Set transparent free-use abuse limits and verification retry policy"
+      "Set validated new-site technical capacity independently of price"
     ]
   },
   "identity": {

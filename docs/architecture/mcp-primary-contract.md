@@ -140,7 +140,15 @@ renewal. Requotes for growth/new scope are explicit. Purchased artifact download
 outlive the rerun window. Studio's five migration slots use the billing period;
 monitoring slots measure concurrent sites. Reruns/downloads don't consume slots.
 
-Unresolved capacity and abuse-control choices remain enumerated in the shared JSON.
+Unresolved capacity choices remain enumerated in the shared JSON. The owner-approved
+free-use policy permits five new free execution reservations per account in a rolling
+24-hour window. Replaying the same operation or retrying its worker job consumes no
+additional slot; a fresh execution with a new key counts as new work. Paid grants are
+outside this free-use limit. The limit must be enforced atomically in durable storage,
+with a retry time when full; it does not reduce the 500-page allowance or matching quality.
+Unfinished verification resumes unchecked URLs against the same immutable export
+without consuming another included verification. Implementation/deployment receipts
+determine whether these contract requirements are live.
 Studio supports self-serve migrations through 15,000 old pages; larger migrations
 require a custom quote. Confirmed commercial terms do not by themselves activate
 live billing: provider and combined workflow acceptance remain release gates.

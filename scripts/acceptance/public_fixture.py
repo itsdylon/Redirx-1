@@ -32,6 +32,9 @@ WORDS = (
 )
 MAX_TEXT_BYTES = 1024
 VECTOR_DIMENSIONS = 1536
+SITEMAP_MAX_URLS = 10000
+# Leave room below SafeDiscoveryFetcher's 2 MiB uncompressed wire ceiling.
+SITEMAP_MAX_BYTES = 2 * 1024 * 1024 - 16 * 1024
 
 
 def public_origin(value):
@@ -101,6 +104,35 @@ def render_page(side, index, html_bytes):
 
 def json_bytes(value):
     return (json.dumps(value, ensure_ascii=True, indent=2) + '\n').encode()
+
+
+def sitemap_documents(origin, urls):
+    """Return bounded static XML files, preserving one urlset for small sites."""
+    declaration = '<?xml version="1.0" encoding="UTF-8"?>\n'
+    opening = (declaration + '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n').encode()
+    closing = b'</urlset>\n'
+    chunks, records = [], []
+    size = len(opening) + len(closing)
+    for url in urls:
+        record = f'<url><loc>{escape(url)}</loc></url>\n'.encode()
+        if len(opening) + len(record) + len(closing) > SITEMAP_MAX_BYTES:
+            raise ValueError('A sitemap URL exceeds the document byte budget')
+        if records and (len(records) == SITEMAP_MAX_URLS or size + len(record) > SITEMAP_MAX_BYTES):
+            chunks.append(opening + b''.join(records) + closing)
+            records, size = [], len(opening) + len(closing)
+        records.append(record)
+        size += len(record)
+    chunks.append(opening + b''.join(records) + closing)
+    if len(chunks) == 1:
+        return {'sitemap.xml': chunks[0]}
+    documents = {f'sitemap-{index:04d}.xml': chunk for index, chunk in enumerate(chunks, 1)}
+    index_xml = (declaration + '<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n' +
+                 ''.join(f'<sitemap><loc>{escape(origin + "/" + name)}</loc></sitemap>\n' for name in documents) +
+                 '</sitemapindex>\n').encode()
+    if len(index_xml) > SITEMAP_MAX_BYTES:
+        raise ValueError('The sitemap index exceeds the document byte budget')
+    documents['sitemap.xml'] = index_xml
+    return documents
 
 
 def build_plan(old_pages, new_pages, old_origin, new_origin, html_bytes=65536):
@@ -198,10 +230,8 @@ def generate(output, old_pages, new_pages, old_origin, new_origin, html_bytes=65
             path = urlsplit(url).path
             filename = 'index.html' if path == '/' else path.removeprefix('/')
             write_new(root / filename, render_page(side, index, html_bytes), 0o644)
-        sitemap = ('<?xml version="1.0" encoding="UTF-8"?>\n'
-                   '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n' +
-                   ''.join(f'<url><loc>{escape(url)}</loc></url>\n' for url in payload['rows']) + '</urlset>\n')
-        write_new(root / 'sitemap.xml', sitemap.encode(), 0o644)
+        for filename, document in sitemap_documents(origin, payload['rows']).items():
+            write_new(root / filename, document, 0o644)
         write_new(root / 'robots.txt', f'User-agent: *\nAllow: /\nSitemap: {origin}/sitemap.xml\n'.encode(), 0o644)
         write_new(output / f'import-{side}.json', json_bytes(payload), 0o600)
     for key, name in (('manifest', 'expected-mappings.json'), ('estimates', 'estimates.json'), ('admission', 'import-admission.json')):

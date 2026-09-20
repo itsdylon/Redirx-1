@@ -21,7 +21,13 @@ JSON artifacts 0600. Use ordinary static HTML handling, no directory listing or
 fallback that turns missing paths into successful pages.
 
 Each site has exactly the requested number of HTML pages, counting `/` once.
-`robots.txt` advertises a sitemap with the same exact total. Other page paths
+`robots.txt` advertises `/sitemap.xml` with the same exact total. Small fixtures
+keep one URL sitemap. Larger fixtures use that path as a sitemap index, linking
+same-origin `sitemap-0001.xml` and subsequent children. Each child has at most
+10000 URLs, and every XML file is capped at 2 MiB minus 16 KiB of uncompressed
+UTF-8 bytes. Thus a full 20k-page site remains below discovery's 2 MiB wire limit
+without depending on HTTP compression. Only page URLs count toward inventory;
+index child URLs are discovery documents. Other page paths
 differ between origins and target 128-character absolute URLs when the hostname
 allows it. Every old page has one intended new counterpart; extra new pages are
 distinct distractors. Pages contain only synthetic text, with no forms, scripts,

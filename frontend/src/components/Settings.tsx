@@ -20,6 +20,7 @@ import { updateUserProfile } from '../api/user';
 import { queryKeys } from '../queries/queryKeys';
 import { handleUnauthorizedAndRedirect } from '../queries/auth';
 import { ApiError } from '../utils/errorHandler';
+import { MCP_PIVOT_ENABLED } from '../api/config';
 
 function getErrorMessage(err: unknown, fallback: string): string {
   if (err instanceof ApiError) return err.user_message || err.message || fallback;
@@ -27,7 +28,7 @@ function getErrorMessage(err: unknown, fallback: string): string {
   return fallback;
 }
 
-export function Settings() {
+export function Settings({ pivotEnabled = MCP_PIVOT_ENABLED }: { pivotEnabled?: boolean } = {}) {
   const { user, refreshSession } = useAuth();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -220,8 +221,7 @@ export function Settings() {
             <TabsTrigger value="api-keys" className="gap-2"><KeyRound className="h-4 w-4" />API keys</TabsTrigger>
           </TabsList>
 
-          {/* Same panel as the standalone /api-keys route, which is where
-              non-enterprise accounts reach this — Settings is enterprise-only. */}
+          {/* Shared with /api-keys. Under the pivot every plan can use Settings. */}
           <TabsContent value="api-keys" className="mt-6">
             <ApiKeysPanel />
           </TabsContent>
@@ -327,7 +327,7 @@ export function Settings() {
               ) : (
                 <>
                   <div className="space-y-1">
-                    <p className="text-sm text-muted-foreground">Current Plan</p>
+                    <p className="text-sm text-muted-foreground">{pivotEnabled ? 'Legacy account plan' : 'Current Plan'}</p>
                     <p className="text-2xl font-semibold capitalize">{billing?.plan || 'free'}</p>
                   </div>
 
@@ -345,7 +345,17 @@ export function Settings() {
                     </div>
                   )}
 
-                  <div className="border border-border p-4 space-y-2">
+                  {pivotEnabled ? (
+                    <div className="border border-border p-4 space-y-2">
+                      <p className="font-medium">Migration allowances</p>
+                      <p className="text-sm text-muted-foreground">
+                        View Studio and monitoring subscriptions in the companion. Existing account billing remains available here.
+                      </p>
+                      <Button variant="outline" onClick={() => navigate('/companion')}>
+                        Manage migration allowances
+                      </Button>
+                    </div>
+                  ) : <div className="border border-border p-4 space-y-2">
                     <p className="font-medium">Agency Plan</p>
                     <p className="text-sm text-muted-foreground">$349/month or $299/month billed annually</p>
                     <p className="text-sm text-muted-foreground">Includes 50,000 Deep Match pages/month and $0.015/page overage</p>
@@ -375,14 +385,14 @@ export function Settings() {
                       <Button variant="outline" onClick={() => navigate('/pricing')}>
                         View Project Pricing
                       </Button>
-                      {billing?.manage_portal_available && (
-                        <Button variant="outline" onClick={() => portalMutation.mutate()} disabled={portalMutation.isPending}>
-                          {portalMutation.isPending && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
-                          Manage Billing <ExternalLink className="h-4 w-4 ml-1" />
-                        </Button>
-                      )}
                     </div>
-                  </div>
+                  </div>}
+                  {billing?.manage_portal_available && (
+                    <Button variant="outline" onClick={() => portalMutation.mutate()} disabled={portalMutation.isPending}>
+                      {portalMutation.isPending && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+                      Manage Billing <ExternalLink className="h-4 w-4 ml-1" />
+                    </Button>
+                  )}
                 </>
               )}
             </Card>

@@ -69,7 +69,7 @@ vi.mock('../api/user', () => ({
 
 import { Settings } from './Settings';
 
-function renderSettings(initialTab = 'profile') {
+function renderSettings(initialTab = 'profile', pivotEnabled = false) {
   mockSearchParams.set('tab', initialTab);
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -80,7 +80,7 @@ function renderSettings(initialTab = 'profile') {
 
   render(
     <QueryClientProvider client={queryClient}>
-      <Settings />
+      <Settings pivotEnabled={pivotEnabled} />
     </QueryClientProvider>,
   );
 }
@@ -125,6 +125,29 @@ beforeEach(() => {
 });
 
 describe('Settings', () => {
+  it('routes pivot allowances to the companion without offering legacy agency checkout', async () => {
+    const user = userEvent.setup();
+    renderSettings('subscription', true);
+    await user.click(await screen.findByRole('button', { name: 'Manage migration allowances' }));
+    expect(mockNavigate).toHaveBeenCalledWith('/companion');
+    expect(screen.queryByRole('button', { name: 'Start Agency Checkout' })).not.toBeInTheDocument();
+    expect(mockCreateAgencyCheckout).not.toHaveBeenCalled();
+  });
+
+  it('keeps existing agency usage and billing management available under the pivot', async () => {
+    const user = userEvent.setup();
+    const billing = await mockGetBillingStatus();
+    mockGetBillingStatus.mockResolvedValue({ ...billing, plan: 'agency', manage_portal_available: true,
+      agency: { ...billing.agency, has_subscription: true, usage_pages: 321 } });
+    // An empty portal response lets us verify the real click without navigating jsdom.
+    mockCreatePortalSession.mockResolvedValue('');
+    renderSettings('subscription', true);
+    expect(await screen.findByText('Usage this period: 321 pages')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Manage Billing' }));
+    await waitFor(() => expect(mockCreatePortalSession).toHaveBeenCalledTimes(1));
+    expect(screen.queryByText('Agency Plan')).not.toBeInTheDocument();
+  });
+
   it('renders profile data and saves profile changes', async () => {
     const user = userEvent.setup();
     renderSettings('profile');

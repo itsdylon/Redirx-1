@@ -9,6 +9,7 @@ import { queryKeys } from '../queries/queryKeys';
 import { createWatch, listWatches } from '../api/watch';
 import { useAuth } from '../contexts/AuthContext';
 import { isEnterprisePlan } from '../lib/plans';
+import { MCP_PIVOT_ENABLED } from '../api/config';
 
 /**
  * Offer post-cutover monitoring from the review page.
@@ -20,20 +21,18 @@ import { isEnterprisePlan } from '../lib/plans';
  * Renders as a link to the existing watch when there already is one, so this
  * doubles as the way back into monitoring for a returning user.
  */
-export function WatchPrompt({ sessionId }: { sessionId: string }) {
+export function WatchPrompt({ sessionId, pivotEnabled = MCP_PIVOT_ENABLED }: { sessionId: string; pivotEnabled?: boolean }) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { user } = useAuth();
-  // Monitoring is a paid-plan feature (the server enforces this too). The
-  // prompt still renders for free accounts as an upsell rather than
-  // disappearing: post-cutover monitoring is the product's recurring half,
-  // and hiding it would mean free users never learn it exists.
+  // Legacy creation is plan-gated. Pivot mode retains existing watch access,
+  // including for lapsed plans, but acquires no new legacy watches.
   const paidPlan = isEnterprisePlan(user?.plan);
 
   const watchesQuery = useQuery({
     queryKey: queryKeys.watches.all,
     queryFn: listWatches,
-    enabled: paidPlan,
+    enabled: paidPlan || pivotEnabled,
   });
 
   const existing = watchesQuery.data?.find((w) => w.session_id === sessionId);
@@ -48,9 +47,10 @@ export function WatchPrompt({ sessionId }: { sessionId: string }) {
     onError: (error: Error) => toast.error(error.message),
   });
 
-  if (paidPlan && watchesQuery.isLoading) return null;
+  if ((paidPlan || pivotEnabled) && watchesQuery.isLoading) return null;
+  if (pivotEnabled && !existing) return null;
 
-  if (!paidPlan) {
+  if (!pivotEnabled && !paidPlan) {
     return (
       <Card className="mt-6 p-4">
         <div className="flex flex-wrap items-center justify-between gap-4">
@@ -82,10 +82,12 @@ export function WatchPrompt({ sessionId }: { sessionId: string }) {
           <Activity className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" />
           <div>
             <p className="text-sm font-medium text-foreground">
-              {existing ? 'Monitoring is on' : 'Watch these redirects after you deploy'}
+              {existing ? (pivotEnabled ? 'Existing redirect monitor' : 'Monitoring is on') : 'Watch these redirects after you deploy'}
             </p>
             <p className="mt-0.5 text-sm text-muted-foreground">
-              {existing
+              {pivotEnabled
+                ? 'Open the monitor to inspect its current status and results.'
+                : existing
                 ? 'We check the live site and email you when something breaks.'
                 : 'We check the live site on a schedule and email you if a redirect 404s, lands on the wrong page, or never shipped.'}
             </p>

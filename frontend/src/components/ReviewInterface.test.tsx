@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ReviewInterface } from './ReviewInterface';
@@ -44,7 +45,7 @@ vi.mock('./StatsBar', () => ({
 }));
 
 vi.mock('./ReviewToolbar', () => ({
-  ReviewToolbar: () => <div>Review Toolbar</div>,
+  ReviewToolbar: ({ onExportClick }: { onExportClick: () => void }) => <button onClick={onExportClick}>Export existing results</button>,
 }));
 
 vi.mock('./RedirectTable', () => ({
@@ -56,8 +57,9 @@ vi.mock('./InlineEditDialog', () => ({
 }));
 
 vi.mock('./ExportModal', () => ({
-  ExportModal: () => null,
+  ExportModal: ({ open }: { open: boolean }) => open ? <div>Existing result export options</div> : null,
 }));
+vi.mock('./WatchPrompt', () => ({ WatchPrompt: () => null }));
 
 vi.mock('./KeyboardShortcutsDialog', () => ({
   KeyboardShortcutsDialog: () => null,
@@ -67,7 +69,7 @@ vi.mock('./DeepMatchPreviewCard', () => ({
   DeepMatchPreviewCard: () => null,
 }));
 
-function renderReviewPage() {
+function renderReviewPage(pivotEnabled = false) {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: { retry: false },
@@ -78,7 +80,8 @@ function renderReviewPage() {
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={['/review/session-1']}>
         <Routes>
-          <Route path="/review/:sessionId" element={<ReviewInterface layoutVariant="tool" />} />
+          <Route path="/review/:sessionId" element={<ReviewInterface layoutVariant="tool" pivotEnabled={pivotEnabled} />} />
+          <Route path="/review/purchased-result" element={<div>Purchased result route</div>} />
         </Routes>
       </MemoryRouter>
     </QueryClientProvider>,
@@ -126,5 +129,31 @@ describe('ReviewInterface regression', () => {
     expect(screen.queryByText('Navigate back to previous projects or return to the main tool page.')).not.toBeInTheDocument();
     expect(screen.getByRole('navigation', { name: 'Primary' })).toBeInTheDocument();
     expect(screen.getByRole('navigation', { name: 'Breadcrumb' })).toBeInTheDocument();
+  });
+
+  it('keeps legacy paid results and export entry while retiring sample and quote acquisition', async () => {
+    mockGetResults.mockResolvedValue({ success: true, session: { id: 'session-1', pipeline_type: 'url_only' }, mappings: [] });
+    mockGetProjectUnlockStatus.mockResolvedValue({ has_quote: true, is_unlocked: true,
+      quote_status: 'paid', deep_session_status: 'completed', deep_session_id: 'purchased-result' });
+    renderReviewPage(true);
+    expect(await screen.findByRole('button', { name: 'Open Deep Match Results' })).toBeInTheDocument();
+    expect(mockGetDeepPreview).not.toHaveBeenCalled();
+    expect(screen.queryByText(/Unlock Deep Match for semantic content/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'View Project Pricing' })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Export existing results' }));
+    expect(screen.getByText('Existing result export options')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Open Deep Match Results' }));
+    expect(await screen.findByText('Purchased result route')).toBeInTheDocument();
+  });
+
+  it.each([null, 'checkout_created'])('retains pending purchase status without an unlock CTA (%s)', async quoteStatus => {
+    mockGetResults.mockResolvedValue({ success: true, session: { id: 'session-1', pipeline_type: 'url_only' }, mappings: [] });
+    mockGetProjectUnlockStatus.mockResolvedValue({ has_quote: !!quoteStatus, is_unlocked: false, quote_status: quoteStatus });
+    renderReviewPage(true);
+    await waitFor(() => expect(mockGetProjectUnlockStatus).toHaveBeenCalledWith('session-1'));
+    if (quoteStatus) expect(await screen.findByText(/Waiting for confirmation and deep-run queueing/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Unlock Deep Match' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'View Project Pricing' })).not.toBeInTheDocument();
+    expect(mockGetDeepPreview).not.toHaveBeenCalled();
   });
 });

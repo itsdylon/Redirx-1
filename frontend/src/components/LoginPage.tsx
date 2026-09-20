@@ -312,17 +312,6 @@ export function LoginPage() {
         </p>
       </Card>
 
-      <div className="mt-8 max-w-md text-center px-4">
-        <p className="text-xs text-muted-foreground leading-relaxed">
-          Limited early partner program for agencies shaping the next generation of redirect automation.{' '}
-          <a
-            href="#"
-            className="text-primary hover:underline font-medium"
-          >
-            Apply for access &rarr;
-          </a>
-        </p>
-      </div>
     </div>
   );
 }

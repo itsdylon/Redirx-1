@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import type { ReactNode } from 'react';
@@ -86,6 +86,7 @@ describe('migration decisions and payment', () => {
     const user = userEvent.setup(); mountDetail('?paid=true&payment_return=success');
     const button = await screen.findByRole('button', { name: 'Continue to checkout' });
     expect(screen.getByText('$49.00 for this migration.')).toBeInTheDocument();
+    expect(within(screen.getByRole('region', { name: 'Payment required' })).getByText(/Test checkout only/)).toBeInTheDocument();
     expect(paths('/checkout')).toHaveLength(0);
     await user.click(button); await screen.findByText('Try this request again.');
     await user.click(button); await screen.findByText(/Checkout status: open/);
@@ -203,6 +204,8 @@ describe('subscription consent and request cancellation', () => {
     handler = () => failure();
     const user = userEvent.setup(); mountBilling('', 'installed-deployment');
     const button = screen.getByRole('button', { name: 'Continue to secure checkout' });
+    expect(screen.getByText(/Test checkout only/)).toBeInTheDocument();
+    expect(screen.getByRole('checkbox')).toHaveAccessibleName(/in test mode/);
     expect(button).toBeDisabled(); expect(requests).toHaveLength(0);
     await user.click(screen.getByRole('checkbox')); await user.click(button); await screen.findByRole('alert');
     await user.click(button); await screen.findByRole('alert');

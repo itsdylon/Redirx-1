@@ -31,7 +31,7 @@ import { DeepMatchPreviewCard } from './DeepMatchPreviewCard';
 import { GscTrafficCard } from './GscTrafficCard';
 import type { GscResultsMeta } from '../api/gsc';
 import { TrafficRiskPanel } from './TrafficRiskPanel';
-import { RISK_PLACEMENT } from '../api/config';
+import { MCP_PIVOT_ENABLED, RISK_PLACEMENT } from '../api/config';
 import type { TrafficRisk } from '../lib/riskSummary';
 import { queryKeys } from '../queries/queryKeys';
 import { handleUnauthorizedAndRedirect } from '../queries/auth';
@@ -90,9 +90,10 @@ export interface RedirectMapping {
 
 interface ReviewInterfaceProps {
   layoutVariant?: 'dashboard' | 'tool';
+  pivotEnabled?: boolean;
 }
 
-export function ReviewInterface({ layoutVariant = 'dashboard' }: ReviewInterfaceProps = {}) {
+export function ReviewInterface({ layoutVariant = 'dashboard', pivotEnabled = MCP_PIVOT_ENABLED }: ReviewInterfaceProps = {}) {
   const { sessionId } = useParams<{ sessionId: string }>();
   const navigate = useNavigate();
   const posthog = usePostHog();
@@ -150,7 +151,7 @@ export function ReviewInterface({ layoutVariant = 'dashboard' }: ReviewInterface
     enabled: !!sessionId,
   });
 
-  const deepPreviewEnabled = !!sessionId && pipelineType === 'url_only' && isFreeUser;
+  const deepPreviewEnabled = !pivotEnabled && !!sessionId && pipelineType === 'url_only' && isFreeUser;
   const deepPreviewQuery = useQuery({
     queryKey: queryKeys.results.deepPreview(sessionId || ''),
     queryFn: () => getDeepPreview(sessionId!),
@@ -740,7 +741,7 @@ export function ReviewInterface({ layoutVariant = 'dashboard' }: ReviewInterface
           )}
 
           {/* URL-only pricing banner */}
-          {pipelineType === 'url_only' && (
+          {!pivotEnabled && pipelineType === 'url_only' && (
             <div className="mb-4 border border-blue-500/30 bg-blue-500/5 p-3 flex items-center gap-3">
               <Info className="h-4 w-4 text-blue-500 flex-shrink-0" />
               <p className="text-sm text-muted-foreground">
@@ -749,7 +750,8 @@ export function ReviewInterface({ layoutVariant = 'dashboard' }: ReviewInterface
             </div>
           )}
 
-          {pipelineType === 'url_only' && unlockStatusEnabled && (
+          {pipelineType === 'url_only' && unlockStatusEnabled && (!pivotEnabled ||
+            isDeepMatchUnlocked || unlockStatusQuery.data?.quote_status === 'checkout_created') && (
             <div
               className={`mb-4 border p-4 ${
                 isDeepMatchUnlocked
@@ -764,7 +766,7 @@ export function ReviewInterface({ layoutVariant = 'dashboard' }: ReviewInterface
                 </div>
               ) : unlockStatusQuery.data ? (
                 <div className="space-y-3">
-                  {!unlockStatusQuery.data.has_quote && (
+                  {!pivotEnabled && !unlockStatusQuery.data.has_quote && (
                     <>
                       <p className="text-sm text-muted-foreground">
                         Get a one-time Deep Match quote for this project.
@@ -775,7 +777,7 @@ export function ReviewInterface({ layoutVariant = 'dashboard' }: ReviewInterface
                     </>
                   )}
 
-                  {unlockStatusQuery.data.has_quote && !unlockStatusQuery.data.is_unlocked && !unlockStatusQuery.data.contact_required && (
+                  {!pivotEnabled && unlockStatusQuery.data.has_quote && !unlockStatusQuery.data.is_unlocked && !unlockStatusQuery.data.contact_required && (
                     <>
                       <p className="text-sm text-muted-foreground">
                         Deep Match is locked for this project.
@@ -792,7 +794,7 @@ export function ReviewInterface({ layoutVariant = 'dashboard' }: ReviewInterface
                     </p>
                   )}
 
-                  {unlockStatusQuery.data.contact_required && (
+                  {!pivotEnabled && unlockStatusQuery.data.contact_required && (
                     <p className="text-sm text-muted-foreground">
                       This project requires enterprise pricing. Contact sales from the pricing page.
                     </p>
@@ -987,7 +989,7 @@ export function ReviewInterface({ layoutVariant = 'dashboard' }: ReviewInterface
 
       {/* Post-cutover monitoring: the export is a prediction until the live
           site confirms it. */}
-      {sessionId && <WatchPrompt sessionId={sessionId} />}
+      {sessionId && <WatchPrompt sessionId={sessionId} pivotEnabled={pivotEnabled} />}
 
       {/* Floating Keyboard Shortcuts Button */}
       <div className="fixed bottom-6 right-6 z-40">

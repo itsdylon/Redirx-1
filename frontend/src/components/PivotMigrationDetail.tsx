@@ -6,6 +6,7 @@ import { ToolLayout } from './ToolLayout';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { SubscriptionCheckoutPanel } from './SubscriptionCheckoutPanel';
+import { PivotBillingNotice } from './PivotBillingNotice';
 import { SearchConsolePanel } from './pivot/SearchConsolePanel';
 import { useRequestScope } from './pivot/useRequestScope';
 
@@ -154,6 +155,7 @@ export function PivotMigrationDetail() {
     </header>
     {paymentRequired && data?.quote_id && <section className="space-y-3 border-t pt-6" aria-labelledby="payment-heading">
       <h2 id="payment-heading" className="text-lg font-semibold">Payment required</h2>
+      <PivotBillingNotice />
       {data.quote && <p>{new Intl.NumberFormat('en-US', { style: 'currency', currency: data.quote.currency }).format(data.quote.amount_cents / 100)} for this migration.</p>}
       <p className="text-sm text-muted-foreground">Payment is confirmed by the server. Returning from checkout does not start work by itself.</p>
       <Button disabled={busy || loading} onClick={() => void pay()}>Continue to checkout</Button>

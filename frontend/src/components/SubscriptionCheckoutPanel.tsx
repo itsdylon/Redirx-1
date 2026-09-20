@@ -3,6 +3,7 @@ import { useLocation, useSearchParams } from 'react-router-dom';
 import { createSubscriptionCheckout, getSubscriptionCheckout, type SubscriptionCheckout } from '../api/pivot';
 import { Button } from './ui/button';
 import { useRequestScope } from './pivot/useRequestScope';
+import { PivotBillingNotice, PIVOT_TEST_BILLING } from './PivotBillingNotice';
 
 export function SubscriptionCheckoutPanel({ deploymentId }: { deploymentId?: string }) {
   const [query] = useSearchParams();
@@ -39,6 +40,7 @@ export function SubscriptionCheckoutPanel({ deploymentId }: { deploymentId?: str
   }
   return <section aria-labelledby="billing-heading" className="space-y-3 border-t pt-6">
     <h2 id="billing-heading" className="text-lg font-semibold">Subscription billing</h2>
+    <PivotBillingNotice />
     {record && <div role="status" className="space-y-1 text-sm">
       <p>Checkout status: {record.state}</p>
       {record.subscription && <p>Subscription: {record.subscription.status}. {record.subscription.eligible ? 'Current allowance is available.' : 'No current allowance is available.'}</p>}
@@ -54,7 +56,7 @@ export function SubscriptionCheckoutPanel({ deploymentId }: { deploymentId?: str
     </label>
     {!deploymentId && <p className="text-sm text-muted-foreground">To subscribe to monitoring, open an installed migration.</p>}
     <label className="flex items-start gap-2 text-sm"><input className="mt-1" type="checkbox" checked={consent} disabled={busy}
-      onChange={e => setConsent(e.target.checked)} />I agree to {sku === 'studio' ? '$99' : '$29'} monthly recurring billing.</label>
+      onChange={e => setConsent(e.target.checked)} />I agree to {sku === 'studio' ? '$99' : '$29'} monthly recurring billing{PIVOT_TEST_BILLING ? ' in test mode' : ''}.</label>
     <Button disabled={busy || !consent} onClick={() => void begin()}>{busy ? 'Checking billing…' : 'Continue to secure checkout'}</Button>
     {message && <p role="alert" className="text-sm">{message}</p>}
   </section>;

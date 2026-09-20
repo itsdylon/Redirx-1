@@ -35,21 +35,44 @@ vi.mock('../api/watch', async () => {
   };
 });
 
-function renderPrompt(sessionId = 'session-123') {
+function renderPrompt(sessionId = 'session-123', pivotEnabled = false) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
-  return render(
+  const view = render(
     <QueryClientProvider client={client}>
-      <WatchPrompt sessionId={sessionId} />
+      <WatchPrompt sessionId={sessionId} pivotEnabled={pivotEnabled} />
     </QueryClientProvider>
   );
+  return { ...view, client };
 }
 
 describe('WatchPrompt', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockPlan = 'agency';
+  });
+
+  it.each(['free', 'agency'])('retires new legacy monitoring acquisition for %s plans under the pivot', async plan => {
+    mockPlan = plan;
+    listWatches.mockResolvedValue([]);
+    const { client } = renderPrompt('session-123', true);
+    await waitFor(() => expect(client.isFetching()).toBe(0));
+    expect(listWatches).toHaveBeenCalled();
+    expect(screen.queryByRole('button')).not.toBeInTheDocument();
+    expect(screen.queryByText(/On paid plans/)).not.toBeInTheDocument();
+    expect(createWatch).not.toHaveBeenCalled();
+  });
+
+  it('preserves existing monitoring access after a plan lapses', async () => {
+    mockPlan = 'free';
+    listWatches.mockResolvedValue([{ id: 'watch-1', session_id: 'session-123', status: 'paused' }]);
+    renderPrompt('session-123', true);
+    await userEvent.click(await screen.findByRole('button', { name: 'View' }));
+    expect(mockNavigate).toHaveBeenCalledWith('/watch/watch-1');
+    expect(screen.getByText('Existing redirect monitor')).toBeInTheDocument();
+    expect(screen.queryByText('Monitoring is on')).not.toBeInTheDocument();
+    expect(createWatch).not.toHaveBeenCalled();
   });
 
   it('offers to start monitoring when the migration has no watch', async () => {

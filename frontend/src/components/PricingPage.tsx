@@ -17,6 +17,7 @@ import {
   createProjectQuote,
   getBillingStatus,
   getPricingEstimate,
+  getProjectUnlockStatus,
   type PricingEstimate,
   type ProjectQuote,
 } from '../api/billing';
@@ -24,6 +25,7 @@ import { queryKeys } from '../queries/queryKeys';
 import { ApiError } from '../utils/errorHandler';
 import { useAuth } from '../contexts/AuthContext';
 import { isEnterprisePlan } from '../lib/plans';
+import { MCP_PIVOT_ENABLED } from '../api/config';
 
 function formatUsdFromCents(value: number | null | undefined): string {
   if (value == null) return '—';
@@ -100,7 +102,44 @@ function QuoteSummary({ quote }: { quote: ProjectQuote }) {
   );
 }
 
-export function PricingPage() {
+/** Keep compatibility acquisition completely unmounted during the pivot:
+ * its quote query creates a record even without a checkout click. */
+export function PricingPage({ pivotEnabled = MCP_PIVOT_ENABLED }: { pivotEnabled?: boolean } = {}) {
+  return pivotEnabled ? <RetiredPricingHandoff /> : <LegacyPricingPage />;
+}
+
+function RetiredPricingHandoff() {
+  const [params] = useSearchParams();
+  const navigate = useNavigate();
+  const sourceSessionId = params.get('source_session_id') || '';
+  const status = useQuery({
+    queryKey: queryKeys.billing.unlockStatus(sourceSessionId),
+    queryFn: () => getProjectUnlockStatus(sourceSessionId),
+    enabled: !!sourceSessionId,
+    refetchInterval: query => query.state.data?.quote_status === 'checkout_created' ? 4000 : false,
+  });
+  const paid = status.data?.is_unlocked;
+  return <ToolLayout title="Migration billing"><Card className="max-w-2xl space-y-4 p-6">
+    <h1 className="text-xl font-semibold">Continue in the migration companion</h1>
+    <p>Plan new migrations with your connected agent. The companion shows the quote and payment step when needed.</p>
+    <Button onClick={() => navigate('/companion')}>Open migration companion</Button>
+    {sourceSessionId && <section className="space-y-3 border-t pt-4" aria-label="Previous project purchase">
+      <h2 className="font-medium">Previous project purchase</h2>
+      <p className="text-sm">Existing purchases and results remain available. Checkout returns are checked against the server.</p>
+      {status.isLoading && <p role="status">Checking purchase status…</p>}
+      {status.error && <p role="alert">Purchase status could not load. Open the project or try again.</p>}
+      {status.data && <p role="status">{paid ? 'This project is paid.'
+        : status.data.quote_status === 'checkout_created' ? 'Waiting for payment confirmation.'
+        : 'No confirmed purchase is available for this project.'}</p>}
+      <Button variant="outline" onClick={() => navigate(`/review/${encodeURIComponent(sourceSessionId)}`)}>Open previous project</Button>
+      {paid && status.data?.deep_session_id && <Button variant="outline"
+        onClick={() => navigate(`/review/${encodeURIComponent(status.data!.deep_session_id!)}`)}>Open purchased results</Button>}
+      <Button variant="outline" disabled={status.isFetching} onClick={() => void status.refetch()}>Refresh purchase status</Button>
+    </section>}
+  </Card></ToolLayout>;
+}
+
+function LegacyPricingPage() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const { user } = useAuth();

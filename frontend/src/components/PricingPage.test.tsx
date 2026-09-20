@@ -42,17 +42,19 @@ const mockCreateProjectQuote = vi.fn();
 const mockCreateProjectCheckout = vi.fn();
 const mockCreateAgencyCheckout = vi.fn();
 const mockGetBillingStatus = vi.fn();
+const mockGetProjectUnlockStatus = vi.fn();
 vi.mock('../api/billing', () => ({
   getPricingEstimate: (...args: unknown[]) => mockGetPricingEstimate(...args),
   createProjectQuote: (...args: unknown[]) => mockCreateProjectQuote(...args),
   createProjectCheckout: (...args: unknown[]) => mockCreateProjectCheckout(...args),
   createAgencyCheckout: (...args: unknown[]) => mockCreateAgencyCheckout(...args),
   getBillingStatus: (...args: unknown[]) => mockGetBillingStatus(...args),
+  getProjectUnlockStatus: (...args: unknown[]) => mockGetProjectUnlockStatus(...args),
 }));
 
 import { PricingPage } from './PricingPage';
 
-function renderPage() {
+function renderPage(pivotEnabled = false) {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: { retry: false },
@@ -62,7 +64,7 @@ function renderPage() {
 
   render(
     <QueryClientProvider client={queryClient}>
-      <PricingPage />
+      <PricingPage pivotEnabled={pivotEnabled} />
     </QueryClientProvider>,
   );
 }
@@ -117,9 +119,44 @@ beforeEach(() => {
     quote_id: 'quote-1',
     deep_session_id: '22222222-2222-2222-2222-222222222222',
   });
+  mockGetProjectUnlockStatus.mockResolvedValue({ is_unlocked: false, quote_status: null });
 });
 
 describe('PricingPage', () => {
+  it('unmounts acquisition in pivot mode without creating a quote or loading the estimator', async () => {
+    mockSearchParams.set('source_session_id', 'previous-project');
+    renderPage(true);
+    expect(await screen.findByText('No confirmed purchase is available for this project.')).toBeInTheDocument();
+    expect(mockGetProjectUnlockStatus).toHaveBeenCalledWith('previous-project');
+    expect(mockCreateProjectQuote).not.toHaveBeenCalled();
+    expect(mockGetPricingEstimate).not.toHaveBeenCalled();
+    expect(mockGetBillingStatus).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: 'Unlock Deep Match' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Start Agency Checkout' })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Open migration companion' }));
+    expect(mockNavigate).toHaveBeenCalledWith('/companion');
+    expect(mockCreateProjectCheckout).not.toHaveBeenCalled();
+    expect(mockCreateAgencyCheckout).not.toHaveBeenCalled();
+  });
+
+  it('keeps cancellation-return recovery read-only and trusts server-confirmed paid results', async () => {
+    mockSearchParams.set('source_session_id', 'previous-project');
+    mockSearchParams.set('status', 'cancelled');
+    mockSearchParams.set('paid', 'true');
+    mockGetProjectUnlockStatus.mockResolvedValueOnce({ is_unlocked: false, quote_status: 'checkout_created' })
+      .mockResolvedValue({ is_unlocked: true, quote_status: 'paid', deep_session_id: 'paid-result' });
+    renderPage(true);
+    expect(await screen.findByText('Waiting for payment confirmation.')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Open purchased results' })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Refresh purchase status' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Open purchased results' }));
+    expect(mockNavigate).toHaveBeenCalledWith('/review/paid-result');
+    await userEvent.click(screen.getByRole('button', { name: 'Open previous project' }));
+    expect(mockNavigate).toHaveBeenCalledWith('/review/previous-project');
+    expect(mockCreateProjectQuote).not.toHaveBeenCalled();
+    expect(mockCreateProjectCheckout).not.toHaveBeenCalled();
+  });
+
   it('renders estimator mode without source_session_id', async () => {
     renderPage();
 

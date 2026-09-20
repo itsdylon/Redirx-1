@@ -179,16 +179,15 @@ watch loads approved mapping/traffic metadata before selecting its 2,000 URLs;
 its whole metadata footprint is not bounded by the probe count. The worker's
 0.5 CPU allocation also prevents extrapolating local elapsed times to production.
 
-`WORKER_MAX_CONCURRENT=1` is worth considering as a configuration change. It is a
-recommendation only, it is not approved, and this packet changed no live
-environment. The two-job
-realistic run is the measured argument for keeping the option open rather than
-the argument for taking it. One job peaked at 198,541,312 bytes and two at
-239,910,912, so concurrency 2 is affordable at the realistic shape; but two full
-jobs also hold two 1,120,000,000-byte spools at once, and the deployed worker's
-0.5 CPU makes their 47.4-minute local wall time optimistic. Concurrency 1 halves
-the temporary-disk requirement and removes the interaction entirely, at the cost
-of queueing the second job.
+`WORKER_MAX_CONCURRENT=1` is an option for reducing overlapping work; changing
+it remains unapproved. One local job peaked at 198,541,312 bytes and two at
+239,910,912, a 41,369,600-byte difference in these runs. This does not halve total
+worker RAM: imports and much process state are shared. One job took 1,393.148
+seconds; two together took 2,843.823 seconds, close to two sequential single runs.
+That comparison does not prove throughput under Render pacing or provider limits.
+Concurrency one would admit only one full content spool at a time and queue the
+second content job; separate background tasks would still run. Actual container
+observations must determine whether either configuration meets launch needs.
 
 ## Changes and runtime admission
 
@@ -238,9 +237,9 @@ What the evidence supports:
   through the explicit-import API. The 582,139,904 and 3,568,058,368-byte
   allocation probes describe shapes that path cannot deliver.
 - Network discovery can still accumulate long-URL inventories across checkpoints.
-  No benchmark in this packet ran a discovered long-URL inventory end to end, so
-  the worker footprint for that case is measured only by the 1,266,171,904-byte
-  maximum-URL run, which remains the relevant upper observation for it.
+  No benchmark in this packet ran a discovered long-URL inventory end to end.
+  The earlier maximum-URL allocation/pipeline runs expose a separate risk but
+  do not establish an upper bound for the complete discovery path.
 
 What the evidence does not support, and what would settle it:
 
@@ -250,15 +249,16 @@ What the evidence does not support, and what would settle it:
   on the pre-lean revision only; no job has run under the real cgroup.
 - Temporary disk is a separate constraint from RAM. Two full spools need
   2,240,000,000 bytes plus margin against a reported 69,969,846,272 bytes free,
-  so this is no longer the open question, but that figure is one ten-second
-  minimum rather than a quota.
+  but that figure is one ten-second minimum rather than a quota or reservation.
 - Database memory, provider spend and background workloads are separate again.
   The database child peaks near 1.6 GB belong to the local fixture, not to any
   deployed worker.
-- The minimum test that would settle the tier is a deployed full-size job at the
-  realistic shape, under the real cgroup, with the real dispatch loop and guarded
-  SQL, sampling `memory.current` against `memory.max` throughout. The sampler
-  that produced the idle observation already does this; it needs a job under it.
+- The next test is a deployed full-size job at the realistic shape, under the
+  real cgroup, with real dispatch and guarded SQL. Follow it with two overlapping
+  jobs if concurrency two is retained, repeated-job recovery and the stated
+  background/preview workload checks. Sample container memory, OOM events, CPU
+  throttling and temporary space throughout. A single successful job alone
+  does not settle all of these capacity limits.
   Until that runs, raising the plan buys headroom against an unmeasured
   deployment, not against a demonstrated failure at the realistic shape.
 

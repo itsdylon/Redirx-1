@@ -1,6 +1,8 @@
 # Application migration release packet — 2026-09-19
 
-Release preparation reviewed through integration `2357ac4`, September 20, 2026 UTC. The API and worker compatibility deployment at `0be61d1` is live with pivot flags off; application migration 033 remains applied and 032/034–056 remain absent. The gateway, broker and browser app have not been cut over to the new product packet. The original review was based on source and root-supplied catalog evidence; the integration owner has since read the production catalog, exported its schema, and rehearsed the ordered packet locally. No production application migration was applied during this preparation. Pin the final release SHA and verify every file hash before application.
+**Production update, September20, 2026 UTC:** all24 reviewed application migrations,032 then034–056, committed together through runner `5348d7a`;033 remains applied. Exact-source history readback passed, and all31 original public-table fingerprints matched (18,568 rows, original columns only). The76 owned legacy sessions have76 matching durable records and runs, with zero ownership/metadata mismatches. All37 pivot-table ACLs,103 reviewed function ACLs, four exact-URL constraints and033 protections passed catalog checks. Hosted anonymous/service/owner checks passed, including a browser seeing only its15 owned migrations while the service census sees76 across nine owners. [Production evidence](release-evidence/application-production-migrations.json) records the scope and limitations.
+
+The API and worker compatibility deployment at `0be61d1` remains live with pivot flags off; API liveness200, disabledv2 route404 and internal authentication401 were rechecked afterSQL. Gateway metadata still advertises the broker andmcp:tools. No compute, environment, account setting, payment or content-job change was made in the SQL stage. The gateway, broker and browser app have not been cut over to the new product packet. Preparation and historical reasoning below are preserved; any statement that032/034–056 are pending describes the pre-application stage and is superseded by this status. Do not replay them.
 
 
 ## Verified backup, schema rehearsal, and remaining deployment gates
@@ -28,7 +30,7 @@ Worker deploy `dep-danjc5ugekts73961jlg` selected the same commit and became Liv
 Still required before activation:
 
 - Final lean-worker release pin after measurements and any accepted optimizations. The first compatible API/worker deployment with flags off is complete; revalidate the active worker revision before enabling pivot jobs.
-- Current backup/queue/writer checks, serialized ordered SQL application with history readback, and hosted PostgREST owner/anonymous/cross-account checks.
+- Ordered SQL, exact history readback, original-public-data comparison and hosted PostgREST owner/anonymous/cross-account reads are complete. Recheck queue and owned-session/backfill census immediately before activation; retain compatible code/schema on rollback.
 - Deployed free and paid **sandbox** journeys, Google callback acceptance, compatible worker restart/retry, and actual resource/disk/shared-limiter evidence.
 - Capacity decision after cheaper alternatives are measured. Dylon has **not approved** the $135/month 8 GB plan. The 8,192-character full-array sizing probes bypassed import payload bounds; they do not establish a required plan for reachable imported workloads. Realistic full-size one/two-job tests, lazy sklearn loading, WebPage slots, and concurrency-one tradeoffs are being evaluated. No account or plan setting changed.
 - Replacement sandbox credentials, if another Stripe-authenticated test is needed. The exposed test key was rotated by the user; never reuse the old private file.

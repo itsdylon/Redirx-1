@@ -1,0 +1,1454 @@
+{
+  "recorded_at": "2026-09-20T01:58:53.797328+00:00",
+  "runner_commit": "5348d7a",
+  "packet_atomic": true,
+  "apply_invocations": 1,
+  "migration_history": [
+    {
+      "name": "032_durable_migrations",
+      "sha256": "b70eb8cce3eddeac71baaa5029609e1ff85020a4a084ed800fd1d8260d6f8bac",
+      "version": "20260920020032",
+      "state": "applied"
+    },
+    {
+      "name": "034_atomic_inventory_import",
+      "sha256": "d8f09ebe23c380b0d63bc234f4984172e5040f310e53ebc2cec22cf9d2f3fd71",
+      "version": "20260920020034",
+      "state": "applied"
+    },
+    {
+      "name": "035_atomic_migration_planning",
+      "sha256": "ff3b038cad585eb04403e0b1d0cd19363f9465a9402156f067845f5bca101d09",
+      "version": "20260920020035",
+      "state": "applied"
+    },
+    {
+      "name": "036_migration_quotes_grants",
+      "sha256": "a66dcf232530b1fffef67ac94d7001dddf821092a44fa94aaf1369ce2b962e3a",
+      "version": "20260920020036",
+      "state": "applied"
+    },
+    {
+      "name": "037_entitled_migration_runs",
+      "sha256": "b01f8ca139bcf149afb745d5c4d1f5277b728bae46beb6f4ec9d5c07f4794fcf",
+      "version": "20260920020037",
+      "state": "applied"
+    },
+    {
+      "name": "038_mapping_decisions",
+      "sha256": "74ee031b261e4ee1ed602ce95fe16c5412874e180f3b71856e2c11a6a44bb3fd",
+      "version": "20260920020038",
+      "state": "applied"
+    },
+    {
+      "name": "039_migration_test_checkout",
+      "sha256": "072d18f2e43a907a158203d175bfb6e3ece5fd2655e7bf82fb5f09f54b143ac2",
+      "version": "20260920020039",
+      "state": "applied"
+    },
+    {
+      "name": "040_agent_search_console",
+      "sha256": "f70b861ed846fc1dfe51e4c19753f6a93115cd565aded4e8150fa5f4936a07f1",
+      "version": "20260920020040",
+      "state": "applied"
+    },
+    {
+      "name": "041_artifact_deployments",
+      "sha256": "cdf08be97e04a868db665d56a29f883580afc3cd1d9a36670fa6b4c2fbf88f5d",
+      "version": "20260920020041",
+      "state": "applied"
+    },
+    {
+      "name": "042_subscription_allowances",
+      "sha256": "f10bd453152040e654bfbfc04991cca2eb7c73d1c2eae7125c5c8ca03ccd3388",
+      "version": "20260920020042",
+      "state": "applied"
+    },
+    {
+      "name": "043_included_verification",
+      "sha256": "4136aa5f684f9a798c318f28c3c52e01ed59a3ce8e8ed44eee9bd6c4c77056a4",
+      "version": "20260920020043",
+      "state": "applied"
+    },
+    {
+      "name": "044_resumable_inventory_discovery",
+      "sha256": "3a81635ee6cb02f2179c6798f7bbc3dabc2986f09819e33a47b0afda913711d5",
+      "version": "20260920020044",
+      "state": "applied"
+    },
+    {
+      "name": "045_recurring_monitoring",
+      "sha256": "b812e7152cc39035a67c6cf7460293af920ea2e5eaa74657d2554b784aa1111d",
+      "version": "20260920020045",
+      "state": "applied"
+    },
+    {
+      "name": "046_subscription_runtime",
+      "sha256": "998e6484c900a95c2e4f0ca4b8ecc38e1ea8c25d2104cf15fd71a7ea62509f8b",
+      "version": "20260920020046",
+      "state": "applied"
+    },
+    {
+      "name": "047_gsc_refresh_compare_and_set",
+      "sha256": "2dc58b810e0c3ab247018ed3d13a8a228373ac4faab6fd45346e7cfc8a0d7c55",
+      "version": "20260920020047",
+      "state": "applied"
+    },
+    {
+      "name": "048_studio_included_verification",
+      "sha256": "0279edcdc8d02d6967d2ec1b73c40abe66c2f10b5e22a1c37b756d7b79f668c2",
+      "version": "20260920020048",
+      "state": "applied"
+    },
+    {
+      "name": "049_subscription_checkout",
+      "sha256": "fa7f59cba4cf839211a271e009a7843c1eb1cc99eaec1a6e8a7453f387480d85",
+      "version": "20260920020049",
+      "state": "applied"
+    },
+    {
+      "name": "050_guarded_migration_engine_persistence",
+      "sha256": "41a1766addc57877c1950aa1c0eeeb579d4226f890a3971e8dc67089adffadc9",
+      "version": "20260920020050",
+      "state": "applied"
+    },
+    {
+      "name": "051_artifact_authority",
+      "sha256": "3b4016c5c225729efd4564dda8607ba42bbf7ba81dce40c6d1a436bb6fa1c48b",
+      "version": "20260920020051",
+      "state": "applied"
+    },
+    {
+      "name": "052_pivot_vector_candidate_fallback",
+      "sha256": "3142bcf1982a29c5641c1329b6e1701c3490ed0b5f4edcc0f4ef542d0a8a8e2b",
+      "version": "20260920020052",
+      "state": "applied"
+    },
+    {
+      "name": "053_pivot_privilege_hardening",
+      "sha256": "357d0dcf9db5c9e91dc28809130bbf8d0204fe12c6d131c0f37714fb741135f5",
+      "version": "20260920020053",
+      "state": "applied"
+    },
+    {
+      "name": "054_pivot_engine_evidence_mutation_fence",
+      "sha256": "fe9b957c2351e364bfa1df89cf67e1447f62a0888739a8743dddd9ae63ba3a70",
+      "version": "20260920020054",
+      "state": "applied"
+    },
+    {
+      "name": "055_pivot_parent_engine_cleanup",
+      "sha256": "f997426ce78fe7ffbc8ef4c673b1e9788715fbe1671e0aa8b4398c0780c26d88",
+      "version": "20260920020055",
+      "state": "applied"
+    },
+    {
+      "name": "056_exact_long_url_storage",
+      "sha256": "3c08647513846623e5ba7e2358954ecd1741f7f6b2093579ad2831640f3ca6a3",
+      "version": "20260920020056",
+      "state": "applied"
+    }
+  ],
+  "independent_history_readback": "All 24 exact original source comparisons returned already_applied; dry-run exit 0",
+  "preservation": {
+    "before_at": "2026-09-20T01:50:00.876203+00:00",
+    "after_at": "2026-09-20T01:54:04.878550+00:00",
+    "tables": 31,
+    "rows": 18568,
+    "original_columns_only": true,
+    "mismatched_tables": []
+  },
+  "catalog_postflight": {
+    "observed_at": "2026-09-20T01:55:12.514960+00:00",
+    "read_only": true,
+    "backfill": {
+      "records": 76,
+      "runs": 76,
+      "owned_sessions": 76,
+      "mismatches": 0
+    },
+    "exact_constraints": [
+      {
+        "conname": "gsc_migration_metrics_url_exact",
+        "convalidated": true
+      },
+      {
+        "conname": "migration_verification_items_source_url_exact",
+        "convalidated": true
+      },
+      {
+        "conname": "session_discovered_urls_inventory_url_exact",
+        "convalidated": true
+      },
+      {
+        "conname": "session_discovered_urls_session_side_url_exact",
+        "convalidated": true
+      }
+    ],
+    "replica_identity": {
+      "relreplident": "f"
+    },
+    "table_acl": [
+      {
+        "relname": "artifact_deployments",
+        "relrowsecurity": true,
+        "anon_table": false,
+        "anon_column": false,
+        "browser_write": false,
+        "browser_column_write": false,
+        "service_read": true,
+        "service_truncate": false
+      },
+      {
+        "relname": "gsc_agent_accounts",
+        "relrowsecurity": true,
+        "anon_table": false,
+        "anon_column": false,
+        "browser_write": false,
+        "browser_column_write": false,
+        "service_read": true,
+        "service_truncate": false
+      },
+      {
+        "relname": "gsc_agent_operations",
+        "relrowsecurity": true,
+        "anon_table": false,
+        "anon_column": false,
+        "browser_write": false,
+        "browser_column_write": false,
+        "service_read": true,
+        "service_truncate": false
+      },
+      {
+        "relname": "gsc_migration_metrics",
+        "relrowsecurity": true,
+        "anon_table": false,
+        "anon_column": false,
+        "browser_write": false,
+        "browser_column_write": false,
+        "service_read": true,
+        "service_truncate": false
+      },
+      {
+        "relname": "gsc_migration_selections",
+        "relrowsecurity": true,
+        "anon_table": false,
+        "anon_column": false,
+        "browser_write": false,
+        "browser_column_write": false,
+        "service_read": true,
+        "service_truncate": false
+      },
+      {
+        "relname": "inventory_snapshots",
+        "relrowsecurity": true,
+        "anon_table": false,
+        "anon_column": false,
+        "browser_write": false,
+        "browser_column_write": false,
+        "service_read": true,
+        "service_truncate": false
+      },
+      {
+        "relname": "migration_artifact_contents",
+        "relrowsecurity": true,
+        "anon_table": false,
+        "anon_column": false,
+        "browser_write": false,
+        "browser_column_write": false,
+        "service_read": true,
+        "service_truncate": false
+      },
+      {
+        "relname": "migration_artifact_mutations",
+        "relrowsecurity": true,
+        "anon_table": false,
+        "anon_column": false,
+        "browser_write": false,
+        "browser_column_write": false,
+        "service_read": true,
+        "service_truncate": false
+      },
+      {
+        "relname": "migration_artifacts",
+        "relrowsecurity": true,
+        "anon_table": false,
+        "anon_column": false,
+        "browser_write": false,
+        "browser_column_write": false,
+        "service_read": true,
+        "service_truncate": false
+      },
+      {
+        "relname": "migration_discovery_jobs",
+        "relrowsecurity": true,
+        "anon_table": false,
+        "anon_column": false,
+        "browser_write": false,
+        "browser_column_write": false,
+        "service_read": true,
+        "service_truncate": false
+      },
+      {
+        "relname": "migration_mapping_decision_events",
+        "relrowsecurity": true,
+        "anon_table": false,
+        "anon_column": false,
+        "browser_write": false,
+        "browser_column_write": false,
+        "service_read": true,
+        "service_truncate": false
+      },
+      {
+        "relname": "migration_mapping_decisions",
+        "relrowsecurity": true,
+        "anon_table": false,
+        "anon_column": false,
+        "browser_write": false,
+        "browser_column_write": false,
+        "service_read": true,
+        "service_truncate": false
+      },
+      {
+        "relname": "migration_monitor_alerts",
+        "relrowsecurity": true,
+        "anon_table": false,
+        "anon_column": false,
+        "browser_write": false,
+        "browser_column_write": false,
+        "service_read": true,
+        "service_truncate": false
+      },
+      {
+        "relname": "migration_monitor_issues",
+        "relrowsecurity": true,
+        "anon_table": false,
+        "anon_column": false,
+        "browser_write": false,
+        "browser_column_write": false,
+        "service_read": true,
+        "service_truncate": false
+      },
+      {
+        "relname": "migration_monitors",
+        "relrowsecurity": true,
+        "anon_table": false,
+        "anon_column": false,
+        "browser_write": false,
+        "browser_column_write": false,
+        "service_read": true,
+        "service_truncate": false
+      },
+      {
+        "relname": "migration_operations",
+        "relrowsecurity": true,
+        "anon_table": false,
+        "anon_column": false,
+        "browser_write": false,
+        "browser_column_write": false,
+        "service_read": true,
+        "service_truncate": false
+      },
+      {
+        "relname": "migration_price_policies",
+        "relrowsecurity": true,
+        "anon_table": false,
+        "anon_column": false,
+        "browser_write": false,
+        "browser_column_write": false,
+        "service_read": true,
+        "service_truncate": false
+      },
+      {
+        "relname": "migration_price_quotes",
+        "relrowsecurity": true,
+        "anon_table": false,
+        "anon_column": false,
+        "browser_write": false,
+        "browser_column_write": false,
+        "service_read": true,
+        "service_truncate": false
+      },
+      {
+        "relname": "migration_purchase_grants",
+        "relrowsecurity": true,
+        "anon_table": false,
+        "anon_column": false,
+        "browser_write": false,
+        "browser_column_write": false,
+        "service_read": true,
+        "service_truncate": false
+      },
+      {
+        "relname": "migration_records",
+        "relrowsecurity": true,
+        "anon_table": false,
+        "anon_column": false,
+        "browser_write": false,
+        "browser_column_write": false,
+        "service_read": true,
+        "service_truncate": false
+      },
+      {
+        "relname": "migration_run_failure_receipts",
+        "relrowsecurity": true,
+        "anon_table": false,
+        "anon_column": false,
+        "browser_write": false,
+        "browser_column_write": false,
+        "service_read": true,
+        "service_truncate": false
+      },
+      {
+        "relname": "migration_runs",
+        "relrowsecurity": true,
+        "anon_table": false,
+        "anon_column": false,
+        "browser_write": false,
+        "browser_column_write": false,
+        "service_read": true,
+        "service_truncate": false
+      },
+      {
+        "relname": "migration_studio_slots",
+        "relrowsecurity": true,
+        "anon_table": false,
+        "anon_column": false,
+        "browser_write": false,
+        "browser_column_write": false,
+        "service_read": true,
+        "service_truncate": false
+      },
+      {
+        "relname": "migration_studio_work_reservations",
+        "relrowsecurity": true,
+        "anon_table": false,
+        "anon_column": false,
+        "browser_write": false,
+        "browser_column_write": false,
+        "service_read": true,
+        "service_truncate": false
+      },
+      {
+        "relname": "migration_subscription_checkout_events",
+        "relrowsecurity": true,
+        "anon_table": false,
+        "anon_column": false,
+        "browser_write": false,
+        "browser_column_write": false,
+        "service_read": true,
+        "service_truncate": false
+      },
+      {
+        "relname": "migration_subscription_checkout_keys",
+        "relrowsecurity": true,
+        "anon_table": false,
+        "anon_column": false,
+        "browser_write": false,
+        "browser_column_write": false,
+        "service_read": true,
+        "service_truncate": false
+      },
+      {
+        "relname": "migration_subscription_checkouts",
+        "relrowsecurity": true,
+        "anon_table": false,
+        "anon_column": false,
+        "browser_write": false,
+        "browser_column_write": false,
+        "service_read": true,
+        "service_truncate": false
+      },
+      {
+        "relname": "migration_subscription_customers",
+        "relrowsecurity": true,
+        "anon_table": false,
+        "anon_column": false,
+        "browser_write": false,
+        "browser_column_write": false,
+        "service_read": true,
+        "service_truncate": false
+      },
+      {
+        "relname": "migration_subscription_site_slots",
+        "relrowsecurity": true,
+        "anon_table": false,
+        "anon_column": false,
+        "browser_write": false,
+        "browser_column_write": false,
+        "service_read": true,
+        "service_truncate": false
+      },
+      {
+        "relname": "migration_test_checkout_events",
+        "relrowsecurity": true,
+        "anon_table": false,
+        "anon_column": false,
+        "browser_write": false,
+        "browser_column_write": false,
+        "service_read": true,
+        "service_truncate": false
+      },
+      {
+        "relname": "migration_test_checkouts",
+        "relrowsecurity": true,
+        "anon_table": false,
+        "anon_column": false,
+        "browser_write": false,
+        "browser_column_write": false,
+        "service_read": true,
+        "service_truncate": false
+      },
+      {
+        "relname": "migration_test_subscription_events",
+        "relrowsecurity": true,
+        "anon_table": false,
+        "anon_column": false,
+        "browser_write": false,
+        "browser_column_write": false,
+        "service_read": true,
+        "service_truncate": false
+      },
+      {
+        "relname": "migration_test_subscription_periods",
+        "relrowsecurity": true,
+        "anon_table": false,
+        "anon_column": false,
+        "browser_write": false,
+        "browser_column_write": false,
+        "service_read": true,
+        "service_truncate": false
+      },
+      {
+        "relname": "migration_test_subscriptions",
+        "relrowsecurity": true,
+        "anon_table": false,
+        "anon_column": false,
+        "browser_write": false,
+        "browser_column_write": false,
+        "service_read": true,
+        "service_truncate": false
+      },
+      {
+        "relname": "migration_verification_items",
+        "relrowsecurity": true,
+        "anon_table": false,
+        "anon_column": false,
+        "browser_write": false,
+        "browser_column_write": false,
+        "service_read": true,
+        "service_truncate": false
+      },
+      {
+        "relname": "migration_verification_request_keys",
+        "relrowsecurity": true,
+        "anon_table": false,
+        "anon_column": false,
+        "browser_write": false,
+        "browser_column_write": false,
+        "service_read": true,
+        "service_truncate": false
+      },
+      {
+        "relname": "migration_verifications",
+        "relrowsecurity": true,
+        "anon_table": false,
+        "anon_column": false,
+        "browser_write": false,
+        "browser_column_write": false,
+        "service_read": true,
+        "service_truncate": false
+      }
+    ],
+    "function_acl": [
+      {
+        "signature": "activate_migration_monitor(uuid)",
+        "proname": "activate_migration_monitor",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": true
+      },
+      {
+        "signature": "advance_migration_selection_revision()",
+        "proname": "advance_migration_selection_revision",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": false
+      },
+      {
+        "signature": "apply_verified_migration_test_checkout_event(uuid,text,text,text,text,text,integer,text)",
+        "proname": "apply_verified_migration_test_checkout_event",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": true
+      },
+      {
+        "signature": "attach_migration_test_checkout(uuid,text,text)",
+        "proname": "attach_migration_test_checkout",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": true
+      },
+      {
+        "signature": "attach_subscription_checkout(uuid,uuid,text,text)",
+        "proname": "attach_subscription_checkout",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": true
+      },
+      {
+        "signature": "attach_subscription_customer(uuid,text)",
+        "proname": "attach_subscription_customer",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": true
+      },
+      {
+        "signature": "authorize_migration_run_dispatch(uuid,uuid,text,integer,text)",
+        "proname": "authorize_migration_run_dispatch",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": true
+      },
+      {
+        "signature": "checkpoint_inventory_discovery(uuid,uuid,uuid,uuid,integer,jsonb,jsonb,text)",
+        "proname": "checkpoint_inventory_discovery",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": true
+      },
+      {
+        "signature": "claim_inventory_discovery(uuid,uuid,uuid)",
+        "proname": "claim_inventory_discovery",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": true
+      },
+      {
+        "signature": "claim_monitor_alert(text)",
+        "proname": "claim_monitor_alert",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": true
+      },
+      {
+        "signature": "claim_monitoring_batch(text,integer)",
+        "proname": "claim_monitoring_batch",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": true
+      },
+      {
+        "signature": "claim_next_job(text,timestamp with time zone)",
+        "proname": "claim_next_job",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": true
+      },
+      {
+        "signature": "claim_verification_batch(text,integer)",
+        "proname": "claim_verification_batch",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": true
+      },
+      {
+        "signature": "complete_studio_migration_work(uuid,uuid)",
+        "proname": "complete_studio_migration_work",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": true
+      },
+      {
+        "signature": "complete_verification_item(uuid,integer,text,integer,text,jsonb)",
+        "proname": "complete_verification_item",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": true
+      },
+      {
+        "signature": "consume_gsc_agent_state(text)",
+        "proname": "consume_gsc_agent_state",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": true
+      },
+      {
+        "signature": "create_migration_price_quote(uuid,uuid,uuid,uuid,text)",
+        "proname": "create_migration_price_quote",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": true
+      },
+      {
+        "signature": "delete_durable_migrations_before_auth_user()",
+        "proname": "delete_durable_migrations_before_auth_user",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": false
+      },
+      {
+        "signature": "deny_included_verification(uuid)",
+        "proname": "deny_included_verification",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": false
+      },
+      {
+        "signature": "erase_gsc_agent_credentials()",
+        "proname": "erase_gsc_agent_credentials",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": false
+      },
+      {
+        "signature": "expire_verified_subscription_checkout(uuid,text,text,text,text)",
+        "proname": "expire_verified_subscription_checkout",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": true
+      },
+      {
+        "signature": "finalize_migration_infrastructure_failure(uuid,uuid,text,integer,text)",
+        "proname": "finalize_migration_infrastructure_failure",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": true
+      },
+      {
+        "signature": "finalize_migration_run_session(uuid,uuid,text,integer,text,text)",
+        "proname": "finalize_migration_run_session",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": true
+      },
+      {
+        "signature": "finish_gsc_agent_operation(uuid,uuid,jsonb,text,jsonb,jsonb)",
+        "proname": "finish_gsc_agent_operation",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": true
+      },
+      {
+        "signature": "finish_monitor_alert(uuid,text,integer,text,boolean)",
+        "proname": "finish_monitor_alert",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": true
+      },
+      {
+        "signature": "get_migration_price_quote(uuid,uuid,uuid)",
+        "proname": "get_migration_price_quote",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": true
+      },
+      {
+        "signature": "get_migration_purchase_grant(uuid,uuid,uuid)",
+        "proname": "get_migration_purchase_grant",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": true
+      },
+      {
+        "signature": "get_migration_selection_revision(uuid,uuid,uuid)",
+        "proname": "get_migration_selection_revision",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": true
+      },
+      {
+        "signature": "get_migration_test_checkout(uuid,uuid,uuid)",
+        "proname": "get_migration_test_checkout",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": true
+      },
+      {
+        "signature": "get_migration_test_subscription(uuid,uuid)",
+        "proname": "get_migration_test_subscription",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": true
+      },
+      {
+        "signature": "get_studio_work_reservation(uuid,uuid)",
+        "proname": "get_studio_work_reservation",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": true
+      },
+      {
+        "signature": "get_subscription_checkout(uuid,uuid)",
+        "proname": "get_subscription_checkout",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": true
+      },
+      {
+        "signature": "get_subscription_monitoring_site(uuid,uuid)",
+        "proname": "get_subscription_monitoring_site",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": true
+      },
+      {
+        "signature": "guard_migration_engine_insert()",
+        "proname": "guard_migration_engine_insert",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": false
+      },
+      {
+        "signature": "included_verification_entitled(migration_verifications)",
+        "proname": "included_verification_entitled",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": false
+      },
+      {
+        "signature": "issue_free_migration_grant(uuid,uuid,uuid)",
+        "proname": "issue_free_migration_grant",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": true
+      },
+      {
+        "signature": "list_migration_matches(uuid,uuid,uuid,text,jsonb,integer)",
+        "proname": "list_migration_matches",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": true
+      },
+      {
+        "signature": "lock_migration_engine_attempt(uuid,uuid,text,integer)",
+        "proname": "lock_migration_engine_attempt",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": false
+      },
+      {
+        "signature": "manage_migration_monitor(uuid,uuid,text,uuid,uuid,uuid,uuid,text,text,integer)",
+        "proname": "manage_migration_monitor",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": true
+      },
+      {
+        "signature": "match_migration_pages(vector,text,uuid,integer,double precision,double precision)",
+        "proname": "match_migration_pages",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": true
+      },
+      {
+        "signature": "migration_engine_url_belongs(uuid,text,text)",
+        "proname": "migration_engine_url_belongs",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": false
+      },
+      {
+        "signature": "migration_grant_summary(migration_purchase_grants)",
+        "proname": "migration_grant_summary",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": true
+      },
+      {
+        "signature": "migration_quote_summary(migration_price_quotes)",
+        "proname": "migration_quote_summary",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": true
+      },
+      {
+        "signature": "migration_subscription_summary(migration_test_subscriptions)",
+        "proname": "migration_subscription_summary",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": true
+      },
+      {
+        "signature": "migration_test_checkout_summary(migration_test_checkouts)",
+        "proname": "migration_test_checkout_summary",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": true
+      },
+      {
+        "signature": "monitor_alert_counts(uuid)",
+        "proname": "monitor_alert_counts",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": true
+      },
+      {
+        "signature": "monitor_entitlement(uuid)",
+        "proname": "monitor_entitlement",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": true
+      },
+      {
+        "signature": "monitor_observed_clicks(uuid,text)",
+        "proname": "monitor_observed_clicks",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": true
+      },
+      {
+        "signature": "monitor_verified_email(uuid)",
+        "proname": "monitor_verified_email",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": true
+      },
+      {
+        "signature": "persist_migration_run_embedding(uuid,uuid,text,integer,text,text,jsonb,text,text)",
+        "proname": "persist_migration_run_embedding",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": true
+      },
+      {
+        "signature": "persist_migration_run_mapping(uuid,uuid,text,integer,text,text,double precision,text,boolean)",
+        "proname": "persist_migration_run_mapping",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": true
+      },
+      {
+        "signature": "plan_migration(uuid,text,jsonb)",
+        "proname": "plan_migration",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": true
+      },
+      {
+        "signature": "preserve_mcp_session_inputs()",
+        "proname": "preserve_mcp_session_inputs",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": false
+      },
+      {
+        "signature": "preserve_migration_checkout_bindings()",
+        "proname": "preserve_migration_checkout_bindings",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": false
+      },
+      {
+        "signature": "preserve_migration_operation_identity()",
+        "proname": "preserve_migration_operation_identity",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": false
+      },
+      {
+        "signature": "preserve_migration_price_bindings()",
+        "proname": "preserve_migration_price_bindings",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": false
+      },
+      {
+        "signature": "preserve_monitor_scope()",
+        "proname": "preserve_monitor_scope",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": false
+      },
+      {
+        "signature": "preserve_run_failure_receipt()",
+        "proname": "preserve_run_failure_receipt",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": false
+      },
+      {
+        "signature": "preserve_subscription_authority()",
+        "proname": "preserve_subscription_authority",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": false
+      },
+      {
+        "signature": "preserve_subscription_checkout_scope()",
+        "proname": "preserve_subscription_checkout_scope",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": false
+      },
+      {
+        "signature": "preserve_verification_scope()",
+        "proname": "preserve_verification_scope",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": false
+      },
+      {
+        "signature": "prevent_artifact_deployment_identity_mutation()",
+        "proname": "prevent_artifact_deployment_identity_mutation",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": false
+      },
+      {
+        "signature": "prevent_mapping_decision_event_mutation()",
+        "proname": "prevent_mapping_decision_event_mutation",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": false
+      },
+      {
+        "signature": "prevent_migration_artifact_content_mutation()",
+        "proname": "prevent_migration_artifact_content_mutation",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": false
+      },
+      {
+        "signature": "prevent_migration_artifact_mutation()",
+        "proname": "prevent_migration_artifact_mutation",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": false
+      },
+      {
+        "signature": "prevent_published_inventory_mutation()",
+        "proname": "prevent_published_inventory_mutation",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": false
+      },
+      {
+        "signature": "prevent_published_inventory_url_mutation()",
+        "proname": "prevent_published_inventory_url_mutation",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": false
+      },
+      {
+        "signature": "publish_artifact_deployment(uuid,uuid,uuid,text,jsonb)",
+        "proname": "publish_artifact_deployment",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": true
+      },
+      {
+        "signature": "publish_inventory_import(uuid,uuid,text,jsonb)",
+        "proname": "publish_inventory_import",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": true
+      },
+      {
+        "signature": "publish_migration_artifact(uuid,uuid,uuid,text,jsonb,text)",
+        "proname": "publish_migration_artifact",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": true
+      },
+      {
+        "signature": "reconcile_monitor_sweep(uuid)",
+        "proname": "reconcile_monitor_sweep",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": true
+      },
+      {
+        "signature": "record_migration_grant_success(uuid,uuid,uuid)",
+        "proname": "record_migration_grant_success",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": true
+      },
+      {
+        "signature": "record_monitoring_item(uuid,integer,text,integer,text,jsonb)",
+        "proname": "record_monitoring_item",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": true
+      },
+      {
+        "signature": "record_verified_subscription_checkout_period(uuid,uuid,text,text,text,text,timestamp with time zone,timestamp with time zone,text,integer,text,text,text,timestamp with time zone,boolean,uuid,text)",
+        "proname": "record_verified_subscription_checkout_period",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": true
+      },
+      {
+        "signature": "record_verified_subscription_period(uuid,text,text,text,text,timestamp with time zone,timestamp with time zone,text,integer,text,text,text,timestamp with time zone,boolean,uuid)",
+        "proname": "record_verified_subscription_period",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": true
+      },
+      {
+        "signature": "record_verified_test_migration_payment(uuid,uuid,uuid,text,text,text,integer,text,boolean)",
+        "proname": "record_verified_test_migration_payment",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": true
+      },
+      {
+        "signature": "refresh_migration_gsc_access_token(uuid,text,text,timestamp with time zone)",
+        "proname": "refresh_migration_gsc_access_token",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": true
+      },
+      {
+        "signature": "refresh_migration_plan_readiness()",
+        "proname": "refresh_migration_plan_readiness",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": false
+      },
+      {
+        "signature": "release_failed_studio_migration_work(uuid,uuid)",
+        "proname": "release_failed_studio_migration_work",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": true
+      },
+      {
+        "signature": "reserve_gsc_agent_operation(uuid,text,text,jsonb,text)",
+        "proname": "reserve_gsc_agent_operation",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": true
+      },
+      {
+        "signature": "reserve_included_verification(uuid,uuid,uuid,uuid,text)",
+        "proname": "reserve_included_verification",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": true
+      },
+      {
+        "signature": "reserve_migration_operation(uuid,uuid,text,text,text)",
+        "proname": "reserve_migration_operation",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": true
+      },
+      {
+        "signature": "reserve_migration_run(uuid,uuid,uuid,uuid,uuid,text,uuid,uuid,text,integer,integer)",
+        "proname": "reserve_migration_run",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": true
+      },
+      {
+        "signature": "reserve_migration_test_checkout(uuid,uuid,uuid,uuid,text)",
+        "proname": "reserve_migration_test_checkout",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": true
+      },
+      {
+        "signature": "reserve_studio_migration_run(uuid,uuid,uuid,uuid,uuid,text,uuid,uuid,text,integer,integer)",
+        "proname": "reserve_studio_migration_run",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": true
+      },
+      {
+        "signature": "reserve_studio_migration_slot(uuid,uuid,uuid,uuid,uuid,text)",
+        "proname": "reserve_studio_migration_slot",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": true
+      },
+      {
+        "signature": "reserve_subscription_checkout(uuid,text,uuid,text,boolean,text)",
+        "proname": "reserve_subscription_checkout",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": true
+      },
+      {
+        "signature": "reserve_subscription_monitoring_site(uuid,uuid,uuid,text)",
+        "proname": "reserve_subscription_monitoring_site",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": true
+      },
+      {
+        "signature": "resolve_migration_match_decisions(uuid,uuid,uuid,uuid,text,jsonb)",
+        "proname": "resolve_migration_match_decisions",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": true
+      },
+      {
+        "signature": "schedule_monitor_sweeps(integer)",
+        "proname": "schedule_monitor_sweeps",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": true
+      },
+      {
+        "signature": "select_studio_run_subscription(uuid,uuid,uuid,uuid,uuid,text,uuid,integer,integer)",
+        "proname": "select_studio_run_subscription",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": true
+      },
+      {
+        "signature": "set_subscription_monitoring_site_state(uuid,uuid,text)",
+        "proname": "set_subscription_monitoring_site_state",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": true
+      },
+      {
+        "signature": "start_inventory_discovery(uuid,uuid,text,text,jsonb,jsonb)",
+        "proname": "start_inventory_discovery",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": true
+      },
+      {
+        "signature": "stop_monitoring_sweeps(uuid,text)",
+        "proname": "stop_monitoring_sweeps",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": true
+      },
+      {
+        "signature": "studio_artifact_entitlement(uuid,uuid,uuid)",
+        "proname": "studio_artifact_entitlement",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": true
+      },
+      {
+        "signature": "studio_run_entitlement(uuid,uuid,uuid)",
+        "proname": "studio_run_entitlement",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": true
+      },
+      {
+        "signature": "subscription_checkout_summary(migration_subscription_checkouts)",
+        "proname": "subscription_checkout_summary",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": false
+      },
+      {
+        "signature": "subscription_site_summary(migration_subscription_site_slots)",
+        "proname": "subscription_site_summary",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": true
+      },
+      {
+        "signature": "subscription_work_summary(migration_studio_work_reservations)",
+        "proname": "subscription_work_summary",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": true
+      },
+      {
+        "signature": "sync_mcp_queue_failure_state()",
+        "proname": "sync_mcp_queue_failure_state",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": false
+      },
+      {
+        "signature": "validate_migration_run_grant(uuid,uuid,uuid,uuid,uuid,uuid)",
+        "proname": "validate_migration_run_grant",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": false
+      },
+      {
+        "signature": "validate_migration_run_inputs()",
+        "proname": "validate_migration_run_inputs",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": false
+      },
+      {
+        "signature": "validate_studio_run_authority(uuid,uuid,uuid,uuid,uuid,boolean)",
+        "proname": "validate_studio_run_authority",
+        "anon_execute": false,
+        "browser_execute": false,
+        "service_execute": false
+      }
+    ],
+    "billing_033": [
+      {
+        "relname": "agency_usage_events",
+        "relrowsecurity": true,
+        "anon_select": false,
+        "browser_select": false,
+        "service_select": true
+      },
+      {
+        "relname": "deep_match_previews",
+        "relrowsecurity": true,
+        "anon_select": false,
+        "browser_select": false,
+        "service_select": true
+      },
+      {
+        "relname": "project_pricing_quotes",
+        "relrowsecurity": true,
+        "anon_select": false,
+        "browser_select": false,
+        "service_select": true
+      },
+      {
+        "relname": "stripe_webhook_events",
+        "relrowsecurity": true,
+        "anon_select": false,
+        "browser_select": false,
+        "service_select": true
+      }
+    ],
+    "claim_signature": [
+      {
+        "result": "TABLE(id uuid, user_id text, project_name text, old_urls jsonb, new_urls jsonb, attempt_count integer, pipeline_type text, is_preview boolean, source_session_id uuid, mcp_run_id uuid)"
+      }
+    ],
+    "queue": [
+      {
+        "status": "completed",
+        "n": 143
+      },
+      {
+        "status": "permanently_failed",
+        "n": 1
+      }
+    ],
+    "failures": [],
+    "passed": true
+  },
+  "hosted_service": {
+    "ready": true,
+    "credential_source": "live worker environment",
+    "checks": [
+      {
+        "table": "migration_records",
+        "status": 200,
+        "zero_rows": true,
+        "code": null
+      },
+      {
+        "table": "migration_runs",
+        "status": 200,
+        "zero_rows": true,
+        "code": null
+      },
+      {
+        "table": "inventory_snapshots",
+        "status": 200,
+        "zero_rows": true,
+        "code": null
+      },
+      {
+        "table": "migration_price_quotes",
+        "status": 200,
+        "zero_rows": true,
+        "code": null
+      },
+      {
+        "table": "migration_purchase_grants",
+        "status": 200,
+        "zero_rows": true,
+        "code": null
+      },
+      {
+        "table": "project_pricing_quotes",
+        "status": 200,
+        "zero_rows": true,
+        "code": null
+      }
+    ],
+    "record_census": {
+      "status": 200,
+      "rows": 76,
+      "distinct_owners": 9
+    }
+  },
+  "hosted_anon": [
+    {
+      "role": "anon",
+      "table": "migration_records",
+      "status": 401,
+      "code": "42501",
+      "passed": true
+    },
+    {
+      "role": "anon",
+      "table": "migration_runs",
+      "status": 401,
+      "code": "42501",
+      "passed": true
+    },
+    {
+      "role": "anon",
+      "table": "inventory_snapshots",
+      "status": 401,
+      "code": "42501",
+      "passed": true
+    },
+    {
+      "role": "anon",
+      "table": "migration_price_quotes",
+      "status": 401,
+      "code": "42501",
+      "passed": true
+    },
+    {
+      "role": "anon",
+      "table": "migration_purchase_grants",
+      "status": 401,
+      "code": "42501",
+      "passed": true
+    },
+    {
+      "role": "anon",
+      "table": "project_pricing_quotes",
+      "status": 401,
+      "code": "42501",
+      "passed": true
+    }
+  ],
+  "hosted_owner": {
+    "method": "Existing authenticated browser session; direct hosted PostgREST GET only; no tokens retained",
+    "checks": [
+      {
+        "table": "migration_records",
+        "status": 200,
+        "rows": 15,
+        "all_visible_rows_owned": true,
+        "other_owner_query_status": 200,
+        "other_owner_visible_rows": 0
+      },
+      {
+        "table": "migration_runs",
+        "status": 200,
+        "rows": 15,
+        "all_visible_rows_owned": true,
+        "other_owner_query_status": 200,
+        "other_owner_visible_rows": 0
+      }
+    ],
+    "non_vacuous": "Live service census sees 76 records across 9 owners; browser sees 15 owned records and zero others"
+  },
+  "limits": [
+    "Pivot flags remain off; no full new-product acceptance claimed",
+    "No content job, paid checkout, account settings or compute change in this SQL stage",
+    "31 original public tables fingerprinted; auth/provider schemas are outside the data comparison",
+    "The local source checkout service credential returned 401; repeated service checks used the actual live worker credential and passed. No credential was changed or printed.",
+    "No exact production transaction duration was instrumented; do not substitute local 165 ms rehearsal duration"
+  ]
+}

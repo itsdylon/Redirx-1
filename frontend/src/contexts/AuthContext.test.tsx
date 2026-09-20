@@ -217,7 +217,7 @@ describe('AuthProvider SDK session bridge', () => {
     await act(async () => {
       emit('SIGNED_OUT', null);
       profile.resolve(reply({ user: { id: 'user-1', email: 'user-1@example.test' } }));
-      await expect(login).rejects.toMatchObject({ code: 'auth_invalid_refresh_token' });
+      await expect(login).rejects.toThrow('Sign-in changed in another tab');
     });
     expect(auth.user).toBeNull();
     expect(localStorage.getItem('refresh_token')).toBeNull();
@@ -253,13 +253,70 @@ describe('AuthProvider SDK session bridge', () => {
     expect(auth.user?.id).toBe('user-1');
   });
 
-  it('preserves the verified login identity fallback when profile loading is unavailable', async () => {
+  it('keeps the authenticated session without exposing fallback plan identity when profile loading is unavailable', async () => {
     await mount();
     fetchMock.mockImplementation(async (url: string) => url.endsWith('/me') ? reply({}, 503) : reply({ access_token: 'access-login', refresh_token: 'refresh-login', user_id: 'user-1', email: 'user-1@example.test' }));
-    await act(async () => { await auth.login('user-1@example.test', 'fixture'); });
-    expect(auth.user).toEqual({ id: 'user-1', email: 'user-1@example.test' });
+    await act(async () => { await expect(auth.login('user-1@example.test', 'fixture')).rejects.toMatchObject({ code: 'auth_profile_load_failed' }); });
+    expect(auth.user).toBeNull();
+    expect(auth.authError).toContain('Your sign-in is saved');
     expect(localStorage.getItem(AUTH_STORAGE_KEY)).not.toBeNull();
     expect(mocks.signOut).not.toHaveBeenCalled();
+  });
+
+  it.each([401, 429, 500, 503])('retains valid SDK auth on profile HTTP%s and recovers through an explicit retry', async status => {
+    sdkSession = session('valid'); localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(sdkSession));
+    fetchMock.mockResolvedValueOnce(reply({}, status));
+    await mount();
+    expect(auth.user).toBeNull(); expect(auth.authError).toContain('Your sign-in is saved');
+    expect(localStorage.getItem(AUTH_STORAGE_KEY)).not.toBeNull();
+    expect(localStorage.getItem('refresh_token')).toBe('refresh-valid');
+    expect(mocks.signOut).not.toHaveBeenCalled();
+    await act(async () => { await auth.retryAuth(); });
+    expect(auth.user?.plan).toBe('free'); expect(auth.authError).toBeNull();
+    expect(mocks.refreshSession).not.toHaveBeenCalled();
+  });
+
+  it('retains a valid session on network and mismatched-profile errors without exposing another user', async () => {
+    sdkSession = session('valid');
+    fetchMock.mockRejectedValueOnce(new Error('offline'));
+    await mount();
+    expect(auth.authError).toBeTruthy(); expect(mocks.signOut).not.toHaveBeenCalled();
+    fetchMock.mockResolvedValueOnce(reply({ user: { id: 'somebody-else', plan: 'enterprise', is_admin: true } }));
+    await act(async () => { await auth.retryAuth(); });
+    expect(auth.user).toBeNull(); expect(auth.authError).toBeTruthy();
+    expect(mocks.signOut).not.toHaveBeenCalled();
+    await act(async () => { await auth.logout(); });
+    expect(auth.authError).toBeNull(); expect(localStorage.getItem(AUTH_STORAGE_KEY)).toBeNull();
+  });
+
+  it('discards an old profile after a new identity broadcast without revoking that newer session', async () => {
+    await mount();
+    const oldProfile = deferred<Response>();
+    const newProfile = deferred<Response>();
+    let entered = false;
+    fetchMock.mockImplementation(async (url: string, options?: RequestInit) => {
+      if (url.endsWith('/me')) {
+        const token = (options?.headers as Record<string, string>).Authorization;
+        if (token === 'Bearer access-login') { entered = true; return oldProfile.promise; }
+        return newProfile.promise;
+      }
+      return reply({ access_token: 'access-login', refresh_token: 'refresh-login', user_id: 'user-1', email: 'user-1@example.test' });
+    });
+    let login!: Promise<void>;
+    act(() => { login = auth.login('user-1@example.test', 'fixture'); });
+    await waitFor(() => expect(entered).toBe(true));
+    await act(async () => {
+      emit('SIGNED_IN', session('newer-tab', 'newer-user'));
+      oldProfile.resolve(reply({ user: { id: 'user-1', email: 'user-1@example.test' } }));
+      await expect(login).rejects.toThrow('Sign-in changed in another tab');
+    });
+    expect(auth.loading).toBe(true); expect(auth.user).toBeNull();
+    expect(mocks.signOut).not.toHaveBeenCalled();
+    expect(localStorage.getItem('refresh_token')).toBe('refresh-newer-tab');
+    await act(async () => { newProfile.resolve(reply({ user: { id: 'newer-user', email: 'newer-user@example.test', plan: 'free' } })); });
+    await waitFor(() => expect(auth.loading).toBe(false));
+    expect(auth.user?.id).toBe('newer-user'); expect(auth.authError).toBeNull();
+    expect(sdkSession?.user.id).toBe('newer-user');
   });
 
 });

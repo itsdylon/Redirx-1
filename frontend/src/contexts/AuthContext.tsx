@@ -25,6 +25,8 @@ interface RegisterResult {
 interface AuthContextType {
   user: User | null;
   loading: boolean;
+  authError: string | null;
+  retryAuth: () => Promise<void>;
   login: (email: string, password: string) => Promise<void>;
   register: (email: string, password: string, fullName: string) => Promise<RegisterResult>;
   startOAuth: (provider: OAuthProvider, redirectPath?: string, source?: string) => Promise<void>;
@@ -34,14 +36,27 @@ interface AuthContextType {
   refreshSession: () => Promise<void>;
 }
 
+class ProfileLoadError extends Error {
+  readonly code = 'auth_profile_load_failed';
+  constructor(readonly revision: number) {
+    super('Unable to load your profile right now. Your sign-in is saved. Please try again.');
+  }
+}
+class SupersededSessionError extends Error {
+  constructor() { super('Sign-in changed in another tab. Continue with the current session.'); }
+}
+
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [profilePending, setProfilePending] = useState(false);
   const posthog = usePostHog();
 
   const currentSession = useRef<Session | null>(null);
+  const sessionRevision = useRef(0);
   const userProfile = useRef<User | null>(null);
   const publishUser = (next: User | null) => { userProfile.current = next; setUser(next); };
   const mutationQueue = useRef<Promise<unknown>>(Promise.resolve());
@@ -57,15 +72,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const mirrorSession = (session: Session | null): void => {
+    if (currentSession.current?.access_token !== session?.access_token || currentSession.current?.user.id !== session?.user.id) {
+      sessionRevision.current++;
+      if (currentSession.current?.user.id !== session?.user.id) setAuthError(null);
+    }
     currentSession.current = session;
     if (session) {
       localStorage.setItem('access_token', session.access_token);
       localStorage.setItem('refresh_token', session.refresh_token);
-      if (userProfile.current?.id !== session.user.id) publishUser(null);
+      if (userProfile.current?.id !== session.user.id) {
+        publishUser(null);
+        setProfilePending(true);
+      }
     } else {
       localStorage.removeItem('access_token');
       localStorage.removeItem('refresh_token');
       publishUser(null);
+      setProfilePending(false);
     }
   };
 
@@ -90,29 +113,44 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     status: 401,
   });
 
-  const hydrateUser = async (session: Session, fallbackUser?: User): Promise<void> => {
+  const handleSessionFailure = async (error: unknown): Promise<Error> => {
+    if (error instanceof SupersededSessionError) return error;
+    if (error instanceof ProfileLoadError) {
+      if (sessionRevision.current === error.revision) {
+        publishUser(null);
+        setAuthError(error.message);
+        setProfilePending(false);
+      }
+      return error;
+    }
+    await clearSession().catch(() => undefined);
+    return sessionError();
+  };
+
+  const hydrateUser = async (session: Session): Promise<void> => {
+    const revision = sessionRevision.current;
     let profile: User | undefined;
     try {
       const response = await fetch(`${API_BASE_URL}/api/auth/me`, {
         headers: { Authorization: `Bearer ${session.access_token}` },
       });
       if (response.ok) profile = (await response.json()).user;
-    } catch { /* Login can retain its verified backend identity without a profile. */ }
+    } catch { /* A profile outage must not revoke a valid SDK session. */ }
     // Never apply an old profile after logout, a refresh, or an identity change.
     if (currentSession.current?.access_token !== session.access_token) {
       const latest = currentSession.current;
-      if (!latest || latest.user.id !== session.user.id) throw sessionError();
-      return hydrateUser(latest, fallbackUser);
+      if (!latest || latest.user.id !== session.user.id) throw new SupersededSessionError();
+      return hydrateUser(latest);
     }
-    const authenticatedUser = profile || fallbackUser;
-    if (!authenticatedUser || authenticatedUser.id !== session.user.id) throw sessionError();
-    publishUser(authenticatedUser);
+    if (!profile || profile.id !== session.user.id) throw new ProfileLoadError(revision);
+    publishUser(profile);
+    setAuthError(null);
+    setProfilePending(false);
   };
 
   const applySessionTokens = async (
     accessToken: string,
     refreshToken: string,
-    fallbackUser?: User,
   ): Promise<void> => {
     try {
       const { data, error } = await supabase.auth.setSession({
@@ -122,10 +160,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // setSession may rotate expired credentials: persist its returned tokens,
       // never the input tokens. No user/consent readiness precedes this await.
       mirrorSession(data.session);
-      await hydrateUser(data.session, fallbackUser);
-    } catch {
-      await clearSession().catch(() => undefined);
-      throw sessionError();
+      await hydrateUser(data.session);
+    } catch (error) {
+      throw await handleSessionFailure(error);
     }
   };
 
@@ -152,7 +189,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           if (currentSession.current?.access_token !== session.access_token) return;
           if (userProfile.current?.id === session.user.id) return;
           try { await hydrateUser(session); }
-          catch { await clearSession().catch(() => undefined); }
+          catch (error) { await handleSessionFailure(error); }
         });
       }
     });
@@ -178,8 +215,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           } else {
             mirrorSession(null);
           }
-        } catch {
-          await clearSession().catch(() => undefined);
+        } catch (error) {
+          await handleSessionFailure(error);
         } finally {
           setLoading(false);
         }
@@ -206,7 +243,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await applySessionTokens(
       data.access_token,
       data.refresh_token,
-      { id: data.user_id, email: data.email }
     );
   });
 
@@ -234,7 +270,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await applySessionTokens(
       data.access_token,
       data.refresh_token,
-      { id: data.user_id, email: data.email }
     );
 
     return {
@@ -355,9 +390,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (error || !data.session) throw sessionError();
         mirrorSession(data.session);
         await hydrateUser(data.session);
-      } catch {
-        await clearSession().catch(() => undefined);
-        throw sessionError();
+      } catch (error) {
+        throw await handleSessionFailure(error);
       }
     });
     refreshInFlight.current = pending;
@@ -365,10 +399,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return pending;
   };
 
+  const retryAuth = () => enqueue(async () => {
+    setLoading(true);
+    try {
+      const { data: { session }, error } = await supabase.auth.getSession();
+      if (error) throw sessionError();
+      mirrorSession(session);
+      if (session) await hydrateUser(session);
+      else setAuthError(null);
+    } catch (error) {
+      await handleSessionFailure(error);
+    } finally {
+      setLoading(false);
+    }
+  });
+
   return (
     <AuthContext.Provider value={{
       user,
-      loading,
+      loading: loading || profilePending,
+      authError,
+      retryAuth,
       login,
       register,
       startOAuth,

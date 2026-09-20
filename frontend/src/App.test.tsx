@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import App from './App';
 
@@ -241,5 +242,40 @@ describe('actual pivot retirement routes', () => {
     expect(await screen.findByText('Login Page')).toBeInTheDocument();
     const current = new URL(screen.getByLabelText('Current route').textContent || '/login', 'https://fixture.invalid');
     expect(current.searchParams.get('redirect')).toBe(target);
+  });
+});
+
+
+describe('profile retry route barrier', () => {
+  it('keeps the consent deep link through profile failure and retry, without mounting consent or login early', async () => {
+    const retryAuth = vi.fn(); const logout = vi.fn();
+    const path = '/oauth/consent?authorization_id=fixture';
+    const Location = () => { const location = useLocation(); return <output>{location.pathname + location.search}</output>; };
+    const tree = () => <MemoryRouter initialEntries={[path]}><App pivotEnabled /><Location /></MemoryRouter>;
+    mockUseAuth.mockReturnValue({ user: null, loading: false, authError: 'Unable to load your profile right now. Your sign-in is saved. Please try again.', retryAuth, logout });
+    const view = render(tree());
+    expect(screen.getByRole('alert')).toHaveTextContent('Your sign-in is saved');
+    expect(screen.queryByText('OAuth Consent Page')).not.toBeInTheDocument();
+    expect(screen.queryByText('Login Page')).not.toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent(path);
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Try again' }));
+    expect(retryAuth).toHaveBeenCalledTimes(1); expect(logout).not.toHaveBeenCalled();
+    mockUseAuth.mockReturnValue({ user: null, loading: true, authError: null, retryAuth, logout });
+    view.rerender(tree());
+    expect(screen.getByText('Loading...')).toBeInTheDocument();
+    expect(screen.queryByText('OAuth Consent Page')).not.toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent(path);
+    mockUseAuth.mockReturnValue({ user: { id: 'verified', plan: 'free' }, loading: false, authError: null, retryAuth, logout });
+    view.rerender(tree());
+    expect(screen.getByText('OAuth Consent Page')).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent(path);
+  });
+
+  it('offers explicit sign-out during a profile outage', async () => {
+    const logout = vi.fn();
+    mockUseAuth.mockReturnValue({ user: null, loading: false, authError: 'Profile unavailable.', retryAuth: vi.fn(), logout });
+    renderAt('/companion', true);
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Sign out' }));
+    expect(logout).toHaveBeenCalledTimes(1);
   });
 });

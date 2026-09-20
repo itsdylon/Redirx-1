@@ -21,6 +21,7 @@ import { PivotMigrationDetail } from './components/PivotMigrationDetail';
 import { MCP_PIVOT_ENABLED } from './api/config';
 import { Toaster } from './components/ui/sonner';
 import { isEnterprisePlan } from './lib/plans';
+import { Button } from './components/ui/button';
 import {
   ROUTES,
   canAccessDashboard,
@@ -33,7 +34,7 @@ import {
 } from './routes';
 
 export default function App({ pivotEnabled = MCP_PIVOT_ENABLED }: { pivotEnabled?: boolean } = {}) {
-  const { user, loading } = useAuth();
+  const { user, loading, authError, retryAuth, logout } = useAuth();
   const location = useLocation();
   const authedHome = pivotEnabled ? ROUTES.companion : getAuthedHomeRoute(user?.plan);
   const pendingReturn = sanitizeRedirectPath(new URLSearchParams(location.search).get('redirect')) || getAuthRedirect();
@@ -53,6 +54,21 @@ export default function App({ pivotEnabled = MCP_PIVOT_ENABLED }: { pivotEnabled
         <div className="text-muted-foreground">Loading...</div>
       </div>
     );
+  }
+
+  // Keep the current deep link and SDK session while profile data is unavailable.
+  // No account/plan-dependent route or consent request runs behind this barrier.
+  if (authError) {
+    return <main className="min-h-screen flex items-center justify-center p-4">
+      <section className="max-w-md space-y-4 text-center" aria-labelledby="profile-retry-heading">
+        <h1 id="profile-retry-heading" className="text-xl font-semibold">Your profile could not load</h1>
+        <p role="alert" className="text-muted-foreground">{authError}</p>
+        <div className="flex justify-center gap-3">
+          <Button onClick={() => void retryAuth()}>Try again</Button>
+          <Button variant="outline" onClick={() => void logout()}>Sign out</Button>
+        </div>
+      </section>
+    </main>;
   }
 
   return (

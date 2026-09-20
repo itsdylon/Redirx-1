@@ -1,16 +1,16 @@
 {
   "recorded_on": "2026-09-20",
-  "evidence_source": "Operator report after the single 057 apply and fresh-process readback; sanitized journals linked below. Rerun states are dispatch observations, not completion claims.",
+  "evidence_source": "Operator post-057 completion and review observations plus locally verified captured MCP mapping pages. Earlier queued states retained as dispatch history.",
   "billing_mode": "test_only",
   "service_pins": {
     "api": {
-      "sha": "c9b15eff725b39f083c7330ed7660f316f8811bb",
-      "deployment": "dep-danl8brtqb8s73c9osd0",
+      "sha": "bb8bca2fc926e05e7e47f55d6546d61838337301",
+      "deployment": "dep-danll3942hec73etc250",
       "status": "live"
     },
     "companion": {
-      "sha": "a7813658273fc9323015e4cd2e81eda75d247413",
-      "deployment": "dep-danl6jjm8hqs73bmgm20",
+      "sha": "0c759a3893b523ef7cebce9bfd8f79d7bbd6c7ff",
+      "deployment": "dep-danljh2jnfac7391o2cg",
       "status": "live"
     },
     "worker": {
@@ -68,20 +68,30 @@
       "run_id": "20a0d858-4ac7-4e69-9bbb-8a2c3851a9b4",
       "operation_id": "1c7265db-1723-42bb-aaf7-0d0fb9828097",
       "session_id": "b3c33132-838e-4cf5-ac78-e5ffa48646fd",
-      "status_at_dispatch": "queued"
+      "status_at_dispatch": "queued",
+      "job_status": "completed",
+      "run_status": "succeeded",
+      "attempt_count": 1,
+      "started_at": "2026-09-20T03:41:06.694309Z",
+      "completed_at": "2026-09-20T03:45:51.107322Z"
     },
     "paid501": {
       "run_id": "e8171cd9-a5cb-4f80-9f4e-7cc967487068",
       "operation_id": "9ab5efed-520c-4704-87bd-72d80c7def1e",
       "session_id": "1dd6cf1c-a78c-4e4a-8f85-0a63ca3ef0f3",
-      "status_at_dispatch": "queued"
+      "status_at_dispatch": "queued",
+      "job_status": "completed",
+      "run_status": "succeeded",
+      "attempt_count": 1,
+      "started_at": "2026-09-20T03:41:07.815678Z",
+      "completed_at": "2026-09-20T03:46:26.847859Z"
     },
     "repurchase": false,
     "acceptance_complete": false
   },
   "remaining": [
     "Fresh email OAuth/session recovery verification after deployed fixes",
-    "Successful free500 and paid501 content reruns with correct matched/unmatched coverage",
+    "Live full artifact export after audited-decision projection fix",
     "Production duplicate webhook handling evidence",
     "Actual artifact installation and verification",
     "Bounded realistic full-capacity deployed job",
@@ -183,5 +193,18 @@
     "limits": "Observed sequence proves profile isolation and no disruption of the two existing identities. Access JWT validity means post-logout HTTP 200 does not prove refresh-token revocation.",
     "new_accounts_created": false,
     "credentials_in_evidence": false
+  },
+  "api_export_fix_pending": {
+    "sha": "bb8bca2fc926e05e7e47f55d6546d61838337301",
+    "status": "API live; full export retry in flight; result pending",
+    "deployment": "dep-danll3942hec73etc250"
+  },
+  "small_run_evidence": "deployed-small-runs-20260920.json",
+  "service_pin_history": {
+    "api_before_export_fix": {
+      "sha": "c9b15eff725b39f083c7330ed7660f316f8811bb",
+      "deployment": "dep-danl8brtqb8s73c9osd0",
+      "status": "live"
+    }
   }
 }

@@ -1,9 +1,9 @@
 # MCP product activation packet
 
 Application schema 032/034–057 is deployed; 033 remains protected. Billing is
-`test_only`; no real paid launch is claimed. The API now runs `c9b15ef`
-(`dep-danl8brtqb8s73c9osd0`) and the companion runs `a781365`
-(`dep-danl6jjm8hqs73bmgm20`). Worker and gateway remain at `5d0117b`, and the
+`test_only`; no real paid launch is claimed. The API now runs `bb8bca2`
+(`dep-danll3942hec73etc250`) and the companion runs `0c759a3`
+(`dep-danljh2jnfac7391o2cg`). Worker and gateway remain at `5d0117b`, and the
 broker remains pinned at `017a2dc`. These are the operator's post-057 deployment
 observations on September 20, 2026.
 
@@ -30,16 +30,38 @@ definitions/enablement, and the mapping RPC body/ACL. No user-row value changed.
 See the [sanitized apply journal](release-evidence/057-apply-journal.json).
 Do not restore NOT NULL after unmatched rows exist or rewrite them to fake targets.
 
-Explicit free/paid reruns are **queued at the recorded dispatch observation**,
-using the same existing grants and quote, without repurchase. Their run,
-operation and session IDs are in the [current activation record](release-evidence/product-activation-20260920.json),
-which preserves the earlier 03:12 observation intact as historical evidence.
-Neither rerun is claimed complete here. Content quality, artifacts, installation,
-verification and full-capacity acceptance remain open. The deployed frontend
-fixes preserve sessions through profile outages; the API isolates session-changing
-auth clients from privileged profile reads. The shared-client contamination
-mechanism was verified in source and installed-SDK tests, but is not asserted to
-be the proven cause of every earlier live profile failure.
+Both explicit post-057 reruns now **completed successfully on attempt one**,
+using the same existing grants and quote without repurchase. Free500 ran from
+03:41:06.694309 to 03:45:51.107322 UTC; paid501 ran from 03:41:07.815678 to
+03:46:26.847859 UTC. Captured native MCP pages exhaust their cursors and contain
+500/501 unique mappings. Every non-root target matches its fixture manifest:
+499 free / 500 paid. Each root was explicitly unmatched, consistent with the
+engine's homepage policy. These successes do not erase the first failed jobs.
+
+After checking the real public homepages' 200 responses, identical title and
+main text, the operator used native `resolve_matches` to select each intended
+homepage target. Both decisions applied once at selection revision 1; the
+unmatched lists became empty. Full nginx exports at revision 1 nevertheless
+failed with `inventory_incomplete`; neither produced an artifact. The reader
+consumed `decision_action`, while the real RPC returns `decision`, and retained
+the original matcher hold. This also allowed a rejected confident mapping to
+escape exclusion. Reader fix `bb8bca2` passes 62 focused tests and two native SQL
+regressions independently repeated by the operator. API-only deployment
+`dep-danll3942hec73etc250` is live; **the full export retry is in flight and its
+result is still pending**. No partial-export bypass,
+blanket approval, engine-row rewrite or worker deploy is part of this fix.
+
+The [small-run acceptance record](acceptance/deployed-small-runs-2026-09-20.md)
+and [sanitized evidence](release-evidence/deployed-small-runs-20260920.json)
+record completion, reviewed targets, the failed exports and the test boundary.
+The [activation record](release-evidence/product-activation-20260920.json) retains
+queued dispatch states and the earlier 03:12 observation as historical evidence.
+Artifacts, installation, verification and full-capacity acceptance remain open.
+
+The deployed frontend fixes preserve sessions through profile outages; the API
+isolates session-changing auth clients from privileged profile reads. The shared
+client contamination mechanism was verified in source and installed-SDK tests,
+but is not asserted to be the cause of every earlier live profile failure.
 
 The operator subsequently verified the deployed API with two distinct existing
 identities: the GitHub SDK session and isolated free-account SDK session. After
@@ -147,8 +169,9 @@ subscription delivery and duplicate handling remain separate acceptance checks.
    purchased artifacts and existing history survive.
 4. Run OAuth free500 and paid501 acceptance on controlled origins/accounts,
    including real content work, exception decisions, artifacts, installation and
-   verification. Checkout passed; the first jobs failed and explicit reruns now
-   reuse existing authority. Preserve those failures and do not repurchase.
+   verification. Checkout and the explicit post-057 content reruns passed with
+   existing authority. Full export exposed the reader defect described above;
+   verify the deployed fix before installation. Preserve the first failed jobs.
 5. Use a read-only cgroup sampler around the actual daemon for deployed capacity.
    Do not run the local concurrency harness in Render: it starts a second worker
    plus1.58GB PGlite children. Bound fixture tokens, provider calls, database

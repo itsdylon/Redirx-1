@@ -1,0 +1,172 @@
+{
+  "recorded_on": "2026-09-20",
+  "scope": "Controlled synthetic production jobs; real worker, provider and durable database. Export still failed at the recorded observation. Not full-capacity acceptance.",
+  "sources": {
+    "mapping_quality": "Independently recomputed locally from captured native MCP pages and expected-mappings manifests; no live calls by document author.",
+    "completion_decisions_export_browser_observer_gsc": "Operator observations reported to document author; no independently repeated production action."
+  },
+  "runs": {
+    "free500": {
+      "run_id": "20a0d858-4ac7-4e69-9bbb-8a2c3851a9b4",
+      "operation_id": "1c7265db-1723-42bb-aaf7-0d0fb9828097",
+      "session_id": "b3c33132-838e-4cf5-ac78-e5ffa48646fd",
+      "status_at_dispatch": "queued",
+      "migration_id": "5ee86625-9335-47ff-9a24-ab3c20c055da",
+      "job_status": "completed",
+      "run_status": "succeeded",
+      "attempt_count": 1,
+      "started_at": "2026-09-20T03:41:06.694309Z",
+      "completed_at": "2026-09-20T03:45:51.107322Z",
+      "elapsed_seconds": 284.413013,
+      "mapping_capture": {
+        "file": "free-production-matches-after057.json",
+        "sha256": "dfa2f09911a01d50738db3ad111ce3c7492de3a7952d1e8d6855f49e6aeb630e",
+        "pages": 5,
+        "cursor_exhausted": true,
+        "captured_at_label_approximate": "2026-09-20T03:55:00Z",
+        "timestamp_scope": "Coarse archive label, not an exact HTTP measurement timestamp."
+      },
+      "expected_manifest": {
+        "file": "public-fixtures-500/expected-mappings.json",
+        "sha256": "016e6953ac214e49ace6fa242d57a327e33cea57aef9526d08baf21b976394ba"
+      },
+      "inventory_counts": {
+        "old": 500,
+        "new": 600
+      },
+      "unique_mapping_ids": 500,
+      "unique_old_urls": 500,
+      "exact_expected_nonroot_targets": 499,
+      "unmatched_homepages_before_decision": 1,
+      "homepage_decision": {
+        "mapping_id": "9b9b18da-853b-4fa9-ac51-72d38a9840a8",
+        "old_url": "https://stuart-ourselves-lexmark-cod.trycloudflare.com/",
+        "decision": "set_target",
+        "decision_target": "https://outcomes-efforts-highway-appendix.trycloudflare.com/",
+        "applied": 1,
+        "selection_revision": 1,
+        "raw_new_url_after": null,
+        "raw_needs_review_after": true,
+        "review_status_after": "set_target",
+        "evidence": "Operator scoped read-only SQL and native resolve_matches; immutable matcher evidence unchanged."
+      },
+      "export_attempt": {
+        "format": "nginx",
+        "revision": 1,
+        "allow_partial": false,
+        "result": "inventory_incomplete",
+        "artifact_created": false
+      }
+    },
+    "paid501": {
+      "run_id": "e8171cd9-a5cb-4f80-9f4e-7cc967487068",
+      "operation_id": "9ab5efed-520c-4704-87bd-72d80c7def1e",
+      "session_id": "1dd6cf1c-a78c-4e4a-8f85-0a63ca3ef0f3",
+      "status_at_dispatch": "queued",
+      "migration_id": "789f477b-4361-4665-b984-1ee5184c02d7",
+      "job_status": "completed",
+      "run_status": "succeeded",
+      "attempt_count": 1,
+      "started_at": "2026-09-20T03:41:07.815678Z",
+      "completed_at": "2026-09-20T03:46:26.847859Z",
+      "elapsed_seconds": 319.032181,
+      "mapping_capture": {
+        "file": "paid-production-matches-after057.json",
+        "sha256": "cc909babea5b7be284120cdbd423c6d3a549613ad8a20fbe75e23cff12f72c36",
+        "pages": 6,
+        "cursor_exhausted": true,
+        "captured_at_label_approximate": "2026-09-20T03:55:00Z",
+        "timestamp_scope": "Coarse archive label, not an exact HTTP measurement timestamp."
+      },
+      "expected_manifest": {
+        "file": "public-fixtures-501/expected-mappings.json",
+        "sha256": "af7a4c28e57f7a4965c0e7e5f587808f39d7541bf66d72b50634e4c610429a12"
+      },
+      "inventory_counts": {
+        "old": 501,
+        "new": 601
+      },
+      "unique_mapping_ids": 501,
+      "unique_old_urls": 501,
+      "exact_expected_nonroot_targets": 500,
+      "unmatched_homepages_before_decision": 1,
+      "homepage_decision": {
+        "mapping_id": "a2bde002-62c1-4c67-a3e9-c758f27ace8d",
+        "old_url": "https://kentucky-pace-recommend-bestsellers.trycloudflare.com/",
+        "decision": "set_target",
+        "decision_target": "https://vampire-released-fur-lake.trycloudflare.com/",
+        "applied": 1,
+        "selection_revision": 1,
+        "raw_new_url_after": null,
+        "raw_needs_review_after": true,
+        "review_status_after": "set_target",
+        "evidence": "Operator scoped read-only SQL and native resolve_matches; immutable matcher evidence unchanged."
+      },
+      "export_attempt": {
+        "format": "nginx",
+        "revision": 1,
+        "allow_partial": false,
+        "result": "inventory_incomplete",
+        "artifact_created": false
+      }
+    }
+  },
+  "homepage_review": {
+    "http_status": 200,
+    "title": "Synthetic specimen 000000",
+    "main_text_equal": true,
+    "scope": "Operator fetched the controlled old/new public HTTPS homepages before explicitly selecting each corresponding target."
+  },
+  "fix": {
+    "sha": "bb8bca2fc926e05e7e47f55d6546d61838337301",
+    "status": "API live; full export retry in flight; result pending",
+    "source_file": "backend/services/migration_artifact_readers.py",
+    "defects": [
+      "038 public RPC serializes decision, but reader consumed internal alias decision_action.",
+      "Positive audited decision did not supersede the immutable matcher needs_review flag.",
+      "A rejected confident row could remain exportable because action was lost."
+    ],
+    "validation": {
+      "focused_tests": 62,
+      "native_postgres_tests": 2,
+      "root_independent_native_elapsed_seconds": 2.895,
+      "independent_source_reviews": 2
+    },
+    "sql_changed": false,
+    "shared_renderer_changed": false,
+    "partial_policy_weakened": false,
+    "deployment": "dep-danll3942hec73etc250",
+    "deploy_elapsed_seconds": 97,
+    "startup_api_workers": 2
+  },
+  "companion": {
+    "sha": "0c759a3893b523ef7cebce9bfd8f79d7bbd6c7ff",
+    "deployment": "dep-danljh2jnfac7391o2cg",
+    "status": "live",
+    "build_seconds": 26.3,
+    "bundle": "index-CzTenfOC.js",
+    "browser_observation": "All filter loaded 20 rows; Unmatched filter empty after the explicit decision. This is a visible page, not a claim that all 500/501 rows were rendered."
+  },
+  "worker_observer": {
+    "observed_at_approx": "2026-09-20T03:56:00Z",
+    "samples": 568,
+    "sampled_memory_max_bytes": 280068096,
+    "last_daemon_rss_bytes": 254611456,
+    "temporary_min_available_bytes": 42440183808,
+    "oom_kill": 0,
+    "summary": null,
+    "scope": "In-progress small-workload observer; not a finalized interval, full-size job, dense spool or allowed-input capacity proof. Worker configuration unchanged."
+  },
+  "gsc": {
+    "free_account": "disconnected; optional",
+    "existing_main_account": "connected, two properties",
+    "sync_performed": false,
+    "connection_changed": false
+  },
+  "remaining": [
+    "Live full export after bb8bca2 API deployment",
+    "Artifact ownership/readback and installed redirect verification",
+    "Remaining subscription/monitoring and governing-plan journeys",
+    "Bounded full-count worker acceptance"
+  ]
+}

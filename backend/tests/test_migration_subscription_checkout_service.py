@@ -8,7 +8,7 @@ from flask import Flask,request
 from backend.routes.migration_checkout_routes import create_migration_checkout_blueprint
 from backend.services.migration_subscription_checkout_service import MigrationSubscriptionCheckoutService
 from backend.services.migration_subscription_service import MigrationSubscriptionService
-from backend.services.migration_repository import InvalidInputError,OperationConflictError,RepositoryUnavailableError
+from backend.services.migration_repository import InvalidInputError,OperationConflictError,RepositoryUnavailableError,MigrationNotFoundError
 from backend.services.migration_subscription_service import SubscriptionNotReadyError
 from backend.tests import test_migration_subscription_webhook_service as recurring_fixture
 SECRET=recurring_fixture.SECRET
@@ -107,6 +107,19 @@ class SubscriptionCheckoutTest(unittest.TestCase):
   self.assertEqual(self.provider.mock_calls,[])
   self.service.get_checkout(U,W);self.assertEqual(self.client.rpc.call_args.args[0],'get_subscription_checkout')
   self.assertEqual(self.provider.mock_calls,[])
+ def test_payment_checkout_is_ignored_only_after_retrieval(self):
+  self.session.update(mode='payment',metadata={'redirx_checkout_id':W})
+  self.assertEqual(self.hook(),{'received':True,'ignored':True})
+  self.provider.v1.checkout.sessions.retrieve.assert_called_once()
+  self.service._row.assert_not_called();self.client.rpc.assert_not_called()
+ def test_present_malformed_or_missing_owned_checkout_is_not_ignored(self):
+  for marker in (None,'','not-a-uuid'):
+   self.session['metadata']['redirx_subscription_checkout_id']=marker
+   with self.subTest(marker=marker),self.assertRaises(InvalidInputError):self.hook()
+  self.session['metadata']['redirx_subscription_checkout_id']=W
+  self.service._row.side_effect=None;self.service._row.return_value=None
+  with self.assertRaises(MigrationNotFoundError):self.hook()
+  self.client.rpc.assert_not_called()
  def test_selector_returns_owned_studio_or_recoverable_allowance_state(self):
   self.client.rpc.side_effect=None;self.client.rpc.return_value.execute.return_value=SimpleNamespace(data={
    'use_studio':False,'subscription_id':S,'reason':'allowance_exhausted','next_action':'complete_payment'},error=None)
@@ -145,5 +158,13 @@ class SubscriptionRoutesTest(unittest.TestCase):
   self.assertEqual(self.client.post(path,data=body,headers={'Stripe-Signature':'bad'}).status_code,400)
   response=self.client.post(path,data=body,headers={'Stripe-Signature':signature});self.assertEqual(response.status_code,200)
   self.assertEqual(self.fixture.client.rpc.call_args.args[0],'record_verified_subscription_checkout_period')
+ def test_subscription_destination_acknowledges_payment_checkout_without_grant(self):
+  self.fixture.session.update(mode='payment',metadata={'redirx_checkout_id':W})
+  body=self.fixture.fixture.body(kind='checkout.session.completed',oid=self.fixture.session['id'])
+  response=self.client.post('/api/v2/billing/stripe-test/subscriptions/webhook',data=body,
+   headers={'Stripe-Signature':self.fixture.fixture.signed(body)})
+  self.assertEqual(response.status_code,200);self.assertEqual(response.json,{'received':True,'ignored':True})
+  self.fixture.provider.v1.checkout.sessions.retrieve.assert_called_once()
+  self.fixture.client.rpc.assert_not_called()
 
 if __name__=='__main__':unittest.main()

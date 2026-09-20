@@ -32,7 +32,11 @@ class MigrationSubscriptionWebhookService:
     def __init__(self, repository=None, *, stripe_client=None, secret_key=None, webhook_secret=None,
                  studio_price_id=None, monitoring_price_id=None):
         key = secret_key if secret_key is not None else os.getenv('MCP_STRIPE_TEST_SECRET_KEY', '')
-        secret = webhook_secret if webhook_secret is not None else os.getenv('MCP_STRIPE_TEST_WEBHOOK_SECRET', '')
+        # Separate Stripe destinations have separate signing credentials. The
+        # shared fallback preserves a single local Stripe CLI listener; an
+        # explicitly configured empty recurring secret still fails closed.
+        secret = webhook_secret if webhook_secret is not None else os.getenv(
+            'MCP_STRIPE_TEST_SUBSCRIPTION_WEBHOOK_SECRET', os.getenv('MCP_STRIPE_TEST_WEBHOOK_SECRET', ''))
         if not isinstance(key, str) or not key.startswith('sk_test_') or len(key) <= 8:
             raise SubscriptionNotReadyError('Test-mode recurring billing is not configured.')
         if not isinstance(secret, str) or not secret.startswith('whsec_') or len(secret) <= 6:
@@ -147,11 +151,18 @@ class MigrationSubscriptionWebhookService:
             sub_id = invoice.get('subscription')
         elif kind == 'charge.refunded':
             charge = self._retrieve(self.stripe.v1.charges, obj.get('id'), 'ch_')
+            if charge.get('invoice') is None:
+                return {'received': True, 'ignored': True}
             invoice = self._retrieve(self.stripe.v1.invoices, charge.get('invoice'), 'in_')
             sub_id = invoice.get('subscription')
         else:
             sub_id = obj.get('id')
+        if invoice is not None and sub_id is None:
+            return {'received': True, 'ignored': True}
         sub = self._retrieve(self.stripe.v1.subscriptions, sub_id, 'sub_')
+        metadata = _dict(sub.get('metadata'))
+        if not {'redirx_sku', 'redirx_subscription_checkout_id'} & metadata.keys():
+            return {'received': True, 'ignored': True}
         return self._apply_retrieved_subscription(sub, event_id=event['id'], event_hash=hashlib.sha256(raw_body).hexdigest(),
                                                   event_at=event_at, invoice=invoice, charge=charge)
 

@@ -59,6 +59,36 @@ class RecurringWebhookTest(unittest.TestCase):
   for change in [{'livemode':True},{'account':'acct_foreign'}]:
    with self.assertRaises(InvalidInputError):self.handle(**change)
   self.client.assert_not_called();self.assertEqual(self.client.mock_calls,[])
+ def environment_service(self,values,**overrides):
+  with patch.dict('os.environ',values,clear=True):
+   service=MigrationSubscriptionWebhookService(self.repo,stripe_client=self.client,secret_key='sk_test_fixture',
+    studio_price_id='price_studio',monitoring_price_id='price_monitoring',**overrides)
+  service.service=self.service.service
+  return service
+ def test_dedicated_recurring_secret_rejects_payment_destination_signature_without_grant(self):
+  payment_secret='whsec_payment_destination_fixture'
+  self.service=self.environment_service({'MCP_STRIPE_TEST_WEBHOOK_SECRET':payment_secret,
+   'MCP_STRIPE_TEST_SUBSCRIPTION_WEBHOOK_SECRET':SECRET})
+  body=self.body()
+  wrong=f't={self.now},v1='+hmac.new(payment_secret.encode(),str(self.now).encode()+b'.'+body,hashlib.sha256).hexdigest()
+  with self.assertRaises(InvalidInputError):self.service.handle_webhook(body,wrong)
+  self.assertEqual(self.client.mock_calls,[])
+  self.service.service.apply_verified_subscription_event.assert_not_called()
+  self.assertEqual(self.service.handle_webhook(body,self.signed(body))['status'],'active')
+  self.service.service.apply_verified_subscription_event.assert_called_once()
+ def test_absent_recurring_secret_preserves_shared_cli_signature(self):
+  self.service=self.environment_service({'MCP_STRIPE_TEST_WEBHOOK_SECRET':SECRET})
+  self.assertEqual(self.handle()['status'],'active')
+  self.service.service.apply_verified_subscription_event.assert_called_once()
+ def test_empty_recurring_secret_does_not_fall_back_to_payment_secret(self):
+  with self.assertRaises(SubscriptionNotReadyError):
+   self.environment_service({'MCP_STRIPE_TEST_WEBHOOK_SECRET':SECRET,'MCP_STRIPE_TEST_SUBSCRIPTION_WEBHOOK_SECRET':''})
+  self.assertEqual(self.client.mock_calls,[])
+  self.service.service.apply_verified_subscription_event.assert_not_called()
+ def test_explicit_secret_overrides_recurring_environment_for_injected_clients(self):
+  self.service=self.environment_service({'MCP_STRIPE_TEST_WEBHOOK_SECRET':'whsec_payment_destination_fixture',
+   'MCP_STRIPE_TEST_SUBSCRIPTION_WEBHOOK_SECRET':'whsec_other_recurring_fixture'},webhook_secret=SECRET)
+  self.assertEqual(self.handle()['status'],'active')
  def test_snapshot_claims_do_not_supply_paid_amount_or_owner(self):
   body=self.body(data={'object':{'id':'in_fixture','paid':True,'amount_paid':1,'metadata':{'redirx_user_id':D}}})
   self.service.handle_webhook(body,self.signed(body))
@@ -116,6 +146,32 @@ class RecurringWebhookTest(unittest.TestCase):
  def test_unknown_event_is_ignored_without_grant(self):
   self.assertTrue(self.handle(kind='checkout.session.completed',oid='cs_test_fixture')['ignored'])
   self.assertEqual(self.client.mock_calls,[]);self.service.service.apply_verified_subscription_event.assert_not_called()
+ def test_non_subscription_invoice_and_refund_are_ignored_after_retrieval(self):
+  self.invoice['subscription']=None
+  self.assertEqual(self.handle(),{'received':True,'ignored':True})
+  self.client.v1.invoices.retrieve.assert_called_once()
+  self.client.v1.subscriptions.retrieve.assert_not_called()
+  self.client.reset_mock();self.charge['invoice']=None
+  self.assertEqual(self.handle(kind='charge.refunded',oid='ch_fixture'),{'received':True,'ignored':True})
+  self.client.v1.charges.retrieve.assert_called_once()
+  self.client.v1.invoices.retrieve.assert_not_called()
+  self.service.service.apply_verified_subscription_event.assert_not_called()
+ def test_unrelated_subscription_is_ignored_but_malformed_owned_scope_still_fails(self):
+  self.sub['metadata']={'legacy_plan':'agency'}
+  self.assertEqual(self.handle(kind='customer.subscription.updated',oid='sub_fixture'),{'received':True,'ignored':True})
+  self.client.v1.subscriptions.retrieve.assert_called_once()
+  self.client.v1.customers.retrieve.assert_not_called()
+  for marker in ({'redirx_sku':''},{'redirx_subscription_checkout_id':None}):
+   self.sub['metadata']=marker
+   with self.subTest(marker=marker),self.assertRaises(OperationConflictError):
+    self.handle(kind='customer.subscription.updated',oid='sub_fixture')
+  self.service.service.apply_verified_subscription_event.assert_not_called()
+ def test_malformed_non_null_invoice_binding_is_not_ignored(self):
+  self.invoice['subscription']=''
+  with self.assertRaises(OperationConflictError):self.handle()
+  self.charge['invoice']=''
+  with self.assertRaises(OperationConflictError):self.handle(kind='charge.refunded',oid='ch_fixture')
+  self.service.service.apply_verified_subscription_event.assert_not_called()
  def test_sdk_client_version_is_local_and_global_key_unchanged(self):
   previous=stripe.api_key
   with patch('stripe.StripeClient') as factory:

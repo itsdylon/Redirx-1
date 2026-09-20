@@ -12,7 +12,7 @@ import stripe
 from flask import Flask, request
 
 from backend.services.migration_checkout_service import MigrationCheckoutService, CheckoutNotReadyError
-from backend.services.migration_repository import InvalidInputError, OperationConflictError
+from backend.services.migration_repository import InvalidInputError, OperationConflictError, MigrationNotFoundError
 from backend.services.migration_quote_service import QuoteExpiredError
 from backend.routes.migration_checkout_routes import create_migration_checkout_blueprint
 
@@ -166,6 +166,27 @@ class CheckoutServiceTest(unittest.TestCase):
         with self.assertRaises(InvalidInputError):self.webhook()
         with self.assertRaises(InvalidInputError):self.service.handle_webhook(b'x'*(1024*1024+1),'anything')
         self.provider.v1.checkout.sessions.retrieve.assert_not_called()
+    def test_subscription_checkout_is_ignored_from_retrieved_metadata_not_snapshot(self):
+        self.session.update(mode='subscription',metadata={'redirx_subscription_checkout_id':C})
+        self.event['data']['object']['metadata']={'redirx_checkout_id':C}
+        self.assertEqual(self.webhook(),{'received':True,'ignored':True})
+        self.provider.v1.checkout.sessions.retrieve.assert_called_once_with('cs_test_fixture')
+        self.db.table.assert_not_called();self.db.rpc.assert_not_called()
+    def test_subscription_refund_is_ignored_without_lookup_or_grant(self):
+        self.event.update(type='charge.refunded',data={'object':{'id':'ch_fixture'}})
+        self.provider.v1.charges.retrieve.return_value={'id':'ch_fixture','livemode':False,'payment_intent':'pi_fixture'}
+        self.intent['metadata']={'redirx_subscription_checkout_id':C}
+        self.assertEqual(self.webhook(),{'received':True,'ignored':True})
+        self.provider.v1.payment_intents.retrieve.assert_called_once_with('pi_fixture')
+        self.db.table.assert_not_called();self.db.rpc.assert_not_called()
+    def test_present_malformed_or_missing_owned_checkout_is_not_ignored(self):
+        for marker in (None,'','not-a-uuid'):
+            self.session['metadata']['redirx_checkout_id']=marker
+            with self.subTest(marker=marker),self.assertRaises(InvalidInputError):self.webhook()
+        self.session['metadata']['redirx_checkout_id']=C
+        self.db.table.return_value.select.return_value.eq.return_value.maybe_single.return_value.execute.return_value=SimpleNamespace(data=None,error=None)
+        with self.assertRaises(MigrationNotFoundError):self.webhook()
+        self.assertEqual(self.mutations(),[])
 
 class CheckoutRoutesTest(unittest.TestCase):
     # Reuse service fixture, but only define route-specific discovery below.
@@ -198,5 +219,12 @@ class CheckoutRoutesTest(unittest.TestCase):
         self.assertEqual(self.mutations(),[])
         response=self.client.post(path,data=raw,headers={'Stripe-Signature':sig})
         self.assertEqual(response.status_code,200);self.assertEqual(response.json['status'],'paid')
+    def test_payment_destination_acknowledges_subscription_checkout_without_grant(self):
+        self.session.update(mode='subscription',metadata={'redirx_subscription_checkout_id':C})
+        raw,sig=signed(self.event)
+        response=self.client.post('/api/v2/billing/stripe-test/webhook',data=raw,headers={'Stripe-Signature':sig})
+        self.assertEqual(response.status_code,200);self.assertEqual(response.json,{'received':True,'ignored':True})
+        self.provider.v1.checkout.sessions.retrieve.assert_called_once_with('cs_test_fixture')
+        self.db.rpc.assert_not_called()
 
 if __name__=='__main__':unittest.main()

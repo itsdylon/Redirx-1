@@ -188,7 +188,10 @@ class MigrationSubscriptionCheckoutService:
             return self.verifier.handle_webhook(raw_body,signature)
         obj=_dict(_dict(event.get('data')).get('object'))
         session=self.verifier._retrieve(self.stripe.v1.checkout.sessions,obj.get('id'),'cs_test_')
-        checkout_id=_uuid(_dict(session.get('metadata')).get('redirx_subscription_checkout_id'),'checkout_id')
+        metadata=_dict(session.get('metadata'))
+        if 'redirx_subscription_checkout_id' not in metadata:
+            return {'received':True,'ignored':True}
+        checkout_id=_uuid(metadata['redirx_subscription_checkout_id'],'checkout_id')
         row=self._row('migration_subscription_checkouts','id',checkout_id)
         if row is None:
             raise MigrationNotFoundError('Subscription checkout not found.')

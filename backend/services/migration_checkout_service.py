@@ -231,9 +231,18 @@ class MigrationCheckoutService:
             if not isinstance(charge_id, str) or not charge_id.startswith('ch_'):
                 raise InvalidInputError('Invalid refund event.')
             charge = self._provider(self.stripe.v1.charges.retrieve, charge_id)
+            if charge.get('id') != charge_id or charge.get('livemode') is not False:
+                raise OperationConflictError('The retrieved charge identity does not match.')
             intent_id = charge.get('payment_intent')
+            if intent_id is None:
+                return {'received': True, 'ignored': True}
             raw_intent = self._provider(self.stripe.v1.payment_intents.retrieve, intent_id)
-            checkout = self._raw_checkout(_dict(raw_intent.get('metadata')).get('redirx_checkout_id'))
+            if raw_intent.get('id') != intent_id or raw_intent.get('livemode') is not False:
+                raise OperationConflictError('The retrieved payment intent identity does not match.')
+            metadata = _dict(raw_intent.get('metadata'))
+            if 'redirx_checkout_id' not in metadata:
+                return {'received': True, 'ignored': True}
+            checkout = self._raw_checkout(metadata['redirx_checkout_id'])
             session_id = checkout.get('stripe_session_id')
             if not session_id:
                 matches = self._provider(self.stripe.v1.checkout.sessions.list, params={'payment_intent': intent_id, 'limit': 2})
@@ -247,7 +256,12 @@ class MigrationCheckoutService:
                 raise InvalidInputError('Invalid checkout event.')
             # Locate through retrieved metadata, never through an unverified browser context.
             first = self._provider(self.stripe.v1.checkout.sessions.retrieve, session_id)
-            checkout = self._raw_checkout(_dict(first.get('metadata')).get('redirx_checkout_id'))
+            if first.get('id') != session_id or first.get('livemode') is not False:
+                raise OperationConflictError('The retrieved checkout identity does not match.')
+            metadata = _dict(first.get('metadata'))
+            if 'redirx_checkout_id' not in metadata:
+                return {'received': True, 'ignored': True}
+            checkout = self._raw_checkout(metadata['redirx_checkout_id'])
         session = self._provider(self.stripe.v1.checkout.sessions.retrieve, session_id) if refund else first
         quote = self.quotes.get_quote(checkout['user_id'], checkout['migration_id'], checkout['quote_id'])
         self._validate_session(session, checkout, quote)

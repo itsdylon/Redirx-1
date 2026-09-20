@@ -535,7 +535,7 @@ class LongURLStorage(cleanup.PivotParentCleanup):
         self.assertEqual((job_limits.PIVOT_CONTENT_MAX_OLD_URLS, job_limits.PIVOT_CONTENT_MAX_NEW_URLS),
                          (15000, 20000))
         mid, inventories, urls = self.plan_import_long(2, seed='capacity')
-        with patch('backend.services.migration_run_service.CONTENT_MAX_OLD_URLS', 1):
+        with patch('backend.services.migration_run_service.PIVOT_CONTENT_MAX_OLD_URLS', 1):
             blocked = self.tool('run_migration', {'migration_id': mid, 'old_inventory_id': inventories['old'],
                 'new_inventory_id': inventories['new'], 'idempotency_key': 'capacity-' + mid})
         self.assertEqual(self.sql('SELECT count(*) AS n FROM migration_runs WHERE migration_id=%s', [mid])[0]['n'], 0,

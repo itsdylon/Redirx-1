@@ -19,6 +19,8 @@ The tested disable/re-enable path closes new pivot entry points without deleting
 
 Read-only commands in the running Render worker confirmed `/tmp` as the Python temporary directory, 57,930,276,864 bytes available, memory.max=536,870,912 and cpu.max=`50000 100000`. The same container reported revision017 and 200,470,528 bytes of current cgroup memory. The observed free space exceeds two 1.12 GB spools plus the 64 MiB margin; it is neither reserved nor a future quota guarantee. [Raw numeric evidence](release-evidence/worker-deployed-resources.json) records scope and instance.
 
+The crawl-limiter pool now belongs to its event loop. The worker and background runner close their own pools; token authority remains in shared PostgreSQL rows. Root independently passed 32 limiter/worker checks, then seven real-database loop tests plus four background lifecycle tests. The added lifecycle test obtains real tokens through the actual runner, verifies standalone-cycle teardown, cancels its persistent thread while it holds a pool, and verifies connections return to baseline. Production transaction-pooler contention remains separate acceptance. Existing fail-open outage behavior is unchanged; this is not a claim that rate limits remain enforced during a database outage.
+
 Still required before activation:
 
 - Final release pin, compatible API/worker deployment with pivot flags off, and verification that no old worker can claim pivot jobs.

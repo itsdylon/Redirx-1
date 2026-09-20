@@ -33,6 +33,7 @@ import unittest
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 from uuid import uuid4
+from unittest.mock import patch
 
 import psycopg
 from psycopg import sql
@@ -256,6 +257,46 @@ class LimiterPoolOwnership(unittest.TestCase):
         self.assertAlmostEqual(self.tokens_left(host), CAPACITY - 2, places=3)
 
     # ---- loops give their connections back --------------------------------
+
+    def test_background_runner_closes_real_pools_after_cycle_and_cancellation(self):
+        """Exercise the actual lifecycle hooks, without closing pools from the test."""
+        from backend.services.pivot_background import PivotBackgroundRunner
+        baseline = self.limiter_connections()
+        flags = {'MCP_PIVOT_ENABLED': 'true', 'MCP_PIVOT_DISCOVERY_ENABLED': 'true',
+                 'MCP_PIVOT_VERIFICATION_ENABLED': 'false', 'MCP_PIVOT_MONITORING_ENABLED': 'false'}
+        host = self.frozen_host('runner')
+        entered = threading.Event()
+
+        class Discovery:
+            hold = False
+
+            async def run_once(inner, **kwargs):
+                result = await self.limiter().try_acquire(host)
+                entered.set()
+                if inner.hold:
+                    await asyncio.Event().wait()
+                return {'allowed': result.allowed}
+
+        async def lifecycle():
+            discovery = Discovery()
+            runner = PivotBackgroundRunner(discovery_factory=lambda: discovery)
+            result = await runner.run_once()
+            self.assertTrue(result['discovery']['allowed'])
+            self.assertEqual(rate_limit._pools, {}, 'standalone cycle retained its pool')
+            entered.clear()
+            discovery.hold = True
+            self.assertTrue(runner.start())
+            try:
+                self.assertTrue(await asyncio.to_thread(entered.wait, 5), 'runner never obtained its token')
+                self.assertEqual(len(rate_limit._pools), 1, 'persistent runner never opened a pool')
+            finally:
+                await runner.stop()
+            self.assertEqual(rate_limit._pools, {}, 'cancelled runner retained its pool')
+
+        with patch.dict(os.environ, flags):
+            asyncio.run(lifecycle())
+        self.assertAlmostEqual(self.tokens_left(host), CAPACITY - 2, places=3)
+        self.assertEqual(self.settled_connections(baseline), baseline)
 
     def test_each_loop_returns_its_connections_when_it_ends(self):
         host = self.frozen_host("closing")

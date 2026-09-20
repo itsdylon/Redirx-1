@@ -80,7 +80,7 @@ describe('migration decisions and payment', () => {
       if (r.url.pathname.endsWith('/checkout')) { attempts++; return attempts === 1 ? failure() : json(envelope({ state: 'open' })); }
       if (r.url.pathname === '/api/v2/migrations/m1') return json(envelope(detail({ run_id: undefined,
         quote_id: 'q1', quote: { amount_cents: 4900, currency: 'usd', kind: 'paid' } }),
-        { status: paid ? 'succeeded' : 'payment_required', next_action: paid ? 'none' : 'complete_payment' }));
+        { operation_id: '11111111-1111-4111-8111-111111111111', status: paid ? 'succeeded' : 'payment_required', next_action: paid ? 'none' : 'complete_payment' }));
       return ordinary(r);
     };
     const user = userEvent.setup(); mountDetail('?paid=true&payment_return=success');
@@ -91,9 +91,47 @@ describe('migration decisions and payment', () => {
     await user.click(button); await screen.findByText('Try this request again.');
     await user.click(button); await screen.findByText(/Checkout status: open/);
     const calls = paths('/quotes/q1/checkout', 'POST'); expect(calls).toHaveLength(2);
+    expect(calls[0].body.operation_id).toBe('11111111-1111-4111-8111-111111111111');
     expect(calls[0].body.idempotency_key).toBeTruthy(); expect(calls[0].body).toEqual(calls[1].body);
     paid = true; await user.click(screen.getByRole('button', { name: 'Refresh status' }));
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Continue to checkout' })).not.toBeInTheDocument());
+  });
+
+  it('uses the persisted payment operation after page reentry, and changes retry identity for a new operation', async () => {
+    let operation = '11111111-1111-4111-8111-111111111111';
+    handler = r => r.url.pathname.endsWith('/checkout') ? json(envelope({ state: 'open' })) : json(envelope(
+      detail({ run_id: undefined, quote_id: 'q1', quote: { operation_id: '33333333-3333-4333-8333-333333333333', amount_cents: 4900, currency: 'usd', kind: 'paid' } }),
+      { operation_id: operation, status: 'payment_required', next_action: 'complete_payment' }));
+    const user = userEvent.setup();
+    const first = mountDetail();
+    await user.click(await screen.findByRole('button', { name: 'Continue to checkout' }));
+    await screen.findByText(/Checkout status: open/);
+    first.unmount();
+    mountDetail();
+    await user.click(await screen.findByRole('button', { name: 'Continue to checkout' }));
+    await screen.findByText(/Checkout status: open/);
+    expect(paths('/checkout', 'POST').map(r => r.body.operation_id)).toEqual([operation, operation]);
+    const previousKey = paths('/checkout', 'POST')[1].body.idempotency_key;
+    operation = '22222222-2222-4222-8222-222222222222';
+    await user.click(screen.getByRole('button', { name: 'Refresh status' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Continue to checkout' })).toBeEnabled());
+    await user.click(screen.getByRole('button', { name: 'Continue to checkout' }));
+    await screen.findByText(/Checkout status: open/);
+    const changed = paths('/checkout', 'POST')[2];
+    expect(changed.body.operation_id).toBe(operation);
+    expect(changed.body.idempotency_key).not.toBe(previousKey);
+  });
+
+  it('does not create checkout or invent an operation when the server summary lacks payment identity', async () => {
+    handler = () => json(envelope(detail({ run_id: undefined, quote_id: 'q1' }), {
+      operation_id: null, status: 'payment_required', next_action: 'complete_payment',
+    }));
+    const user = userEvent.setup(); mountDetail();
+    const button = await screen.findByRole('button', { name: 'Continue to checkout' });
+    expect(button).toBeDisabled();
+    expect(screen.getByRole('alert')).toHaveTextContent('Payment details are incomplete');
+    await user.click(button);
+    expect(paths('/checkout')).toHaveLength(0);
   });
 
   it('refreshes exceptions after a saved decision even when the run ID is unchanged', async () => {

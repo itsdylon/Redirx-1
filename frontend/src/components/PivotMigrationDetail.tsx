@@ -123,7 +123,10 @@ export function PivotMigrationDetail() {
   }
   async function pay() {
     await perform(async signal => {
-      const result = await checkout(migrationId, summary!.data.quote_id!, scope.key(`checkout:${summary!.data.quote_id}`), signal);
+      const operationId = summary?.operation_id;
+      if (!operationId) throw new Error('Payment details are incomplete. Refresh the migration before trying checkout again.');
+      const result = await checkout(migrationId, summary!.data.quote_id!, operationId,
+        scope.key(`checkout:${summary!.data.quote_id}:${operationId}`), signal);
       if (signal.aborted) return;
       if (result.data.checkout_url) window.location.assign(result.data.checkout_url);
       else { setMessage(`Checkout status: ${result.data.state || result.status}. Refresh to check payment.`); }
@@ -158,7 +161,8 @@ export function PivotMigrationDetail() {
       <PivotBillingNotice />
       {data.quote && <p>{new Intl.NumberFormat('en-US', { style: 'currency', currency: data.quote.currency }).format(data.quote.amount_cents / 100)} for this migration.</p>}
       <p className="text-sm text-muted-foreground">Payment is confirmed by the server. Returning from checkout does not start work by itself.</p>
-      <Button disabled={busy || loading} onClick={() => void pay()}>Continue to checkout</Button>
+      {!summary?.operation_id && <p role="alert">Payment details are incomplete. Refresh the migration before trying checkout again.</p>}
+      <Button disabled={busy || loading || !summary?.operation_id} onClick={() => void pay()}>Continue to checkout</Button>
     </section>}
     {data?.run_id && <section className="space-y-3 border-t pt-6" aria-labelledby="exceptions-heading">
       <h2 id="exceptions-heading" className="text-lg font-semibold">Exception review</h2>

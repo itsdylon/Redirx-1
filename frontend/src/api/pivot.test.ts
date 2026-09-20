@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { checkout, createSubscriptionCheckout, getSubscriptionCheckout, listPivotMatches,
+import { checkout, createSubscriptionCheckout, getSubscriptionCheckout, getPivotMigration, listPivotMatches,
   listPivotMigrations, monitoring, PivotRequestError, resolvePivotMatch } from './pivot';
 
 const envelope = (data: unknown, changes = {}) => ({ contract_version: '1.0.0', migration_id: 'm',
@@ -57,11 +57,11 @@ describe('pivot browser transport', () => {
 
   it('uses POST and explicit consent for checkout while return remains a server read', async () => {
     fetchMock.mockImplementation(() => response(envelope({ state: 'open' })));
-    await checkout('m', 'q', 'oneoff-key');
+    await checkout('m', 'q', '11111111-1111-4111-8111-111111111111', 'oneoff-key');
     await createSubscriptionCheckout({ sku: 'monitoring', deployment_id: 'deployment-1', recurring_consent: true }, 'subscription-key');
     await getSubscriptionCheckout('checkout/1', true);
     expect(fetchMock.mock.calls[0][1].method).toBe('POST');
-    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ idempotency_key: 'oneoff-key' });
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ operation_id: '11111111-1111-4111-8111-111111111111', idempotency_key: 'oneoff-key' });
     expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({ sku: 'monitoring', deployment_id: 'deployment-1', recurring_consent: true, idempotency_key: 'subscription-key' });
     expect(fetchMock.mock.calls[2][0]).toContain('/billing/subscription-checkouts/checkout%2F1/return');
     expect(fetchMock.mock.calls[2][1].method).toBeUndefined();
@@ -78,4 +78,24 @@ describe('pivot browser transport', () => {
     await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
     expect(fetchMock.mock.calls[0][1].signal.aborted).toBe(true);
   });
+  it('preserves the durable run operation from a reloaded payment-required summary into checkout', async () => {
+    const operation = '11111111-1111-4111-8111-111111111111';
+    fetchMock.mockResolvedValueOnce(response(envelope({ quote_id: 'quote-1',
+      quote: { operation_id: '22222222-2222-4222-8222-222222222222', amount_cents: 4900, currency: 'usd', kind: 'paid' },
+    }, { operation_id: operation, status: 'payment_required', next_action: 'complete_payment' })))
+      .mockResolvedValueOnce(response(envelope({ checkout_url: 'https://checkout.stripe.com/fixture', state: 'open' })));
+    const summary = await getPivotMigration('migration-1');
+    const signal = new AbortController().signal;
+    const result = await checkout('migration-1', summary.data.quote_id!, summary.operation_id!, 'retry-key', signal);
+    expect(result.data.checkout_url).toBe('https://checkout.stripe.com/fixture');
+    expect(fetchMock.mock.calls[1][0]).toContain('/migrations/migration-1/quotes/quote-1/checkout');
+    expect(fetchMock.mock.calls[1][1].signal).toBe(signal);
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({ operation_id: operation, idempotency_key: 'retry-key' });
+  });
+
+  it.each([undefined, null, '', 'quote-operation-not-a-uuid'])('refuses missing or malformed checkout operation %s before sending a request', async operation => {
+    await expect(checkout('migration-1', 'quote-1', operation as unknown as string, 'retry-key')).rejects.toMatchObject({ code: 'invalid_response' });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
 });

@@ -73,8 +73,15 @@ export const monitoring = (migration: string, fixes = false, id?: string | null,
 };
 export const gscAction = (data: Record<string, unknown>, key?: string, signal?: AbortSignal) =>
   request<GscData>('/connections/search-console/actions', post({ ...data, ...(key ? { idempotency_key: key } : {}) }, signal));
-export const checkout = (migration: string, quote: string, key: string, signal?: AbortSignal) =>
-  request<{ checkout_url?: string; state?: string }>(`/migrations/${part(migration)}/quotes/${part(quote)}/checkout`, post({ idempotency_key: key }, signal));
+export const checkout = async (migration: string, quote: string, operation: string, key: string, signal?: AbortSignal) => {
+  // This is the persisted run operation from the status envelope, not the
+  // quote's operation or a new browser-generated identifier.
+  if (typeof operation !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(operation)) {
+    throw new PivotRequestError('Payment details are incomplete. Refresh the migration before trying checkout again.', 'invalid_response', 0);
+  }
+  return request<{ checkout_url?: string; state?: string }>(`/migrations/${part(migration)}/quotes/${part(quote)}/checkout`,
+    post({ operation_id: operation, idempotency_key: key }, signal));
+};
 export const createSubscriptionCheckout = (data: { sku: 'studio' | 'monitoring'; deployment_id?: string; recurring_consent: true }, key: string, signal?: AbortSignal) =>
   request<SubscriptionCheckout>('/billing/subscription-checkouts', post({ ...data, idempotency_key: key }, signal));
 export const getSubscriptionCheckout = (id: string, returned = false, signal?: AbortSignal) =>

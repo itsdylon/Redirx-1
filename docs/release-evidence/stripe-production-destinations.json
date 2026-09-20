@@ -1,0 +1,42 @@
+{
+  "account": "acct_1T1fwzReyTnSoYHg",
+  "created_at": "2026-09-20T02:06:54.840298+00:00",
+  "mode": "test",
+  "destinations": {
+    "migration": {
+      "id": "we_1UHa9bReyTnSoYHgYVYEttju",
+      "url": "https://redirx-api.onrender.com/api/v2/billing/stripe-test/webhook",
+      "status": "disabled",
+      "livemode": false,
+      "api_version": "2024-12-18.acacia",
+      "enabled_events": [
+        "checkout.session.completed",
+        "checkout.session.async_payment_succeeded",
+        "checkout.session.async_payment_failed",
+        "checkout.session.expired",
+        "charge.refunded"
+      ]
+    },
+    "subscription": {
+      "id": "we_1UHa9bReyTnSoYHgikl6voLO",
+      "url": "https://redirx-api.onrender.com/api/v2/billing/stripe-test/subscriptions/webhook",
+      "status": "disabled",
+      "livemode": false,
+      "api_version": "2024-12-18.acacia",
+      "enabled_events": [
+        "checkout.session.completed",
+        "checkout.session.async_payment_succeeded",
+        "checkout.session.async_payment_failed",
+        "checkout.session.expired",
+        "invoice.paid",
+        "invoice.payment_failed",
+        "customer.subscription.updated",
+        "customer.subscription.deleted",
+        "charge.refunded"
+      ]
+    }
+  },
+  "configuration_applied_to_render": false,
+  "delivery_accepted": false,
+  "required_code_commit": "f0229e5a548a8189400006805271798532da8440"
+}

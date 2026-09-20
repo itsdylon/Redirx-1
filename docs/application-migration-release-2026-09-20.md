@@ -33,6 +33,26 @@ Still required before activation:
 - Capacity decision after cheaper alternatives are measured. Dylon has **not approved** the $135/month 8 GB plan. The 8,192-character full-array sizing probes bypassed import payload bounds; they do not establish a required plan for reachable imported workloads. Realistic full-size one/two-job tests, lazy sklearn loading, WebPage slots, and concurrency-one tradeoffs are being evaluated. No account or plan setting changed.
 - Replacement sandbox credentials, if another Stripe-authenticated test is needed. The exposed test key was rotated by the user; never reuse the old private file.
 
+## Lean worker capacity decision — upgrade not approved
+
+Dylon's decision is to explore cheaper options first. The 8 GB upgrade is blocked pending that review; compute, billing and concurrency settings remain his to apply. No plan change is necessary merely to continue local measurement.
+
+The earlier 582 MB ASCII allocation and 3.57 GB Unicode allocation do **not** establish the memory requirement of an accepted explicit import. They construct 35,000 maximum-length URLs directly in Python, bypassing the 25 MiB HTTP request and 32 MiB serialized-policy limits. Each side uses one snapshot. Discovery can accumulate URLs across checkpoints, so its count-only admission remains a separate capacity concern; the import correction does not prove every accepted discovery workload fits.
+
+Evaluate these options before recommending compute:
+
+1. Lazy-load scikit-learn in the preview path. Three fresh-process comparisons measured median idle peak RSS of 209,371,136 bytes before and 136,560,640 after, saving 72,810,496 bytes. These are local measurements of an uncommitted candidate, not deployed savings.
+2. Compare one and two concurrent jobs. The code default is one; the live override is still two. Do not change that setting during investigation. Assess memory and throughput together before proposing a value to Dylon.
+3. Review fixed slots on WebPage, including copying and attribute compatibility. The candidate includes slots; its individual saving must be reported separately rather than assumed from the full-run result.
+
+The first candidate run completed one 15,000-old/20,000-new job with 128-character URLs and dense 64 KiB synthetic HTML, alongside 22 streamed discovery cycles. Peak worker RSS was **198,541,312 bytes**, duration 1,393.148 seconds, and all 15,000 expected mappings were correct. Both full inventories fit the measured import byte limits. The vector database ran in a separate process and its memory is reported separately. The two-job run has started; no result is available yet.
+
+This is a local macOS process benchmark using deterministic embeddings, disabled loopback pacing and synthetic content. It does not measure Render Linux cgroup usage, filesystem cache charged to that cgroup, live provider behavior, active monitoring, or maximum-size documents. Process RSS below 512 MiB therefore does not yet prove the existing container is sufficient. Also measure after exercising the lazy preview path, since a long-lived worker can retain the imported libraries.
+
+Ephemeral disk has now been checked on the deployed worker: the current compatibility instance reported 55,216,259,072 available bytes in `/tmp`, exceeding the measured two-spool requirement of 2,240,000,000 bytes plus 67,108,864 bytes of margin. This is a point-in-time observation, not reserved storage. Retain the runtime reservation check and repeat it during deployed acceptance.
+
+Raw local evidence is under `/private/tmp/redirx-operation-20260919/lean-worker-runs/`: `inventory-gate.json`, `baseline-idle-{1,2,3}.json`, `lazy-sklearn-idle-{1,2,3}.json`, and `worker-realistic-15000-one.json`. Finalize and commit the candidate and its evidence after the two-job run and independent review. Select the least expensive configuration supported by deployed measurements; do not treat either 2 GB or 8 GB as a proven requirement at this stage.
+
 ## Root-supplied production preflight
 
 `application-preflight.json` positively records PostgreSQL 17.6, `vector` 0.8.0 in public, `pgcrypto` in extensions, `vector(1536)` embeddings, service_role BYPASSRLS=true and browser roles=false. There are 76 owned sessions, zero null owned timestamps, and no new pivot tables. Its tracked history contains031 and033. Claim RPC is the expected pre037 nine-column result; `match_pages` has the documented vector/text/uuid/integer/double-precision signature. Both engine foreign keys are **NO ACTION**, confirming the deletion compatibility defect below. Approximate storage is113.4MB embeddings and2.6MB mappings; this is catalog evidence, not measured index-build lock time.

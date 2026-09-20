@@ -1,6 +1,6 @@
 {
   "recorded_on": "2026-09-20",
-  "evidence_source": "Operator post-057 completion and review observations plus locally verified captured MCP mapping pages. Earlier queued states retained as dispatch history.",
+  "evidence_source": "Operator final included-verification record at04:24:45 UTC and subsequent monitoring first-sweep report at04:31:23.49095 UTC; historical failures/dispatch observations retained.",
   "billing_mode": "test_only",
   "service_pins": {
     "api": {
@@ -14,9 +14,10 @@
       "status": "live"
     },
     "worker": {
-      "sha": "5d0117bda961603987a6e5d212c38191ba61edc3",
-      "deployment": "dep-dankfqmgekts739946ng",
-      "status": "unchanged"
+      "sha": "4d6a15f3036864283992a05cbd53d2cbaf35b064",
+      "deployment": "dep-danlte3tqb8s73cbpeeg",
+      "instance": "qtqzl",
+      "status": "live"
     },
     "gateway": {
       "sha": "5d0117bda961603987a6e5d212c38191ba61edc3",
@@ -90,10 +91,9 @@
     "acceptance_complete": false
   },
   "remaining": [
+    "Controlled monitoring wrong-target alert, fix and verified recovery; broader lifecycle/renewal receipts",
     "Fresh email OAuth/session recovery verification after deployed fixes",
-    "Live full artifact export after audited-decision projection fix",
     "Production duplicate webhook handling evidence",
-    "Actual artifact installation and verification",
     "Bounded realistic full-capacity deployed job",
     "Remaining governing-plan journeys"
   ],
@@ -194,17 +194,67 @@
     "new_accounts_created": false,
     "credentials_in_evidence": false
   },
-  "api_export_fix_pending": {
-    "sha": "bb8bca2fc926e05e7e47f55d6546d61838337301",
-    "status": "API live; full export retry in flight; result pending",
-    "deployment": "dep-danll3942hec73etc250"
-  },
   "small_run_evidence": "deployed-small-runs-20260920.json",
   "service_pin_history": {
     "api_before_export_fix": {
       "sha": "c9b15eff725b39f083c7330ed7660f316f8811bb",
       "deployment": "dep-danl8brtqb8s73c9osd0",
       "status": "live"
+    },
+    "worker_before_verification_fix": {
+      "sha": "5d0117bda961603987a6e5d212c38191ba61edc3",
+      "deployment": "dep-dankfqmgekts739946ng",
+      "status": "unchanged"
     }
+  },
+  "api_export_fix_history": {
+    "sha": "bb8bca2fc926e05e7e47f55d6546d61838337301",
+    "deployment": "dep-danll3942hec73etc250",
+    "status_at_prior_record": "API live; full export retry in flight; result pending",
+    "current_status": "Full export and included live verification passed; see final evidence."
+  },
+  "core_installed_verification": {
+    "evidence": "deployed-artifact-verification-final.json",
+    "recorded_at": "2026-09-20 04:24:45 UTC",
+    "free": "500/500 passed, zero failed or unchecked",
+    "paid": "501/501 passed, zero failed or unchecked",
+    "identities_preserved": true,
+    "historical_partials_retained": true,
+    "new_included_allowance_consumed": false
+  },
+  "paid_monitoring": {
+    "monitoring_id": "5aefe17e-6853-49c4-ad64-6068be0e5653",
+    "state": "active",
+    "first_complete_sweep_at": "2026-09-20T04:31:23.49095Z",
+    "first_sweep": {
+      "total": 501,
+      "passed": 501,
+      "failed": 0,
+      "unchecked": 0,
+      "outcome": "passed"
+    },
+    "expires_at": "2026-10-20T04:04:54.199598+00:00",
+    "evidence_source": "Operator report after the separately dated final included-verification evidence",
+    "controlled_alerts_authorized": true,
+    "deliberate_wrong_target_test": "Complete fault sweep:500 passed,1 wrong_target,0 unchecked",
+    "alert_delivery_proven": false,
+    "correction_recovery_proven": false,
+    "fault_sweep": {
+      "passed": 500,
+      "wrong_target": 1,
+      "unchecked": 0
+    },
+    "alert_outbox": {
+      "state": "sent",
+      "attempt": 1,
+      "provider_id": "01a0bd1b-79d8-726f-ab92-ab3831d58f3d",
+      "scope": "One operator-verified sent outbox record; not independently observed recipient inbox delivery."
+    },
+    "exact_artifact_restored": true,
+    "recovery_sweep": "pending"
+  },
+  "worker_small_journey_observer": {
+    "evidence": "worker-small-journeys-cgroup-summary.json",
+    "scope": "Completed one-hour small-workload window on pre-fix5d; not4d6 capacity proof or a full-size bound."
   }
 }

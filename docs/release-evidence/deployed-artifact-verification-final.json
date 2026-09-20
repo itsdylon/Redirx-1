@@ -1,0 +1,117 @@
+{
+  "recorded_at": "2026-09-20 04:24:45 UTC",
+  "scope": "Real controlled production MCP free500 and sandbox-paid501 artifacts, installation and full included verification; monitoring not started.",
+  "api_revision": "bb8bca2fc926e05e7e47f55d6546d61838337301",
+  "worker": {
+    "revision": "4d6a15f3036864283992a05cbd53d2cbaf35b064",
+    "instance": "qtqzl",
+    "deploy": "dep-danlte3tqb8s73cbpeeg",
+    "max_concurrent": 2,
+    "compute_unchanged": true
+  },
+  "frontend": {
+    "revision": "0c759a3893b523ef7cebce9bfd8f79d7bbd6c7ff",
+    "deploy": "dep-danljh2jnfac7391o2cg"
+  },
+  "journeys": {
+    "free": {
+      "migration_id": "5ee86625-9335-47ff-9a24-ab3c20c055da",
+      "run_id": "20a0d858-4ac7-4e69-9bbb-8a2c3851a9b4",
+      "artifact": {
+        "artifact_id": "9eb0f3e4-e684-47c1-bcb4-3af8143fab8a",
+        "content_hash": "eb2bb91ea408f91b8d395efec5e9f0b705701d593aa10c9bd40df2c4e694df33",
+        "decision_revision": "1",
+        "download_url": "/api/v2/migrations/5ee86625-9335-47ff-9a24-ab3c20c055da/artifacts/9eb0f3e4-e684-47c1-bcb4-3af8143fab8a",
+        "excluded_count": 0,
+        "format": "nginx",
+        "included_count": 500,
+        "partial_policy": "deny",
+        "replayed": false,
+        "resource_uri": "redirx://migrations/5ee86625-9335-47ff-9a24-ab3c20c055da/artifacts/9eb0f3e4-e684-47c1-bcb4-3af8143fab8a",
+        "run_id": "20a0d858-4ac7-4e69-9bbb-8a2c3851a9b4",
+        "summary": "Immutable artifact ready; install it before confirming deployment.",
+        "target_origins": [
+          "https://outcomes-efforts-highway-appendix.trycloudflare.com/"
+        ]
+      },
+      "verification": {
+        "artifact_id": "9eb0f3e4-e684-47c1-bcb4-3af8143fab8a",
+        "checked": 500,
+        "complete": true,
+        "deployment_id": "e3989d0b-b393-4d40-9fce-8885aab820de",
+        "failed": 0,
+        "included": true,
+        "outcome": "passed",
+        "passed": 500,
+        "pending": 0,
+        "summary": "500 of 500 redirects checked; 0 issues; 0 unchecked.",
+        "total": 500,
+        "unavailable": 0,
+        "unchecked": 0,
+        "verification_id": "de79ba05-0250-44ec-95f4-c449071cdf26"
+      }
+    },
+    "paid": {
+      "migration_id": "789f477b-4361-4665-b984-1ee5184c02d7",
+      "run_id": "e8171cd9-a5cb-4f80-9f4e-7cc967487068",
+      "artifact": {
+        "artifact_id": "7d45ac17-655c-465d-8603-6562e916c29f",
+        "content_hash": "97020f05d741285d4791ef1ec5de707cb2f4455824bc4915e9013a8f022ece18",
+        "decision_revision": "1",
+        "download_url": "/api/v2/migrations/789f477b-4361-4665-b984-1ee5184c02d7/artifacts/7d45ac17-655c-465d-8603-6562e916c29f",
+        "excluded_count": 0,
+        "format": "nginx",
+        "included_count": 501,
+        "partial_policy": "deny",
+        "replayed": false,
+        "resource_uri": "redirx://migrations/789f477b-4361-4665-b984-1ee5184c02d7/artifacts/7d45ac17-655c-465d-8603-6562e916c29f",
+        "run_id": "e8171cd9-a5cb-4f80-9f4e-7cc967487068",
+        "summary": "Immutable artifact ready; install it before confirming deployment.",
+        "target_origins": [
+          "https://vampire-released-fur-lake.trycloudflare.com/"
+        ]
+      },
+      "verification": {
+        "artifact_id": "7d45ac17-655c-465d-8603-6562e916c29f",
+        "checked": 501,
+        "complete": true,
+        "deployment_id": "4e1cb4ae-0b34-4805-b649-0493f1bc9a86",
+        "failed": 0,
+        "included": true,
+        "outcome": "passed",
+        "passed": 501,
+        "pending": 0,
+        "summary": "501 of 501 redirects checked; 0 issues; 0 unchecked.",
+        "total": 501,
+        "unavailable": 0,
+        "unchecked": 0,
+        "verification_id": "bc86e43c-aac9-4862-98d7-79ebe2d4e5ed"
+      }
+    }
+  },
+  "additional_checks": {
+    "all_1001_artifact_rules_match_fixture_manifests": true,
+    "artifact_bytes_hash_verified": true,
+    "installed_only_controlled_old_servers": true,
+    "root_first_last_get_and_head_301_then_exact_destination_200": true,
+    "all_four_health_200_private_manifest_404": true,
+    "free_cross_owner_paid_artifact_read": {
+      "denied": true,
+      "mcp_error_code": -32002
+    },
+    "paid_identical_export_replay": {
+      "same_artifact_and_hash": true,
+      "replayed": true
+    },
+    "free_transport_reconnect_during_verification": true,
+    "free_monitoring_start": {
+      "denied": true,
+      "error_code": "payment_required"
+    }
+  },
+  "limitations": [
+    "Original intermittent observation-write error remains unidentified. Batch lifecycle cascade is reproduced, fixed and regression-tested; both live verifications complete after deployment.",
+    "Partial historical observations retained and retried on original verification/deployment/artifact IDs. No lease reset or new included allowance.",
+    "No full-size deployed capacity claim; no monitoring or email acceptance yet."
+  ]
+}

@@ -3,8 +3,9 @@
 Application schema 032/034–057 is deployed; 033 remains protected. Billing is
 `test_only`; no real paid launch is claimed. The API now runs `bb8bca2`
 (`dep-danll3942hec73etc250`) and the companion runs `0c759a3`
-(`dep-danljh2jnfac7391o2cg`). Worker and gateway remain at `5d0117b`, and the
-broker remains pinned at `017a2dc`. These are the operator's post-057 deployment
+(`dep-danljh2jnfac7391o2cg`). Worker now runs `4d6a15f`
+(`dep-danlte3tqb8s73cbpeeg`, instance `qtqzl`); gateway remains at `5d0117b`, and
+the broker remains pinned at `017a2dc`. These are the operator's post-057 deployment
 observations on September 20, 2026.
 
 The worker remains one 512 MiB / 0.5 CPU instance with concurrency two.
@@ -17,7 +18,9 @@ Stripe **test** Checkout subsequently completed at $49 USD; independent provider
 readback shows `paid`, `livemode=false`, and a genuine `checkout.session.completed`
 event with zero pending webhooks. See the [Stripe evidence](release-evidence/paid-501-stripe-readback.json)
 and [production checkout record](acceptance/stripe-sandbox-2026-09-19.md#production-hosted-501-page-checkout--september-20).
-This does not establish content completion or production duplicate-delivery handling.
+Payment alone did not establish content completion. The separate completed-run
+and installed-verification evidence below now does; production duplicate-delivery
+handling remains separately scoped.
 
 The first free and paid content jobs both failed after five attempts. The legacy
 `url_mappings.new_url NOT NULL` constraint rejected the existing explicit-unmatched
@@ -47,16 +50,32 @@ consumed `decision_action`, while the real RPC returns `decision`, and retained
 the original matcher hold. This also allowed a rejected confident mapping to
 escape exclusion. Reader fix `bb8bca2` passes 62 focused tests and two native SQL
 regressions independently repeated by the operator. API-only deployment
-`dep-danll3942hec73etc250` is live; **the full export retry is in flight and its
-result is still pending**. No partial-export bypass,
+`dep-danll3942hec73etc250` is live. **Both full nginx exports subsequently
+succeeded**, included500/501 and excluded0; their exact hashes and all1,001
+targets matched the controlled manifests before installation. No partial-export bypass,
 blanket approval, engine-row rewrite or worker deploy is part of this fix.
 
 The [small-run acceptance record](acceptance/deployed-small-runs-2026-09-20.md)
 and [sanitized evidence](release-evidence/deployed-small-runs-20260920.json)
-record completion, reviewed targets, the failed exports and the test boundary.
+record completion, reviewed targets and the historical failed exports. The
+[final installed-verification record](acceptance/deployed-installed-verification-2026-09-20.md)
+adds both full passes on the original verification/deployment/artifact IDs.
 The [activation record](release-evidence/product-activation-20260920.json) retains
 queued dispatch states and the earlier 03:12 observation as historical evidence.
-Artifacts, installation, verification and full-capacity acceptance remain open.
+Artifacts, controlled installation and complete included live verification now
+pass: free500/500 and paid501/501, zero failed/unchecked. Historical partial
+measurements were retried without resetting leases or consuming another included
+allowance. Worker `4d6a15f` fixes the reproduced session-close cascade and drains
+started writes; the initiating intermittent observation-write error remains
+unidentified. This is not a claim that every earlier connection failure shared
+that cause. Full-capacity acceptance remains open.
+
+Paid monitor `5aefe17e-6853-49c4-ad64-6068be0e5653` is active. Its first complete
+sweep passed501/501 at04:31:23.49095 UTC and its recorded expiry is
+2026-10-20T04:04:54.199598+00:00. The explicitly authorized fault sweep then recorded500 passed,1 wrong_target
+and0 unchecked, with one outbox message sent on attempt1. The exact artifact is
+restored; the recovery sweep is pending. Inbox delivery is not independently
+claimed. The final04:24:45 verification JSON predates this monitor activation.
 
 The deployed frontend fixes preserve sessions through profile outages; the API
 isolates session-changing auth clients from privileged profile reads. The shared
@@ -170,8 +189,9 @@ subscription delivery and duplicate handling remain separate acceptance checks.
 4. Run OAuth free500 and paid501 acceptance on controlled origins/accounts,
    including real content work, exception decisions, artifacts, installation and
    verification. Checkout and the explicit post-057 content reruns passed with
-   existing authority. Full export exposed the reader defect described above;
-   verify the deployed fix before installation. Preserve the first failed jobs.
+   existing authority. Full exports, controlled nginx installation and both
+   complete included live checks now pass. Preserve the first failed jobs and
+   partial checks; finish the separate monitoring alert/recovery exercise.
 5. Use a read-only cgroup sampler around the actual daemon for deployed capacity.
    Do not run the local concurrency harness in Render: it starts a second worker
    plus1.58GB PGlite children. Bound fixture tokens, provider calls, database

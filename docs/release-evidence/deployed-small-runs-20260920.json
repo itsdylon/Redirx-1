@@ -1,6 +1,6 @@
 {
   "recorded_on": "2026-09-20",
-  "scope": "Controlled synthetic production jobs; real worker, provider and durable database. Export still failed at the recorded observation. Not full-capacity acceptance.",
+  "scope": "Controlled synthetic production jobs; real worker/provider/database, exact nginx artifacts installed, both complete included live verifications passed. Historical failed export observations below retained. Not full-capacity acceptance.",
   "sources": {
     "mapping_quality": "Independently recomputed locally from captured native MCP pages and expected-mappings manifests; no live calls by document author.",
     "completion_decisions_export_browser_observer_gsc": "Operator observations reported to document author; no independently repeated production action."
@@ -119,7 +119,6 @@
   },
   "fix": {
     "sha": "bb8bca2fc926e05e7e47f55d6546d61838337301",
-    "status": "API live; full export retry in flight; result pending",
     "source_file": "backend/services/migration_artifact_readers.py",
     "defects": [
       "038 public RPC serializes decision, but reader consumed internal alias decision_action.",
@@ -137,7 +136,9 @@
     "partial_policy_weakened": false,
     "deployment": "dep-danll3942hec73etc250",
     "deploy_elapsed_seconds": 97,
-    "startup_api_workers": 2
+    "startup_api_workers": 2,
+    "status_at_prior_observation": "API live; full export retry in flight; result pending",
+    "status": "Live full exports succeeded; included verification subsequently passed after separate worker lifecycle fix4d6a15f."
   },
   "companion": {
     "sha": "0c759a3893b523ef7cebce9bfd8f79d7bbd6c7ff",
@@ -155,7 +156,8 @@
     "temporary_min_available_bytes": 42440183808,
     "oom_kill": 0,
     "summary": null,
-    "scope": "In-progress small-workload observer; not a finalized interval, full-size job, dense spool or allowed-input capacity proof. Worker configuration unchanged."
+    "scope": "In-progress small-workload observer; not a finalized interval, full-size job, dense spool or allowed-input capacity proof. Worker configuration unchanged.",
+    "historical": true
   },
   "gsc": {
     "free_account": "disconnected; optional",
@@ -164,9 +166,48 @@
     "connection_changed": false
   },
   "remaining": [
-    "Live full export after bb8bca2 API deployment",
-    "Artifact ownership/readback and installed redirect verification",
-    "Remaining subscription/monitoring and governing-plan journeys",
+    "Controlled monitoring alert/fix/verified recovery and remaining lifecycle receipts",
+    "Remaining governing-plan/client/platform/Google/landing release actions",
     "Bounded full-count worker acceptance"
-  ]
+  ],
+  "final_installed_verification": {
+    "evidence": "deployed-artifact-verification-final.json",
+    "recorded_at": "2026-09-20 04:24:45 UTC",
+    "free_passed": 500,
+    "paid_passed": 501,
+    "unchecked": 0,
+    "failed": 0
+  },
+  "paid_monitoring": {
+    "monitoring_id": "5aefe17e-6853-49c4-ad64-6068be0e5653",
+    "state": "active",
+    "first_complete_sweep_at": "2026-09-20T04:31:23.49095Z",
+    "first_sweep": {
+      "total": 501,
+      "passed": 501,
+      "failed": 0,
+      "unchecked": 0,
+      "outcome": "passed"
+    },
+    "expires_at": "2026-10-20T04:04:54.199598+00:00",
+    "evidence_source": "Operator report after the separately dated final included-verification evidence",
+    "controlled_alerts_authorized": true,
+    "deliberate_wrong_target_test": "Complete fault sweep:500 passed,1 wrong_target,0 unchecked",
+    "alert_delivery_proven": false,
+    "correction_recovery_proven": false,
+    "fault_sweep": {
+      "passed": 500,
+      "wrong_target": 1,
+      "unchecked": 0
+    },
+    "alert_outbox": {
+      "state": "sent",
+      "attempt": 1,
+      "provider_id": "01a0bd1b-79d8-726f-ab92-ab3831d58f3d",
+      "scope": "One operator-verified sent outbox record; not independently observed recipient inbox delivery."
+    },
+    "exact_artifact_restored": true,
+    "recovery_sweep": "pending"
+  },
+  "worker_observer_final_evidence": "worker-small-journeys-cgroup-summary.json"
 }

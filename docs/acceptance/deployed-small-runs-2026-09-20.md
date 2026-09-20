@@ -1,5 +1,29 @@
 # Deployed free500 and paid501 content results — September 20
 
+## Current result — complete installed verification
+
+Both core installed journeys now pass: free500/500 and paid501/501, with zero
+failed or unchecked redirects. Exact full nginx artifacts were authenticated,
+validated against every fixture target and installed only on controlled old
+servers. Worker `4d6a15f` completed the original verification identities after
+repairing a reproduced shared-session failure cascade. The initial triggering
+observation-write error remains unidentified.
+
+See [final installed-verification acceptance](deployed-installed-verification-2026-09-20.md)
+and its [sanitized evidence](../release-evidence/deployed-artifact-verification-final.json).
+Paid monitoring subsequently completed its first501/501 sweep, then detected
+one controlled wrong target with no unchecked tail and recorded one sent alert.
+The exact artifact is restored; verified recovery remains pending. No full-capacity
+or complete-monitoring-lifecycle acceptance is claimed.
+
+---
+
+## Historical observation — content success, export retry pending
+
+The following record is preserved from before the successful full export and
+included verification. Its pending/failed states are historical, not current.
+
+
 Both controlled post-057 content runs succeeded on their first attempt, reusing
 existing grants and the paid quote without repurchase. All non-root mappings
 match the intended fixture destinations. Full export is **not yet accepted**:

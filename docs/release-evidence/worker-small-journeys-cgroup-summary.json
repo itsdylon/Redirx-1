@@ -1,0 +1,34 @@
+{
+  "service": "redirx-worker",
+  "instance": "jpfpb",
+  "revision": "5d0117bda961603987a6e5d212c38191ba61edc3",
+  "worker_pid": 40,
+  "scope": "One hour including controlled 500/501 discovery, content attempts and reruns, then partial verification. Not a full-size capacity bound.",
+  "remote_output": "/tmp/pivot-paid-501-jpfpb.jsonl",
+  "summary": {
+    "state": "duration_complete",
+    "samples": 721,
+    "elapsed_seconds": 3600.001,
+    "sampled_max_memory_current_bytes": 283369472,
+    "minimum_temporary_available_bytes": 42440183808,
+    "memory_events_delta": {
+      "low": 0,
+      "high": 0,
+      "max": 0,
+      "oom": 0,
+      "oom_kill": 0,
+      "oom_group_kill": 0
+    },
+    "cpu_stat_delta": {
+      "usage_usec": 193116295,
+      "user_usec": 159699841,
+      "system_usec": 33416455,
+      "core_sched.force_idle_usec": 0,
+      "nr_periods": 14774,
+      "nr_throttled": 508,
+      "throttled_usec": 25602801,
+      "nr_bursts": 0,
+      "burst_usec": 0
+    }
+  }
+}

@@ -1,9 +1,9 @@
 import type { NavigateFunction } from 'react-router-dom';
 import { ApiError } from '../utils/errorHandler';
+import { clearBrowserSession } from '../lib/authSessionStorage';
 
 export function clearAuthTokens(): void {
-  localStorage.removeItem('access_token');
-  localStorage.removeItem('refresh_token');
+  clearBrowserSession();
 }
 
 export function isUnauthorizedError(error: unknown): boolean {

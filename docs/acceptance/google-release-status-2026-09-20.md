@@ -16,3 +16,7 @@ A scoped free-account connect operation generated a consent URL for configuratio
 Owner action pending: align configured Data Access scopes with the three requested scopes, then inspect whatever Verification Center requires. User was asked through asynchronous input; their account/project settings rule applies. Existing connection success is not public new-user approval evidence. Google guidance: https://developers.google.com/workspace/guides/configure-oauth-consent .
 
 This is an optional Search Console release dependency; actual non-GSC free and paid journeys already pass. It is not a reason to declare the entire product broken or silently remove Search Console from the approved scope.
+
+## Owner update independently verified
+
+Dylon added the requested scopes. A fresh page reload now shows `openid`, `.../auth/userinfo.email`, and `.../auth/webmasters.readonly` under non-sensitive scopes, with no sensitive/restricted rows. Verification Center explicitly says data-access verification is not required. This closes the declared-scope/verification discrepancy. Branding is still not shown to users; do not describe the app as brand-verified. No additional data-access verification submission is required by the inspected current console. Root changed no Google setting.

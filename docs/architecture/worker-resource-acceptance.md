@@ -1,43 +1,18 @@
 # Worker memory and temporary-space acceptance
 
-> **Current decision — 2026-09-20:** the 2c-8g/$135 recommendation below is
-> withdrawn pending realistic capacity evidence; Dylon has not approved a plan
-> change. The 35,000/70,000 maximum-length URL allocations bypassed explicit
-> import admission and do not establish reachable import workloads. Explicit
-> imports have a 25 MiB HTTP body limit and a 32 MiB policy-result limit; each run
-> uses one snapshot per side. Discovery accumulation needs separate evaluation.
-> The historical measurements remain below with their original scope.
->
-> Lean candidate evidence: three fresh-process idle measurements gave median
-> peak RSS 209,371,136 bytes before lazy sklearn import and 136,560,640 after.
-> One realistic 15,000/20,000-page run with 128-character URLs, 64 KiB HTML and
-> concurrent discovery completed in 1,393.148 seconds, peaked at 198,541,312
-> worker-process bytes, and produced all 15,000 expected mappings. The two-job
-> run is pending. These are local macOS measurements using synthetic embeddings,
-> not deployed cgroup or provider acceptance. Separate PGlite children are
-> excluded from worker RSS. WebPage slots are also under review; deployed
-> concurrency remains two, and evaluating concurrency one does not authorize
-> changing its setting.
->
-> The actual Render instance t49lj had 55,216,259,072 bytes available in `/tmp`
-> at the 01:32 UTC read-only check. This closes the missing deployed disk
-> observation, not a future reservation or quota guarantee. Use the cgroup
-> observer in `scripts/capacity/deployed-worker-sampling.md` with the existing
-> daemon before choosing the cheapest configuration supported by the evidence.
-
-## Historical measurements and superseded recommendation
-
 The current Render worker allocation reported by the release owner is 0.5 CPU,
 512 MB, one instance, with `WORKER_MAX_CONCURRENT=2` and scraper limits of 12 total
 and 8 per site. This packet does not change Render settings or enable features.
 
-**A full-size job at the realistic inventory shape fits the current 512 MB
-allocation; a full-size job at the maximum permitted URL length does not, and
-cannot be imported through the explicit-import API either.** Two concurrent
-15,000/20,000 pipelines with 128-character original URLs, dense 64 KiB pages and
-streamed discovery running alongside peaked at 239,910,912 bytes in a fully
-imported worker. The same benchmark with 8,192-character original URLs peaked at
-1,266,171,904 bytes. The difference is the URL strings, not the pipeline.
+**The realistic one- and two-job runs stayed below 512 MiB in local worker
+process RSS. Deployed workload capacity remains unproven, and no compute upgrade
+is approved.** Two concurrent 15,000/20,000 pipelines with 128-character original
+URLs, dense 64 KiB pages and streamed discovery peaked at 239,910,912 bytes.
+The earlier 8,192-character benchmark peaked at 1,266,171,904 bytes, but also
+predates the lazy-import and slots changes. This comparison is not a controlled
+attribution to URL length alone. The maximum-length full arrays cannot enter
+through explicit import; discovery accumulation remains a separate reachable
+path requiring its own capacity assessment.
 
 An earlier revision of this document stated without qualification that 512 MB is
 insufficient for all valid full-size inventories, and recommended a 2c-8g plan.
@@ -66,8 +41,8 @@ the real policy code and the real serialization.
 The 128-character rows are materialised and measured exactly. The 8,192-character
 rows use a linear fit over smaller samples, verified to within 2 bytes on a third
 sample size, rather than building a 165 MB array to watch it fail a 25 MiB check.
-The binding gate is the policy JSON: **at most 1,020 maximum-length URLs per
-import request.** Individual 8,192-character URLs are still accepted; they simply
+The binding gate is the policy JSON: **at most 1,020 maximum-length ASCII URLs per
+import request for the measured policy shape. Unicode byte costs differ.** Individual 8,192-character URLs are still accepted; they simply
 cannot all arrive together.
 
 This does not make long URLs unreachable. `checkpoint_inventory_discovery`
@@ -87,11 +62,10 @@ no remote database, provider, billing or email call occurs.
 | Measurement | Peak process RSS, bytes | Scope |
 | --- | ---: | --- |
 | Fully imported idle worker, before this packet | 209,338,368 | Mean of three runs; eager sklearn import |
-| Deployed idle worker, before this packet | 214,392,832 | Release owner's cgroup sample; see *Deployed observation* |
 | Fully imported idle worker, after this packet | 135,992,661 | Mean of three runs; same services constructed |
 | Worker plus one full 15k/20k pipeline, realistic URLs | 198,541,312 | 128-character URLs, dense 64 KiB HTML, streamed discovery alongside |
 | Worker plus two full 15k/20k pipelines, realistic URLs | 239,910,912 | Same, two concurrent jobs |
-| Worker plus two full 15k/20k pipelines, maximum URLs | 1,266,171,904 | Prior run; 8,192-character URLs, otherwise identical |
+| Worker plus two full 15k/20k pipelines, maximum URLs | 1,266,171,904 | Prior run; 8,192-character URLs and pre-lean code |
 | Earlier full 15k/20k engine benchmark | 156,663,808 | Bare engine, short URLs, 64 KiB HTML, deterministic provider |
 | Earlier dense near-2 MiB scraper | 300,400,640 | Bare scraper, 32 short-URL pages |
 | Worker plus one dense scraper | 376,766,464 | Real HTTP, 32 near-2 MiB pages |
@@ -113,13 +87,10 @@ children are not part of the deployed worker process and would not run inside it
 The single realistic pipeline completed in 1,393.148 seconds with all 15,000
 targets correct, 22 discovery cycles and one 1,120,000,000-byte spool closed.
 
-Two variables separate the 239,910,912-byte realistic run from the
-1,266,171,904-byte maximum-URL run, so the gap is a decomposition rather than a
-controlled attribution. Original URL strings account for most of it: 70,000
-one-byte-ASCII strings cost 49 bytes of header each, so one copy of the arrays is
-about 577,010,000 bytes at 8,192 characters against 12,390,000 at 128, and the
-pipeline holds more than one copy at points. The import reductions below account
-for roughly 76 MB of the remainder.
+The earlier and current runs differ in URL shape, lazy imports and WebPage
+slots. Their peak difference cannot be assigned exactly to one change. The
+separate import and page-object measurements below establish the reductions
+those narrower experiments actually tested.
 
 ## Deployed observation
 
@@ -132,27 +103,19 @@ temporary-filesystem free space of 69,969,846,272 bytes. This measurement is not
 mine and is not reproduced here; it is cited as reported.
 
 It is an idle observation on the pre-lean revision, not capacity acceptance. No
-job ran during the window. Two things follow from it and nothing else does.
+job ran during the window. The sampler ran as a separate process observing daemon
+PID 40; the sampler itself was not PID 40. The committed counters are in
+`../release-evidence/worker-idle-cgroup-0be61d1.json`.
 
-First, it cross-checks the local method. Deployed idle `memory.current` of
-214,392,832 bytes and local idle peak RSS of 209,338,368 bytes on the same
-pre-lean code differ by 2.4%, which is the first evidence that these local macOS
-numbers track the deployed cgroup at all. They are still different metrics on
-different kernels; agreement at idle is not agreement under load.
+Container `memory.current` includes the observer, other container processes and
+filesystem cache; local worker RSS is a different metric. Similar idle values
+do not validate transferring workload deltas between macOS and Render. No
+numerical projection from local RSS is used as deployed headroom evidence.
 
-Second, it removes the temporary-disk unknown for this shape. 69,969,846,272
-bytes of free space is 31 times the 2,240,000,000 bytes two full spools require,
-so temporary space is not the binding constraint the RAM discussion needs to
-resolve. It is one minimum over ten seconds, not a quota guarantee.
-
-Arithmetic that follows, clearly marked as projection and not measurement: the
-local realistic two-job run added 105,447,424 bytes over its local idle baseline.
-If that delta carried to the deployed cgroup unchanged, a pre-lean deployed
-worker running the same two jobs would sit near 319,840,256 bytes against the
-536,870,912-byte cap, and a post-lean one near 246,494,549. Both are under the
-cap; the first leaves 40% headroom and the second 54%. Neither number has been
-observed. The delta is the part most likely not to transfer, because it is where
-allocator behaviour, page cache and the 0.5 CPU pacing all differ.
+Available temporary space exceeded the two-spool requirement during this window.
+That closes the missing deployed filesystem observation, but does not establish
+a reservation or future quota. Recheck admission for every job and retain the
+existing failure/retry behavior if available space changes.
 
 ## Import and per-page reductions in this packet
 

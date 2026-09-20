@@ -1,5 +1,32 @@
 # Worker memory and temporary-space acceptance
 
+> **Current decision — 2026-09-20:** the 2c-8g/$135 recommendation below is
+> withdrawn pending realistic capacity evidence; Dylon has not approved a plan
+> change. The 35,000/70,000 maximum-length URL allocations bypassed explicit
+> import admission and do not establish reachable import workloads. Explicit
+> imports have a 25 MiB HTTP body limit and a 32 MiB policy-result limit; each run
+> uses one snapshot per side. Discovery accumulation needs separate evaluation.
+> The historical measurements remain below with their original scope.
+>
+> Lean candidate evidence: three fresh-process idle measurements gave median
+> peak RSS 209,371,136 bytes before lazy sklearn import and 136,560,640 after.
+> One realistic 15,000/20,000-page run with 128-character URLs, 64 KiB HTML and
+> concurrent discovery completed in 1,393.148 seconds, peaked at 198,541,312
+> worker-process bytes, and produced all 15,000 expected mappings. The two-job
+> run is pending. These are local macOS measurements using synthetic embeddings,
+> not deployed cgroup or provider acceptance. Separate PGlite children are
+> excluded from worker RSS. WebPage slots are also under review; deployed
+> concurrency remains two, and evaluating concurrency one does not authorize
+> changing its setting.
+>
+> The actual Render instance t49lj had 55,216,259,072 bytes available in `/tmp`
+> at the 01:32 UTC read-only check. This closes the missing deployed disk
+> observation, not a future reservation or quota guarantee. Use the cgroup
+> observer in `scripts/capacity/deployed-worker-sampling.md` with the existing
+> daemon before choosing the cheapest configuration supported by the evidence.
+
+## Historical measurements and superseded recommendation
+
 The current Render worker allocation reported by the release owner is 0.5 CPU,
 512 MB, one instance, with `WORKER_MAX_CONCURRENT=2` and scraper limits of 12 total
 and 8 per site. This packet does not change Render settings or enable features.

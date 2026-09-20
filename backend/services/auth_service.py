@@ -3,9 +3,11 @@ Authentication service using Supabase Auth.
 Handles user registration, login, token management, and verification.
 """
 from typing import Any, Dict, Optional
-from supabase import Client
+from supabase import Client, ClientOptions, create_client
+from contextlib import contextmanager
+import httpx
 from functools import wraps
-from flask import request, jsonify
+from flask import request, jsonify, after_this_request, has_request_context
 import logging
 import sys
 import os
@@ -16,6 +18,7 @@ SRC_DIR = os.path.join(BASE_DIR, "src")
 sys.path.insert(0, SRC_DIR)
 
 from redirx.database import SupabaseClient
+from redirx.config import Config
 
 
 logger = logging.getLogger(__name__)
@@ -43,14 +46,83 @@ class AuthServiceError(Exception):
 class AuthService:
     """Handles all authentication operations."""
 
-    def __init__(self, client: Optional[Client] = None):
+    def __init__(self, client: Optional[Client] = None, *, auth_client: Optional[Client] = None):
         """
         Initialize auth service.
 
         Args:
-            client: Optional Supabase client (uses singleton if not provided)
+            client: Caller-owned compatibility client for DB and, unless supplied
+                separately, auth. Production defaults never share these roles.
+            auth_client: Optional caller-owned auth client for isolated tests.
         """
-        self.client = client or SupabaseClient.get_client()
+        self._database_client = client
+        self._injected_auth_client = auth_client if auth_client is not None else client
+        self._database_http = None
+        self._close_registered = False
+
+    @staticmethod
+    def _new_owned_client(*, database=False):
+        """Fresh service-key client with an explicitly owned HTTP transport.
+
+        User sign-in changes SDK headers even with persistence disabled. Auth
+        clients therefore never become privileged database clients. Disabling
+        refresh as well prevents a server timer from rotating a browser's token.
+        """
+        Config.validate()
+        options = ClientOptions(auto_refresh_token=False, persist_session=False)
+        kwargs = {'timeout': options.postgrest_client_timeout} if database else {}
+        transport = httpx.Client(follow_redirects=True, http2=True, **kwargs)
+        options.httpx_client = transport
+        try:
+            return create_client(Config.SUPABASE_URL, Config.SUPABASE_KEY, options), transport
+        except BaseException:
+            transport.close()
+            raise
+
+    @contextmanager
+    def _auth(self):
+        if self._injected_auth_client is not None:
+            yield self._injected_auth_client.auth
+            return
+        client, transport = self._new_owned_client()
+        try:
+            yield client.auth
+        finally:
+            transport.close()
+
+    @property
+    def client(self):
+        """Privileged profile DB compatibility surface; never signed in as a user.
+
+        Flask closes its owned transport after the response is constructed.
+        Outside Flask, direct `.client` users must use `with AuthService()` or
+        call close(); get_user_profile() handles its own non-request lifetime.
+        Injected clients remain caller-owned and are never closed here.
+        """
+        if self._database_client is None:
+            self._database_client, self._database_http = self._new_owned_client(database=True)
+        if self._database_http is not None and has_request_context() and not self._close_registered:
+            self._close_registered = True
+
+            @after_this_request
+            def close_profile_transport(response):
+                self.close()
+                return response
+
+        return self._database_client
+
+    def close(self):
+        if self._database_http is not None:
+            self._database_http.close()
+            self._database_http = None
+            self._database_client = None
+        self._close_registered = False
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        self.close()
 
     def register(self, email: str, password: str, full_name: str = "") -> Dict:
         """
@@ -67,15 +139,16 @@ class AuthService:
         Raises:
             Exception: If registration fails (duplicate email, weak password, etc.)
         """
-        response = self.client.auth.sign_up({
-            "email": email,
-            "password": password,
-            "options": {
-                "data": {
-                    "full_name": full_name
+        with self._auth() as auth:
+            response = auth.sign_up({
+                "email": email,
+                "password": password,
+                "options": {
+                    "data": {
+                        "full_name": full_name
+                    }
                 }
-            }
-        })
+            })
 
         if not response.user:
             raise Exception("Registration failed - no user returned")
@@ -110,10 +183,11 @@ class AuthService:
             Exception: If credentials are invalid
         """
         try:
-            response = self.client.auth.sign_in_with_password({
-                "email": email,
-                "password": password
-            })
+            with self._auth() as auth:
+                response = auth.sign_in_with_password({
+                    "email": email,
+                    "password": password
+                })
         except Exception as exc:
             raise self._classify_login_exception(exc) from exc
 
@@ -144,7 +218,8 @@ class AuthService:
         }
         if email_redirect_to:
             credentials["options"] = {"email_redirect_to": email_redirect_to}
-        self.client.auth.resend(credentials)
+        with self._auth() as auth:
+            auth.resend(credentials)
 
     def _classify_login_exception(self, exc: Exception) -> AuthServiceError:
         message = str(exc).lower()
@@ -208,13 +283,16 @@ class AuthService:
 
     def logout(self, access_token: str) -> None:
         """
-        Logout user (invalidate session).
+        Revoke the caller's refresh session. Existing access JWTs expire normally.
 
         Args:
-            access_token: JWT access token to invalidate
+            access_token: Explicit JWT identifying the caller's session
         """
+        if not isinstance(access_token, str) or not access_token.strip():
+            return
         try:
-            self.client.auth.sign_out()
+            with self._auth() as auth:
+                auth.admin.sign_out(access_token, scope="local")
         except Exception:
             # Logout errors are non-critical
             pass
@@ -232,7 +310,13 @@ class AuthService:
         Raises:
             Exception: If refresh token is invalid or expired
         """
-        response = self.client.auth.refresh_session(refresh_token)
+        if not isinstance(refresh_token, str) or not refresh_token.strip():
+            raise AuthServiceError(
+                code="auth_invalid_refresh_token", user_message="Session expired. Please log in again.",
+                status_code=401, retryable=False, next_action="login",
+            )
+        with self._auth() as auth:
+            response = auth.refresh_session(refresh_token)
 
         if not response.session:
             raise AuthServiceError(
@@ -258,8 +342,11 @@ class AuthService:
         Returns:
             User data if valid, None if invalid/expired
         """
+        if not isinstance(token, str) or not token.strip():
+            return None
         try:
-            response = self.client.auth.get_user(token)
+            with self._auth() as auth:
+                response = auth.get_user(token)
             return response.user
         except Exception:
             return None
@@ -277,14 +364,18 @@ class AuthService:
         Raises:
             Exception: If user not found
         """
-        result = self.client.table('user_profiles').select('*').eq(
-            'id', user_id
-        ).single().execute()
+        try:
+            result = self.client.table('user_profiles').select('*').eq(
+                'id', user_id
+            ).single().execute()
 
-        if not result.data:
-            raise Exception(f"User profile not found for id: {user_id}")
+            if not result.data:
+                raise Exception(f"User profile not found for id: {user_id}")
 
-        return result.data
+            return result.data
+        finally:
+            if not has_request_context():
+                self.close()
 
 
 # ============================================================================

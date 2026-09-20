@@ -158,13 +158,29 @@ The eight real HTTP body tests cover early termination of huge chunked responses
 compression bombs, invalid gzip, CMS/archive fallbacks, root reachability, disk
 failure, cancellation cleanup, and unchanged legacy behavior.
 
-Final combined restart acceptance used three fresh engine processes: the first
+Earlier 500-page restart acceptance used three fresh engine processes: the first
 committed 1,100 embeddings and 125 mappings before abrupt exit; the second made
 zero embedding calls and completed the remaining 375 mappings; the third made
 zero provider/candidate/write calls. All originals and tail targets remained
 correct with no duplicate rows (`restart-body-500.json`). The corrected 052
 namespace tests passed 160 actual vector queries across public and extensions
 schemas, including restricted operator lookup.
+
+The full 15,000-old/20,000-new restart fixture subsequently passed in 712.689
+engine seconds (`scripts/capacity/evidence/restart-15000.json`). The first engine
+exited abruptly after 35,000 persisted embeddings and 3,750 mappings; a fresh
+engine completed the remaining 11,250 mappings with zero embedding calls. A third
+engine made zero embedding, candidate, or mapping writes. All 15,000 exact targets,
+including tail/query/case/slash identities, survived without duplicate rows.
+Each process used a 48,605,548-byte disk spool: the crashed process's spool was
+unlinked before exit, and both successful processes explicitly closed theirs;
+all child processes were reaped and their private spool directories were empty.
+The receipt includes SHA-256 identities for eight unchanged runtime/fixture files.
+This proves sequential actual engine-process restart with deterministic local
+embeddings and PGlite/pgvector, not overlapping worker ownership or deployed
+capacity. No paid provider calls occurred. Reproduce with the restart command
+above using `--old 15000 --new 20000 --stop-after 3750 --timeout-seconds 3600`
+and a fresh output path and isolated `CAPACITY_DATABASE_DIR`.
 
 ## Pivot-only limits and release wiring
 

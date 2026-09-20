@@ -19,7 +19,7 @@ describe('pivot browser transport', () => {
     await listPivotMatches('m/a', 'r/b', 'opaque+/cursor', signal);
     await resolvePivotMatch('m/a', 'r/b', { mapping_id: 'x', expected_revision: 2, action: 'set_target',
       target_url: 'https://new.example/Case?x=1' }, 'stable-key', signal);
-    expect(fetchMock.mock.calls[0][0]).toContain('/migrations/m%2Fa/runs/r%2Fb/matches?filter=needs_review&limit=20&cursor=opaque%2B%2Fcursor');
+    expect(fetchMock.mock.calls[0][0]).toContain('/migrations/m%2Fa/runs/r%2Fb/matches?filter=all&limit=20&cursor=opaque%2B%2Fcursor');
     expect(fetchMock.mock.calls[0][1]).toMatchObject({ signal, headers: { Authorization: 'Bearer browser-token' } });
     expect(fetchMock.mock.calls[1][1]).toMatchObject({ method: 'PATCH', signal });
     expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({ idempotency_key: 'stable-key',
@@ -96,6 +96,13 @@ describe('pivot browser transport', () => {
   it.each([undefined, null, '', 'quote-operation-not-a-uuid'])('refuses missing or malformed checkout operation %s before sending a request', async operation => {
     await expect(checkout('migration-1', 'quote-1', operation as unknown as string, 'retry-key')).rejects.toMatchObject({ code: 'invalid_response' });
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it.each(['all', 'needs_review', 'unmatched', 'rejected', 'approved'] as const)('preserves the explicit %s mapping filter and its cursor', async filter => {
+    fetchMock.mockResolvedValue(response(envelope({ items: [], next_cursor: null })));
+    await listPivotMatches('m', 'r', 'opaque+/cursor', undefined, filter);
+    const url = new URL(fetchMock.mock.calls[0][0], 'https://fixture.invalid');
+    expect(Object.fromEntries(url.searchParams)).toEqual({ filter, limit: '20', cursor: 'opaque+/cursor' });
   });
 
 });

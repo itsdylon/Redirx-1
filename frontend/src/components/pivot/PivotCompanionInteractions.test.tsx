@@ -154,7 +154,7 @@ describe('migration decisions and payment', () => {
     handler = r => r.url.pathname.endsWith('/matches') ? failure('Exception review is temporarily unavailable.') : ordinary(r);
     mountDetail();
     expect(await screen.findByRole('alert')).toHaveTextContent('Exception review is temporarily unavailable.');
-    expect(screen.queryByText('No exceptions on this page.')).not.toBeInTheDocument();
+    expect(screen.queryByText('No saved mappings match this filter.')).not.toBeInTheDocument();
   });
 
   it('retains a row and explains a per-row partial failure rather than reporting a saved decision', async () => {
@@ -189,12 +189,83 @@ describe('migration decisions and payment', () => {
       next_cursor: r.url.searchParams.has('cursor') ? null : 'exceptions+/next',
     })) : ordinary(r);
     const user = userEvent.setup(); mountDetail();
-    await user.click(await screen.findByRole('button', { name: 'Load more exceptions' }));
+    await user.click(await screen.findByRole('button', { name: 'Load more mappings' }));
     expect(await screen.findByLabelText('Destination for https://old.example/b')).toBeInTheDocument();
     expect(screen.getByLabelText('Destination for https://old.example/a')).toBeInTheDocument();
     expect(paths('/matches')[1].url.searchParams.get('cursor')).toBe('exceptions+/next');
     expect(screen.getAllByText(/Search traffic not measured/)).toHaveLength(2);
-    expect(screen.queryByRole('button', { name: 'Load more exceptions' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Load more mappings' })).not.toBeInTheDocument();
+  });
+});
+
+describe('mapping visibility and filter pagination', () => {
+  const unmatched = { ...row('unmatched'), new_url: null, review_status: 'unmatched' };
+  const deferred = { ...row('deferred'), review_status: 'defer' };
+  const approved = { ...row('approved'), review_status: 'approved' };
+
+  it('defaults to all saved mappings including null targets, with explicit filters and loaded counts', async () => {
+    handler = r => {
+      if (!r.url.pathname.endsWith('/matches')) return ordinary(r);
+      const filter = r.url.searchParams.get('filter');
+      const items = filter === 'unmatched' ? [unmatched] : filter === 'needs_review' ? [row('review'), deferred]
+        : filter === 'approved' ? [approved] : r.url.searchParams.has('cursor') ? [deferred, approved] : [unmatched, row('review')];
+      return json(envelope({ items, next_cursor: filter === 'all' && !r.url.searchParams.has('cursor') ? 'all+/next' : null }));
+    };
+    const user = userEvent.setup(); mountDetail();
+    expect(await screen.findByRole('heading', { name: 'Mapping review' })).toBeInTheDocument();
+    await screen.findByLabelText('Destination for https://old.example/unmatched');
+    expect(screen.getByRole('combobox', { name: 'Show mappings' })).toHaveValue('all');
+    expect(paths('/matches')[0].url.searchParams.get('filter')).toBe('all');
+    expect(screen.getByText('2 saved mappings loaded for this filter; more available.')).toBeInTheDocument();
+    const unmatchedRow = screen.getByLabelText('Destination for https://old.example/unmatched').closest('li')!;
+    expect(within(unmatchedRow).getByText(/No destination/)).toBeInTheDocument();
+    expect(within(unmatchedRow).getByRole('button', { name: 'Approve', exact: true })).toBeDisabled();
+    expect(within(unmatchedRow).getByRole('button', { name: 'Defer' })).toBeEnabled();
+    await user.click(screen.getByRole('button', { name: 'Load more mappings' }));
+    await screen.findByLabelText('Destination for https://old.example/approved');
+    expect(screen.getByText('4 saved mappings loaded for this filter.')).toBeInTheDocument();
+    expect(paths('/matches')[1].url.searchParams.get('filter')).toBe('all');
+    expect(paths('/matches')[1].url.searchParams.get('cursor')).toBe('all+/next');
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Show mappings' }), 'needs_review');
+    await screen.findByLabelText('Destination for https://old.example/deferred');
+    expect(screen.queryByLabelText('Destination for https://old.example/unmatched')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Destination for https://old.example/approved')).not.toBeInTheDocument();
+    expect(paths('/matches')[2].url.searchParams.has('cursor')).toBe(false);
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Show mappings' }), 'unmatched');
+    await screen.findByLabelText('Destination for https://old.example/unmatched');
+    expect(screen.getByText('1 saved mapping loaded for this filter.')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Destination for https://old.example/deferred')).not.toBeInTheDocument();
+  });
+
+  it('aborts old-filter pagination and ignores late rows when the selection changes', async () => {
+    let finish!: (response: Response) => void;
+    handler = r => {
+      if (!r.url.pathname.endsWith('/matches')) return ordinary(r);
+      if (r.url.searchParams.has('cursor')) return new Promise(resolve => { finish = resolve; });
+      const isUnmatched = r.url.searchParams.get('filter') === 'unmatched';
+      return json(envelope({ items: isUnmatched ? [unmatched] : [row('a')], next_cursor: isUnmatched ? null : 'old-filter-cursor' }));
+    };
+    const user = userEvent.setup(); mountDetail();
+    await user.click(await screen.findByRole('button', { name: 'Load more mappings' }));
+    const oldSignal = paths('/matches')[1].init.signal!;
+    expect(oldSignal.aborted).toBe(false);
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Show mappings' }), 'unmatched');
+    await screen.findByLabelText('Destination for https://old.example/unmatched');
+    expect(oldSignal.aborted).toBe(true);
+    await act(async () => { finish(json(envelope({ items: [approved], next_cursor: 'stale-cursor' }))); });
+    expect(screen.queryByLabelText('Destination for https://old.example/approved')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Load more mappings' })).not.toBeInTheDocument();
+    expect(paths('/matches')[2].url.searchParams.get('filter')).toBe('unmatched');
+    expect(paths('/matches')[2].url.searchParams.has('cursor')).toBe(false);
+  });
+
+  it('labels saved results from a failed run as incomplete instead of implying full coverage', async () => {
+    handler = r => r.url.pathname.endsWith('/matches') ? json(envelope({ items: [], next_cursor: null }))
+      : json(envelope(detail({ run: { status: 'failed' } }), { status: 'failed', next_action: 'retry' }));
+    mountDetail();
+    expect(await screen.findByText('No saved mappings match this filter.')).toBeInTheDocument();
+    expect(screen.getByText('This run has not completed successfully. Saved mappings may be incomplete.')).toBeInTheDocument();
+    expect(screen.queryByText(/No exceptions/)).not.toBeInTheDocument();
   });
 });
 

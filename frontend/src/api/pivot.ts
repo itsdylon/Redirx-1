@@ -6,6 +6,7 @@ export interface PivotEnvelope<T = Record<string, unknown>> {
   error: { code: string; message: string; retryable: boolean; next_action: string } | null;
 }
 export interface PivotMigration { id: string; name?: string | null; old_origin?: string; new_origin?: string; status?: string; }
+export type PivotMatchFilter = 'all' | 'needs_review' | 'unmatched' | 'rejected' | 'approved';
 export interface PivotMatch {
   mapping_id: string; old_url: string; new_url?: string | null; decision_target?: string | null;
   revision: number; review_status: string; traffic_observed: boolean; traffic_clicks: number | null;
@@ -59,9 +60,9 @@ export const listPivotMigrations = (cursor?: string, signal?: AbortSignal) =>
   request<{ items: PivotMigration[]; next_cursor?: string | null }>(`/migrations?limit=20${cursor ? `&cursor=${part(cursor)}` : ''}`, { signal });
 export const getPivotMigration = (id: string, signal?: AbortSignal) =>
   request<MigrationDetail>(`/migrations/${part(id)}`, { signal });
-export const listPivotMatches = (migration: string, run: string, cursor?: string, signal?: AbortSignal) =>
+export const listPivotMatches = (migration: string, run: string, cursor?: string, signal?: AbortSignal, filter: PivotMatchFilter = 'all') =>
   request<{ items: PivotMatch[]; next_cursor?: string | null; selection_revision: number }>(
-    `/migrations/${part(migration)}/runs/${part(run)}/matches?filter=needs_review&limit=20${cursor ? `&cursor=${part(cursor)}` : ''}`, { signal });
+    `/migrations/${part(migration)}/runs/${part(run)}/matches?filter=${part(filter)}&limit=20${cursor ? `&cursor=${part(cursor)}` : ''}`, { signal });
 export const resolvePivotMatch = (migration: string, run: string, decision: Record<string, unknown>, key: string, signal?: AbortSignal) =>
   request<{ outcomes: Array<{ code: string; message?: string }> }>(`/migrations/${part(migration)}/runs/${part(run)}/matches`,
     { ...post({ decisions: [decision], idempotency_key: key }, signal), method: 'PATCH' });

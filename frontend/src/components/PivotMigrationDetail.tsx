@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { checkout, downloadArtifact, getPivotMigration, listPivotMatches, monitoring, resolvePivotMatch,
-  type MigrationDetail, type MonitoringData, type MonitoringIssue, type PivotEnvelope, type PivotMatch } from '../api/pivot';
+  type MigrationDetail, type MonitoringData, type MonitoringIssue, type PivotEnvelope, type PivotMatch, type PivotMatchFilter } from '../api/pivot';
 import { ToolLayout } from './ToolLayout';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -67,6 +67,8 @@ export function PivotMigrationDetail() {
   const scope = useRequestScope(migrationId);
   const [summary, setSummary] = useState<PivotEnvelope<MigrationDetail> | null>(null);
   const [rows, setRows] = useState<PivotMatch[]>([]);
+  const [matchFilter, setMatchFilter] = useState<PivotMatchFilter>('all');
+  const [pageLoading, setPageLoading] = useState(false);
   const [next, setNext] = useState<string | null>(null);
   const [targets, setTargets] = useState<Record<string, string>>({});
   const [message, setMessage] = useState('');
@@ -74,17 +76,19 @@ export function PivotMigrationDetail() {
   const [matchesLoaded, setMatchesLoaded] = useState(false);
   const [busy, setBusy] = useState(false);
   const [refresh, setRefresh] = useState(0);
+  const mappingScope = useRequestScope(`${migrationId}:${summary?.data.run_id || ''}:${matchFilter}:${refresh}`);
   useEffect(() => {
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
-    setLoading(true); setMessage(''); setMatchesLoaded(false);
+    setLoading(true); setMessage(''); setMatchesLoaded(false); setPageLoading(false);
+    setRows([]); setNext(null);
     void (async () => {
       try {
         const result = await getPivotMigration(migrationId, controller.signal);
         if (controller.signal.aborted) return;
         setSummary(result);
         if (result.data.run_id && !['queued', 'running'].includes(result.data.run?.status || '')) {
-          const matches = await listPivotMatches(migrationId, result.data.run_id, undefined, controller.signal);
+          const matches = await listPivotMatches(migrationId, result.data.run_id, undefined, controller.signal, matchFilter);
           if (controller.signal.aborted) return;
           setRows(matches.data.items); setNext(matches.data.next_cursor || null); setMatchesLoaded(true);
         } else { setRows([]); setNext(null); }
@@ -94,7 +98,7 @@ export function PivotMigrationDetail() {
       finally { if (!controller.signal.aborted) setLoading(false); }
     })();
     return () => { controller.abort(); clearTimeout(timer); };
-  }, [migrationId, refresh]);
+  }, [migrationId, refresh, matchFilter]);
   async function perform(action: (signal: AbortSignal) => Promise<void>) {
     const signal = scope.signal();
     setBusy(true); setMessage('');
@@ -116,10 +120,15 @@ export function PivotMigrationDetail() {
     });
   }
   async function more() {
-    await perform(async signal => {
-      const result = await listPivotMatches(migrationId, summary!.data.run_id!, next!, signal);
+    if (!next || !summary?.data.run_id || pageLoading) return;
+    const signal = mappingScope.signal();
+    setPageLoading(true); setMessage('');
+    try {
+      const result = await listPivotMatches(migrationId, summary.data.run_id, next, signal, matchFilter);
       if (!signal.aborted) { setRows(current => [...current, ...result.data.items]); setNext(result.data.next_cursor || null); }
-    });
+    } catch (e) {
+      if (!signal.aborted) setMessage(e instanceof Error ? e.message : 'More mappings could not load. Try again.');
+    } finally { if (!signal.aborted) setPageLoading(false); }
   }
   async function pay() {
     await perform(async signal => {
@@ -164,15 +173,27 @@ export function PivotMigrationDetail() {
       {!summary?.operation_id && <p role="alert">Payment details are incomplete. Refresh the migration before trying checkout again.</p>}
       <Button disabled={busy || loading || !summary?.operation_id} onClick={() => void pay()}>Continue to checkout</Button>
     </section>}
-    {data?.run_id && <section className="space-y-3 border-t pt-6" aria-labelledby="exceptions-heading">
-      <h2 id="exceptions-heading" className="text-lg font-semibold">Exception review</h2>
+    {data?.run_id && <section className="space-y-3 border-t pt-6" aria-labelledby="mappings-heading">
+      <h2 id="mappings-heading" className="text-lg font-semibold">Mapping review</h2>
       <p className="text-sm text-muted-foreground">Approve only a relevant destination. Leave uncertain decisions for review with your agent.</p>
-      {!loading && matchesLoaded && !rows.length && <p className="text-sm">No exceptions on this page.</p>}
+      <label className="block space-y-2 text-sm">Show mappings
+        <select className="block rounded-md border border-input bg-background px-3 py-2" value={matchFilter}
+          disabled={busy || loading} onChange={event => setMatchFilter(event.target.value as PivotMatchFilter)}>
+          <option value="all">All mappings</option>
+          <option value="needs_review">Needs review or deferred</option>
+          <option value="unmatched">Unmatched</option>
+          <option value="rejected">Rejected or intentionally removed</option>
+          <option value="approved">Approved</option>
+        </select>
+      </label>
+      {data.run?.status !== 'succeeded' && <p className="text-sm text-muted-foreground">This run has not completed successfully. Saved mappings may be incomplete.</p>}
+      {!loading && matchesLoaded && <p className="text-sm text-muted-foreground">{rows.length} saved {rows.length === 1 ? 'mapping' : 'mappings'} loaded for this filter{next ? '; more available' : ''}.</p>}
+      {!loading && matchesLoaded && !rows.length && <p className="text-sm">No saved mappings match this filter.</p>}
       <ul className="divide-y">{rows.map(row => <li key={row.mapping_id} className="space-y-3 py-4">
         <p className="break-all text-sm font-medium">{row.old_url} → {row.decision_target || row.new_url || 'No destination'}</p>
         <p className="text-sm text-muted-foreground">{row.review_status.replaceAll('_', ' ')}. {row.traffic_observed ? `${row.traffic_clicks ?? 0} observed search clicks` : 'Search traffic not measured'}</p>
         <div className="flex flex-wrap gap-2">
-          <Button disabled={busy || loading} onClick={() => void decide(row, 'approve')}>Approve</Button>
+          <Button disabled={busy || loading || !row.new_url} onClick={() => void decide(row, 'approve')}>Approve</Button>
           <Button variant="outline" disabled={busy || loading} onClick={() => void decide(row, 'reject')}>Reject</Button>
           <Button variant="outline" disabled={busy || loading} onClick={() => void decide(row, 'defer')}>Defer</Button>
         </div>
@@ -182,7 +203,7 @@ export function PivotMigrationDetail() {
         </label>
         <Button variant="outline" disabled={busy || loading || !targets[row.mapping_id]} onClick={() => void decide(row, 'set_target')}>Set destination</Button>
       </li>)}</ul>
-      {next && <Button variant="outline" disabled={busy || loading} onClick={() => void more()}>Load more exceptions</Button>}
+      {next && <Button variant="outline" disabled={busy || loading || pageLoading} onClick={() => void more()}>{pageLoading ? 'Loading mappings…' : 'Load more mappings'}</Button>}
     </section>}
     {data?.artifact && <section className="space-y-3 border-t pt-6">
       <h2 className="text-lg font-semibold">Redirect artifact</h2>

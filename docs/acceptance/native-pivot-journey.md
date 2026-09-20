@@ -31,7 +31,9 @@ to the Node bridge.
 Use the app's existing Python virtual environment and Node 24.21.0.
 
 The fixture applies real 006/009/019/026/027/031/032 and all migration SQL from
-034 through 051, plus 024 for Search Console storage. The earlier session and
+034 through 051 and 053 through 056, plus 024 for Search Console storage.
+052 needs pgvector and has a separate actual-vector acceptance suite; it is not
+replaced with a fake vector function here. The earlier session and
 mapping table shapes are supplied as minimal fixtures; all relevant later
 constraints, security definer functions, grants, and ownership filters remain
 active. SQL uses service_role as production's trusted backend does. This is not

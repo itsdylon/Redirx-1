@@ -1,0 +1,155 @@
+{
+  "source": "actual production public/auth schema archive; synthetic data only",
+  "source_schema_sha256": "7043809436dd9b8b9f728e73b64075b681cb0de0cdaa0d47fa9d5b99b6b4baa3",
+  "limitations": [
+    "PGlite runtime, not hosted PostgREST or native production server",
+    "Provider-managed storage/realtime/vault/extension administration schemas excluded",
+    "DDL runs as a non-superuser proxy with production owner attributes and inherited postgres object authority; existing SECURITY DEFINER functions still retain bootstrap owners",
+    "Synthetic records, no production user data copied"
+  ],
+  "migrations": [
+    {
+      "file": "032_durable_migrations.sql",
+      "sha256": "b70eb8cce3eddeac71baaa5029609e1ff85020a4a084ed800fd1d8260d6f8bac",
+      "milliseconds": 20
+    },
+    {
+      "file": "034_atomic_inventory_import.sql",
+      "sha256": "d8f09ebe23c380b0d63bc234f4984172e5040f310e53ebc2cec22cf9d2f3fd71",
+      "milliseconds": 1
+    },
+    {
+      "file": "035_atomic_migration_planning.sql",
+      "sha256": "ff3b038cad585eb04403e0b1d0cd19363f9465a9402156f067845f5bca101d09",
+      "milliseconds": 2
+    },
+    {
+      "file": "036_migration_quotes_grants.sql",
+      "sha256": "a66dcf232530b1fffef67ac94d7001dddf821092a44fa94aaf1369ce2b962e3a",
+      "milliseconds": 8
+    },
+    {
+      "file": "037_entitled_migration_runs.sql",
+      "sha256": "b01f8ca139bcf149afb745d5c4d1f5277b728bae46beb6f4ec9d5c07f4794fcf",
+      "milliseconds": 4
+    },
+    {
+      "file": "038_mapping_decisions.sql",
+      "sha256": "74ee031b261e4ee1ed602ce95fe16c5412874e180f3b71856e2c11a6a44bb3fd",
+      "milliseconds": 4
+    },
+    {
+      "file": "039_migration_test_checkout.sql",
+      "sha256": "072d18f2e43a907a158203d175bfb6e3ece5fd2655e7bf82fb5f09f54b143ac2",
+      "milliseconds": 5
+    },
+    {
+      "file": "040_agent_search_console.sql",
+      "sha256": "f70b861ed846fc1dfe51e4c19753f6a93115cd565aded4e8150fa5f4936a07f1",
+      "milliseconds": 4
+    },
+    {
+      "file": "041_artifact_deployments.sql",
+      "sha256": "cdf08be97e04a868db665d56a29f883580afc3cd1d9a36670fa6b4c2fbf88f5d",
+      "milliseconds": 6
+    },
+    {
+      "file": "042_subscription_allowances.sql",
+      "sha256": "f10bd453152040e654bfbfc04991cca2eb7c73d1c2eae7125c5c8ca03ccd3388",
+      "milliseconds": 11
+    },
+    {
+      "file": "043_included_verification.sql",
+      "sha256": "4136aa5f684f9a798c318f28c3c52e01ed59a3ce8e8ed44eee9bd6c4c77056a4",
+      "milliseconds": 5
+    },
+    {
+      "file": "044_resumable_inventory_discovery.sql",
+      "sha256": "3a81635ee6cb02f2179c6798f7bbc3dabc2986f09819e33a47b0afda913711d5",
+      "milliseconds": 2
+    },
+    {
+      "file": "045_recurring_monitoring.sql",
+      "sha256": "b812e7152cc39035a67c6cf7460293af920ea2e5eaa74657d2554b784aa1111d",
+      "milliseconds": 8
+    },
+    {
+      "file": "046_subscription_runtime.sql",
+      "sha256": "998e6484c900a95c2e4f0ca4b8ecc38e1ea8c25d2104cf15fd71a7ea62509f8b",
+      "milliseconds": 3
+    },
+    {
+      "file": "047_gsc_refresh_compare_and_set.sql",
+      "sha256": "2dc58b810e0c3ab247018ed3d13a8a228373ac4faab6fd45346e7cfc8a0d7c55",
+      "milliseconds": 0
+    },
+    {
+      "file": "048_studio_included_verification.sql",
+      "sha256": "0279edcdc8d02d6967d2ec1b73c40abe66c2f10b5e22a1c37b756d7b79f668c2",
+      "milliseconds": 2
+    },
+    {
+      "file": "049_subscription_checkout.sql",
+      "sha256": "fa7f59cba4cf839211a271e009a7843c1eb1cc99eaec1a6e8a7453f387480d85",
+      "milliseconds": 6
+    },
+    {
+      "file": "050_guarded_migration_engine_persistence.sql",
+      "sha256": "41a1766addc57877c1950aa1c0eeeb579d4226f890a3971e8dc67089adffadc9",
+      "milliseconds": 1
+    },
+    {
+      "file": "051_artifact_authority.sql",
+      "sha256": "3b4016c5c225729efd4564dda8607ba42bbf7ba81dce40c6d1a436bb6fa1c48b",
+      "milliseconds": 1
+    },
+    {
+      "file": "052_pivot_vector_candidate_fallback.sql",
+      "sha256": "3142bcf1982a29c5641c1329b6e1701c3490ed0b5f4edcc0f4ef542d0a8a8e2b",
+      "milliseconds": 1
+    },
+    {
+      "file": "053_pivot_privilege_hardening.sql",
+      "sha256": "357d0dcf9db5c9e91dc28809130bbf8d0204fe12c6d131c0f37714fb741135f5",
+      "milliseconds": 13
+    },
+    {
+      "file": "054_pivot_engine_evidence_mutation_fence.sql",
+      "sha256": "fe9b957c2351e364bfa1df89cf67e1447f62a0888739a8743dddd9ae63ba3a70",
+      "milliseconds": 1
+    },
+    {
+      "file": "055_pivot_parent_engine_cleanup.sql",
+      "sha256": "f997426ce78fe7ffbc8ef4c673b1e9788715fbe1671e0aa8b4398c0780c26d88",
+      "milliseconds": 0
+    },
+    {
+      "file": "056_exact_long_url_storage.sql",
+      "sha256": "3c08647513846623e5ba7e2358954ecd1741f7f6b2093579ad2831640f3ca6a3",
+      "milliseconds": 3
+    }
+  ],
+  "version": "PostgreSQL 18.3 (PGlite 0.5.8) on wasm32-unknown-emscripten, compiled by emcc (Emscripten gcc/clang-like replacement + linker emulating GNU ld) 3.1.74 (1092ec30a3fb1d46b1782ff1b4db5094d3d06ae5), 32-bit",
+  "restored_tables": 58,
+  "legacy_before": "1b0549b645feef373d2f2027c9428d3e030d5ff0b78d2c67df01032a8d0828b5",
+  "migration_owner": {
+    "current_user": "release_owner",
+    "rolsuper": false,
+    "rolbypassrls": true,
+    "rolcreaterole": true,
+    "rolcreatedb": true,
+    "auth_trigger": true
+  },
+  "legacy_after": "1b0549b645feef373d2f2027c9428d3e030d5ff0b78d2c67df01032a8d0828b5",
+  "backfill": {
+    "records": 76,
+    "runs": 76
+  },
+  "exclusion_constraints": 4,
+  "public_grants": {
+    "anon_truncate": false,
+    "browser_truncate": false,
+    "service_read": true
+  },
+  "passed": true
+}

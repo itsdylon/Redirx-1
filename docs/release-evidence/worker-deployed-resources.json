@@ -1,0 +1,22 @@
+{
+  "observed_at": "2026-09-20T01:09:35.331337+00:00",
+  "service_id": "srv-d59iq2v5r7bs7399t4c0",
+  "instance": "j4knz",
+  "revision": "017a2dcd7f4d02f6ec51edc3f13cc7cd4518c14f",
+  "method": "Read-only commands in authenticated Render Web Shell; no allocation or settings change",
+  "temporary_directory": "/tmp",
+  "filesystem": "/dev/root",
+  "disk_total_bytes": 310911414272,
+  "disk_used_bytes": 252964360192,
+  "disk_free_bytes": 57930276864,
+  "cgroup_memory_max_bytes": 536870912,
+  "cgroup_memory_current_bytes": 200470528,
+  "cgroup_cpu_max": "50000 100000",
+  "two_full_spools_bytes": 2240000000,
+  "shared_margin_bytes": 67108864,
+  "limits": [
+    "Point-in-time statvfs-visible availability, not a reserved quota or promise across deploys",
+    "Current cgroup usage includes container processes and cache, not a content-workload peak",
+    "Live revision017 predates new pipeline admission helper; this did not execute the helper on production"
+  ]
+}

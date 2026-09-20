@@ -114,7 +114,8 @@ class NativeProductJourney(unittest.TestCase):
             paths = [ROOT/'database/migrations/024_add_gsc_integration.sql',
                      ROOT/'database/migrations/038_mapping_decisions.sql', ROOT/'database/migrations/039_migration_test_checkout.sql',
                      ROOT/'database/migrations/040_agent_search_console.sql', artifact]
-            for pattern in ('042_*.sql','043_*.sql','044_*.sql','045_*.sql','046_*.sql','047_*.sql','048_*.sql','049_*.sql','050_*.sql','051_*.sql'):
+            for pattern in ('042_*.sql','043_*.sql','044_*.sql','045_*.sql','046_*.sql','047_*.sql','048_*.sql','049_*.sql','050_*.sql','051_*.sql',
+                            '053_*.sql','054_*.sql','055_*.sql','056_*.sql'):
                 paths.extend(sorted((ROOT/'database/migrations').glob(pattern)))
             for path in paths: conn.execute(path.read_text())
             conn.execute('GRANT SELECT,INSERT,UPDATE,DELETE ON url_mappings,webpage_embeddings,gsc_connections,gsc_url_metrics TO service_role')

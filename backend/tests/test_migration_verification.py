@@ -2,6 +2,7 @@
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 import os
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 import unittest
@@ -136,6 +137,123 @@ class LocalHTTPTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result['recorded'],4)
         states={ordinal:state for ordinal,state,_ in recorded}
         self.assertEqual(states,{0:'passed',1:'passed',2:'unchecked',3:'unchecked'})
+
+
+class BatchLifecycleTests(unittest.IsolatedAsyncioTestCase):
+    """Real session/probe lifecycle; HTTP responses and persistence are local fakes."""
+
+    def items(self, count=2):
+        return [{'ordinal': i, 'attempt': 1, 'source_url': f'https://old.example/{i}',
+                 'expected_url': f'https://new.example/{i}'} for i in range(count)]
+
+    async def persistence_failure(self, monitoring=False):
+        from backend.services.migration_monitoring_service import run_monitoring_batch
+        loop = asyncio.get_running_loop()
+        slow_started, release_slow, write_failed = (asyncio.Event() for _ in range(3))
+        sessions, records = [], []
+
+        async def request(session, method, url):
+            sessions.append(session)
+            if url == 'https://old.example/1':
+                slow_started.set()
+                await release_slow.wait()
+            elif url == 'https://old.example/0':
+                await slow_started.wait()
+            if session.closed:
+                raise RuntimeError('Session is closed')
+            if url.startswith('https://old.example/'):
+                return SimpleNamespace(status=301, headers={'Location': url.replace('old.', 'new.')}, release=lambda: None)
+            return SimpleNamespace(status=200, headers={}, release=lambda: None)
+
+        def record(vid, item, worker, state, finding):
+            if item['ordinal'] == 0:
+                loop.call_soon_threadsafe(write_failed.set)
+                raise RuntimeError('private persistence error must not become a site finding')
+            records.append((item['ordinal'], state, finding))
+            return True
+
+        service = SimpleNamespace(claim=lambda *_: {'verification_id': 'fixture', 'items': self.items()},
+                                  record=record, schedule_due=lambda: 1)
+        run = run_monitoring_batch if monitoring else run_verification_batch
+        with patch.object(rp, '_request', side_effect=request), patch.object(rp, 'get_limiter', return_value=None):
+            task = asyncio.create_task(run(service, 'worker', 2))
+            try:
+                await asyncio.wait_for(write_failed.wait(), 2)
+                await asyncio.sleep(.02)
+                self.assertFalse(task.done(), 'one failed write must not close the batch around an active probe')
+                self.assertTrue(sessions)
+                self.assertFalse(any(session.closed for session in sessions))
+                release_slow.set()
+                result = await asyncio.wait_for(task, 2)
+                self.assertEqual((result['claimed'], result['recorded'], result['record_failed']), (2, 1, 1))
+                self.assertTrue(result['retryable'])
+                self.assertEqual([(i, state) for i, state, _ in records], [(1, 'passed')])
+                self.assertEqual(records[0][2]['error'], None)
+                self.assertTrue(all(session.closed for session in sessions))
+                if monitoring:
+                    self.assertEqual(result['scheduled'], 1)
+            finally:
+                release_slow.set()
+                await asyncio.gather(task, return_exceptions=True)
+                await asyncio.sleep(.02)
+
+    async def test_failed_record_does_not_close_session_under_sibling_probe(self):
+        await self.persistence_failure()
+
+    async def test_monitoring_uses_the_same_failure_isolation(self):
+        await self.persistence_failure(monitoring=True)
+
+    async def test_cancellation_drains_probe_and_started_record_without_fabricated_finding(self):
+        loop = asyncio.get_running_loop()
+        write_started, probe_started, probe_finished = (asyncio.Event() for _ in range(3))
+        release_write, write_finished = threading.Event(), threading.Event()
+        sessions, recorded = [], []
+
+        async def request(session, method, url):
+            sessions.append(session)
+            if url == 'https://old.example/1':
+                probe_started.set()
+                try:
+                    await asyncio.Event().wait()
+                finally:
+                    self.assertFalse(session.closed, 'probe must unwind before session closes')
+                    probe_finished.set()
+            elif url == 'https://old.example/0':
+                await probe_started.wait()
+            if url.startswith('https://old.example/'):
+                return SimpleNamespace(status=301, headers={'Location': url.replace('old.', 'new.')}, release=lambda: None)
+            return SimpleNamespace(status=200, headers={}, release=lambda: None)
+
+        def record(vid, item, worker, state, finding):
+            loop.call_soon_threadsafe(write_started.set)
+            if not release_write.wait(3):
+                raise AssertionError('test write was not released')
+            recorded.append((item['ordinal'], state))
+            write_finished.set()
+            return True
+
+        service = SimpleNamespace(claim=lambda *_: {'verification_id': 'fixture', 'items': self.items()}, record=record)
+        with patch.object(rp, '_request', side_effect=request), patch.object(rp, 'get_limiter', return_value=None):
+            task = asyncio.create_task(run_verification_batch(service, 'worker', 2))
+            try:
+                await asyncio.wait_for(write_started.wait(), 2)
+                task.cancel()
+                await asyncio.wait_for(probe_finished.wait(), 2)
+                await asyncio.sleep(.02)
+                self.assertFalse(task.done(), 'a started synchronous write must drain before returning cancellation')
+                self.assertFalse(any(session.closed for session in sessions))
+                task.cancel()  # repeated shutdown must not interrupt the drain
+                await asyncio.sleep(.02)
+                self.assertFalse(task.done())
+                release_write.set()
+                with self.assertRaises(asyncio.CancelledError):
+                    await asyncio.wait_for(task, 2)
+                self.assertTrue(write_finished.is_set())
+                self.assertEqual(recorded, [(0, 'passed')])
+                self.assertTrue(all(session.closed for session in sessions))
+            finally:
+                release_write.set()
+                await asyncio.gather(task, return_exceptions=True)
 
 
 @unittest.skipUnless(os.getenv('PREFLIGHT_TEST_DATABASE_URL'),'requires disposable local PostgreSQL')

@@ -7,6 +7,7 @@ resolver. Worker leases, observations and progress are persisted independently.
 from __future__ import annotations
 
 import asyncio
+import logging
 
 import aiohttp
 
@@ -18,6 +19,7 @@ from .migration_repository import (MigrationRepository, MigrationRepositoryError
 from .migration_planning_service import envelope, validate_key
 
 PROBE_DEADLINE_SECONDS = 45
+logger = logging.getLogger(__name__)
 
 
 class VerificationEntitlementError(MigrationRepositoryError):
@@ -161,6 +163,8 @@ async def run_verification_batch(service, worker_id, batch_size=50):
         return {'claimed':0,'recorded':0}
     semaphore = asyncio.Semaphore(10)
     async with aiohttp.ClientSession(connector=create_safe_connector(limit=10)) as session:
+        writes = []
+
         async def one(item):
             async with semaphore:
                 try:
@@ -173,6 +177,40 @@ async def run_verification_batch(service, worker_id, batch_size=50):
                 except Exception:
                     state, finding = 'unchecked', {'issue':'worker_error','measurement':'unavailable'}
                 # Persist each finished observation, not just the end of a batch.
-                return await asyncio.to_thread(service.record,batch['verification_id'],item,worker_id,state,finding)
-        outcomes = await asyncio.gather(*(one(item) for item in batch['items']))
-    return {'verification_id':batch['verification_id'],'claimed':len(batch['items']),'recorded':sum(bool(v) for v in outcomes)}
+                # A cancelled await cannot stop a synchronous DB call. Keep its
+                # task alive so shutdown can drain it without abandoning writes.
+                write = asyncio.create_task(asyncio.to_thread(
+                    service.record,batch['verification_id'],item,worker_id,state,finding))
+                writes.append(write)
+                return await asyncio.shield(write)
+
+        tasks = [asyncio.create_task(one(item)) for item in batch['items']]
+        settled = asyncio.gather(*tasks, return_exceptions=True)
+        try:
+            # One failed persistence call must not close the shared HTTP session
+            # under sibling probes and manufacture "Session is closed" findings.
+            outcomes = await asyncio.shield(settled)
+        except asyncio.CancelledError:
+            for task in tasks:
+                task.cancel()
+            # Keep the session open until all probes have unwound, then await
+            # every already-started write. Repeated shutdown signals cannot
+            # interrupt this drain; cancellation is re-raised afterwards.
+            for pending in (settled, asyncio.gather(*writes, return_exceptions=True)):
+                while not pending.done():
+                    try:
+                        await asyncio.shield(pending)
+                    except asyncio.CancelledError:
+                        continue
+            raise
+    recorded = sum(not isinstance(value, BaseException) and bool(value) for value in outcomes)
+    failed = len(outcomes) - recorded
+    result = {'verification_id':batch['verification_id'],'claimed':len(batch['items']),'recorded':recorded}
+    if failed:
+        # No retry/fallback write is invented. Failed or fenced writes remain
+        # governed by their original lease/attempt; an uncertain commit is not
+        # called recorded. Only counts are logged, never DB/provider messages.
+        logger.warning('Verification batch could not confirm %d of %d observation writes; durable work will retry',
+                       failed, len(outcomes))
+        result.update(record_failed=failed, retryable=True)
+    return result

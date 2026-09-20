@@ -1,0 +1,184 @@
+{
+  "jobs": 2,
+  "worker_baseline": {
+    "current_rss_bytes": 202997760,
+    "peak_rss_bytes": 202997760
+  },
+  "worker_final": {
+    "current_rss_bytes": 1266171904,
+    "peak_rss_bytes": 1265811456
+  },
+  "wall_seconds": 2825.622,
+  "jobs_completed": [
+    {
+      "old_urls": 15000,
+      "new_urls": 20000,
+      "requested_html_bytes": 65536,
+      "original_url_bytes_each": 8192,
+      "dense_html": true,
+      "worker_baseline": null,
+      "wall_seconds": 2819.113,
+      "stage_timings": [
+        {
+          "stage": "Filtering URLs",
+          "seconds": 0.829
+        },
+        {
+          "stage": "Matching exact URLs",
+          "seconds": 2.933
+        },
+        {
+          "stage": "Scraping webpages",
+          "seconds": 1415.942
+        },
+        {
+          "stage": "Matching HTML content",
+          "seconds": 0.006
+        },
+        {
+          "stage": "Generating embeddings",
+          "seconds": 1066.246
+        },
+        {
+          "stage": "Pairing URLs",
+          "seconds": 330.556
+        }
+      ],
+      "python_peak_rss_bytes": 1086472192,
+      "candidate_query_plan": {
+        "Node Type": "Subquery Scan",
+        "Plans": [
+          {
+            "Node Type": "Limit",
+            "Plans": [
+              {
+                "Node Type": "Index Scan",
+                "Index Name": "webpage_embeddings_embedding_idx",
+                "Relation Name": "webpage_embeddings"
+              }
+            ]
+          }
+        ]
+      },
+      "retained_html_characters": 0,
+      "retained_text_heap_bytes": 0,
+      "temporary_content_bytes": 1120000000,
+      "content_stores_closed": true,
+      "database_child": {
+        "queries": 65673,
+        "sampled_peak_rss_bytes": 1662976000,
+        "os_peak_rss_bytes": 1663516672,
+        "current_rss_bytes": 946274304
+      },
+      "http_requests": 35002,
+      "peak_observed_http_handlers": 14,
+      "embedding_provider_calls": 35000,
+      "dimensions": 1536,
+      "candidate_sql_queries": 15000,
+      "vector_read_pages": 511,
+      "max_vector_page_rows": 97,
+      "mappings_persisted": 15000,
+      "correct_semantic_targets": 15000,
+      "semantic_recall": 1.0,
+      "acceptance_passed": true,
+      "tail_verified": true,
+      "query_case_slash_variants_verified": true,
+      "provider": "deterministic injected embeddings; no LLM exists in this content pipeline",
+      "database": "real PGlite PostgreSQL + pgvector + documented HNSW match_pages SQL",
+      "limitations": [
+        "loopback pacing disabled",
+        "synthetic content and embeddings",
+        "not a live provider/deployed worker benchmark"
+      ]
+    },
+    {
+      "old_urls": 15000,
+      "new_urls": 20000,
+      "requested_html_bytes": 65536,
+      "original_url_bytes_each": 8192,
+      "dense_html": true,
+      "worker_baseline": null,
+      "wall_seconds": 2820.452,
+      "stage_timings": [
+        {
+          "stage": "Filtering URLs",
+          "seconds": 0.879
+        },
+        {
+          "stage": "Matching exact URLs",
+          "seconds": 1.483
+        },
+        {
+          "stage": "Scraping webpages",
+          "seconds": 1416.005
+        },
+        {
+          "stage": "Matching HTML content",
+          "seconds": 0.006
+        },
+        {
+          "stage": "Generating embeddings",
+          "seconds": 1067.597
+        },
+        {
+          "stage": "Pairing URLs",
+          "seconds": 332.437
+        }
+      ],
+      "python_peak_rss_bytes": 1254817792,
+      "candidate_query_plan": {
+        "Node Type": "Subquery Scan",
+        "Plans": [
+          {
+            "Node Type": "Limit",
+            "Plans": [
+              {
+                "Node Type": "Index Scan",
+                "Index Name": "webpage_embeddings_embedding_idx",
+                "Relation Name": "webpage_embeddings"
+              }
+            ]
+          }
+        ]
+      },
+      "retained_html_characters": 0,
+      "retained_text_heap_bytes": 0,
+      "temporary_content_bytes": 1120000000,
+      "content_stores_closed": true,
+      "database_child": {
+        "queries": 65673,
+        "sampled_peak_rss_bytes": 1574928384,
+        "os_peak_rss_bytes": 1575534592,
+        "current_rss_bytes": 942555136
+      },
+      "http_requests": 35002,
+      "peak_observed_http_handlers": 10,
+      "embedding_provider_calls": 35000,
+      "dimensions": 1536,
+      "candidate_sql_queries": 15000,
+      "vector_read_pages": 511,
+      "max_vector_page_rows": 97,
+      "mappings_persisted": 15000,
+      "correct_semantic_targets": 15000,
+      "semantic_recall": 1.0,
+      "acceptance_passed": true,
+      "tail_verified": true,
+      "query_case_slash_variants_verified": true,
+      "provider": "deterministic injected embeddings; no LLM exists in this content pipeline",
+      "database": "real PGlite PostgreSQL + pgvector + documented HNSW match_pages SQL",
+      "limitations": [
+        "loopback pacing disabled",
+        "synthetic content and embeddings",
+        "not a live provider/deployed worker benchmark"
+      ]
+    }
+  ],
+  "discovery_background_cycles": 45,
+  "limitations": [
+    "macOS local process, not Render Linux cgroup",
+    "deterministic embedding provider; no live provider rate/latency proof",
+    "real concurrent pipelines and real HTTP/vector SQL; each database child measured separately",
+    "background runs actual streamed discovery parser; monitoring/watch services imported but not actively probing",
+    "dense64KiB content and8192-character original URLs; not35k maximum2MiB dense documents"
+  ]
+}

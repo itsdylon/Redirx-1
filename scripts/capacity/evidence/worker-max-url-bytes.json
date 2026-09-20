@@ -1,0 +1,38 @@
+{
+  "mode": "urls",
+  "worker_max_concurrent_default": 1,
+  "constructed_background_services": 4,
+  "baseline": {
+    "current_rss_bytes": 208977920,
+    "peak_rss_bytes": 208977920
+  },
+  "final": {
+    "current_rss_bytes": 557776896,
+    "peak_rss_bytes": 582139904
+  },
+  "wall_seconds": 0.227,
+  "details": {
+    "old_urls": 15000,
+    "new_urls": 20000,
+    "url_bytes_each": 8192,
+    "original_url_utf8_bytes": 286720000,
+    "resident_with_originals": {
+      "current_rss_bytes": 555565056,
+      "peak_rss_bytes": 582139904
+    },
+    "pipeline_started": false
+  },
+  "temporary_disk_free_bytes": 129695272960,
+  "runtime_disk_admission": {
+    "passed": true,
+    "required_free_bytes": 1187108864,
+    "available_bytes": 129695272960
+  },
+  "temporary_disk_required_full_job_bytes": 1120000000,
+  "limits": [
+    "macOS local process, not Render Linux cgroup",
+    "real worker and SDK/client construction, no live DB/provider requests",
+    "dense mode uses real scraper/local HTTP; discovery mode injects its bounded fetch result",
+    "does not establish deployed CPU throughput or safe repeated-job steady state"
+  ]
+}

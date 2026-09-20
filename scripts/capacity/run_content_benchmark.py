@@ -7,6 +7,7 @@ in a fresh process; Python and child PostgreSQL/WASM RSS are reported separately
 import argparse
 import asyncio
 from contextlib import redirect_stdout, ExitStack
+from contextvars import ContextVar
 import json
 import os
 from pathlib import Path
@@ -29,6 +30,27 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "src"))
 from src.redirx.lib import Pipeline
 from src.redirx.database import URLMappingDB
+
+
+ACTIVE_CLIENT = ContextVar('capacity_client')
+ACTIVE_PROVIDER = ContextVar('capacity_provider')
+FIXTURE_ROOTS = set()
+ORIGINAL_AIOHTTP_REQUEST = aiohttp.ClientSession._request
+
+
+async def fixture_request(session, method, url, **kwargs):
+    if not any(str(url).startswith(root + '/') for root in FIXTURE_ROOTS):
+        raise RuntimeError('Capacity fixture forbids all external HTTP')
+    return await ORIGINAL_AIOHTTP_REQUEST(session, method, url, **kwargs)
+
+
+def fixture_patches(stack):
+    stack.enter_context(patch('aiohttp.ClientSession._request', new=fixture_request))
+    stack.enter_context(patch('src.redirx.database.SupabaseClient.get_client', side_effect=lambda: ACTIVE_CLIENT.get()))
+    stack.enter_context(patch('src.redirx.stages.AsyncOpenAI', side_effect=lambda *args, **kwargs: ACTIVE_PROVIDER.get()))
+    stack.enter_context(patch('src.redirx.stages.Config.validate_embeddings', return_value=True))
+    stack.enter_context(patch('src.redirx.stages.create_safe_connector', side_effect=aiohttp.TCPConnector))
+    stack.enter_context(patch('src.redirx.stages.HostRateLimiter', return_value=NoLimit()))
 
 
 class Query:
@@ -126,6 +148,12 @@ class Embeddings:
 
 
 async def measure(args, client):
+    worker_context = None
+    worker_baseline = None
+    if args.worker_process:
+        from measure_worker_budget import construct_worker_fixture, memory
+        worker_context = construct_worker_fixture()
+        worker_baseline = memory()
     hits = 0
     rejected_outbound = 0
     active = 0
@@ -135,10 +163,12 @@ async def measure(args, client):
         hits += 1; active += 1; peak_active = max(active, peak_active)
         await asyncio.sleep(0)
         matched = re.search(r'(?:source|target)-(\d+)', request.path)
-        entity = entity_by_route.get(request.raw_path, int(matched[1]) if matched else 0)
+        routing_key = request.path + ('?q=' + request.query['q'] if 'q' in request.query else '')
+        entity = entity_by_route.get(routing_key, int(matched[1]) if matched else 0)
         side = 'old' if '/old/' in request.path else 'new'
         body = f'<html><head><title>ENTITY {entity}</title></head><body><h1>ENTITY {entity}</h1><p>Edition {side} '
-        body += 'Relevant page material about the distinct entity. ' * max(5,args.html_bytes//50)
+        unit = '<section><p>Relevant page material about the distinct entity.</p><a href="/next">Next</a></section>' if args.dense_html else 'Relevant page material about the distinct entity. '
+        body += unit * max(5,args.html_bytes//len(unit))
         body += '</p></body></html>'
         active -= 1
         return web.Response(text=body, content_type='text/html')
@@ -146,27 +176,25 @@ async def measure(args, client):
     runner = web.AppRunner(app); await runner.setup()
     site = web.TCPSite(runner, '127.0.0.1', 0); await site.start()
     root = 'http://127.0.0.1:'+str(site._server.sockets[0].getsockname()[1])
-    original_request = aiohttp.ClientSession._request
-    async def only_fixture(session, method, url, **kwargs):
-        nonlocal rejected_outbound
-        if not str(url).startswith(root + '/'):
-            rejected_outbound += 1
-            raise RuntimeError('Capacity fixture forbids all external HTTP')
-        return await original_request(session, method, url, **kwargs)
+    FIXTURE_ROOTS.add(root)
     variants = ['Variant','variant','Variant/','Variant?q=1','Variant?q=2','variant?q=1','Variant/?q=1','VARIANT']
     old_urls = [root+'/old/'+(variants[n] if n<len(variants) else f'source-{n}') for n in range(args.old)]
     new_urls = [root+'/new/'+(variants[n] if n<len(variants) else f'target-{n}') for n in range(args.new)]
     entity_by_route = {url[len(root):]: n for urls in (old_urls,new_urls) for n,url in enumerate(urls)}
+    if args.url_bytes:
+        def pad(url):
+            prefix = url + ('&' if '?' in url else '?') + 'capacity_pad='
+            assert len(prefix) < args.url_bytes
+            return prefix.ljust(args.url_bytes, 'x')
+        old_urls = [pad(url) for url in old_urls]
+        new_urls = [pad(url) for url in new_urls]
     session = client.sql("INSERT INTO migration_sessions(user_id) VALUES('fixture') RETURNING id")[0]['id']
     provider = Embeddings()
     stages = []; start = time.perf_counter()
     with ExitStack() as stack:
-        stack.enter_context(patch('aiohttp.ClientSession._request', new=only_fixture))
-        stack.enter_context(patch('src.redirx.database.SupabaseClient.get_client', return_value=client))
-        stack.enter_context(patch('src.redirx.stages.AsyncOpenAI', return_value=provider))
-        stack.enter_context(patch('src.redirx.stages.Config.validate_embeddings', return_value=True))
-        stack.enter_context(patch('src.redirx.stages.create_safe_connector', side_effect=aiohttp.TCPConnector))
-        stack.enter_context(patch('src.redirx.stages.HostRateLimiter', return_value=NoLimit()))
+        ACTIVE_CLIENT.set(client)
+        ACTIVE_PROVIDER.set(provider)
+        fixture_patches(stack)
         pipeline = Pipeline((old_urls,new_urls), session_id=UUID(session), preserve_url_identity=True)
         previous = start
         async for state in pipeline.iterate():
@@ -197,8 +225,11 @@ async def measure(args, client):
     assert retained_html == retained_text == 0, 'Pivot pages must release full HTML and spool semantic text'
     assert all(store.file.closed for store in stores.values()), 'Pipeline must close temporary content stores'
     assert all(page._text_reference[1] <= 32000 for page in pages if page._text_reference)
+    if worker_context:
+        await worker_context[2].close()
     usage = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
     return {'old_urls':args.old,'new_urls':args.new,'requested_html_bytes':args.html_bytes,
+        'original_url_bytes_each':args.url_bytes or None,'dense_html':args.dense_html,'worker_baseline':worker_baseline,
         'wall_seconds':round(time.perf_counter()-start,3),'stage_timings':stages,
         'python_peak_rss_bytes':usage if sys.platform=='darwin' else usage*1024,
         'candidate_query_plan':plan,
@@ -217,7 +248,10 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--old', type=int, default=500); parser.add_argument('--new', type=int, default=500)
     parser.add_argument('--html-bytes', type=int, default=2048); parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--url-bytes',type=int,default=0)
+    parser.add_argument('--dense-html',action='store_true');parser.add_argument('--worker-process',action='store_true')
     args = parser.parse_args()
+    assert args.url_bytes in (0,8192)
     process = subprocess.Popen(['node',str(Path(__file__).with_name('vector_fixture_server.mjs'))], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     try:
         line = process.stdout.readline()

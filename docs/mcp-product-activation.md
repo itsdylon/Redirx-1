@@ -1,7 +1,12 @@
 # MCP product activation packet
 
 Application schema032/034–056 is deployed;033 remains protected. API/worker
-currently run0be61d1 with pivot off. This packet describes the next service
+now run `5d0117b` with pivot off (verified 2026-09-20 02:38 UTC). The lean
+worker and independent Stripe webhook secrets are deployed. Worker instance
+`qzbfx` passed an idle cgroup observation at 175,509,504 bytes sampled maximum,
+with its existing 512 MiB limit and concurrency two. No full job is claimed.
+See `release-evidence/worker-idle-cgroup-5d0117b.json`.
+This packet describes the next service
 configuration, not a claim that the new product is live. Dylon has not approved
 a compute upgrade or concurrency change.
 
@@ -80,8 +85,8 @@ tests; genuine external delivery is still a separate acceptance step.
 
 ## Cutover and acceptance order
 
-1. Finish and review the lean-worker packet; pin the final descendant containing
-   the webhook correction. Keep API/worker/gateway/front-end pins explicit and
+1. **Done for API/worker:** reviewed lean and webhook code deployed from
+   `deploy/mcp-product-5d0117b` at the exact SHA. Keep gateway/front-end pins explicit and
    auto-deploy off. Preserve existing legacy environment values.
 2. Configure the scoped API/worker product variables, with worker support ready
    before new work is admitted. Enable the two test destinations only when the

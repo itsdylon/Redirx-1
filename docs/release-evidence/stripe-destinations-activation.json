@@ -1,0 +1,32 @@
+{
+  "signing_probes": {
+    "migration": {
+      "correct_secret": 200,
+      "other_destination_secret": 400,
+      "signed_live_mode_rejected": 400
+    },
+    "subscription": {
+      "correct_secret": 200,
+      "other_destination_secret": 400,
+      "signed_live_mode_rejected": 400
+    }
+  },
+  "destinations": {
+    "migration": {
+      "id": "we_1UHa9bReyTnSoYHgYVYEttju",
+      "before": "disabled",
+      "after": "enabled",
+      "livemode": false,
+      "url": "https://redirx-api.onrender.com/api/v2/billing/stripe-test/webhook"
+    },
+    "subscription": {
+      "id": "we_1UHa9bReyTnSoYHgikl6voLO",
+      "before": "disabled",
+      "after": "enabled",
+      "livemode": false,
+      "url": "https://redirx-api.onrender.com/api/v2/billing/stripe-test/subscriptions/webhook"
+    }
+  },
+  "enable_requested": true,
+  "scope": "Locally signed unsupported events verify configuration only, not Stripe delivery acceptance"
+}

@@ -1,14 +1,23 @@
 # MCP product activation packet
 
-Application schema032/034–056 is deployed;033 remains protected. API/worker
-now run `5d0117b` with pivot off (verified 2026-09-20 02:38 UTC). The lean
-worker and independent Stripe webhook secrets are deployed. Worker instance
-`qzbfx` passed an idle cgroup observation at 175,509,504 bytes sampled maximum,
-with its existing 512 MiB limit and concurrency two. No full job is claimed.
+Application schema032/034–056 is deployed;033 remains protected. API, worker,
+gateway and companion run `5d0117b` with the product flags enabled and billing
+set to `test_only` (2026-09-20 02:50 UTC). The broker remains pinned at017.
+The current worker is one 512 MiB /0.5 CPU instance with concurrency two.
+Dylon has not approved a compute upgrade or concurrency change; the earlier
+8 GB/$135 recommendation is withdrawn pending realistic deployed measurements.
+
+At03:10 UTC native OAuth and the actual eleven-tool list passed. Controlled
+network discovery completed at501old/601new pages; run admission returned a
+$49 test-only payment requirement with no run created. Full free/paid content,
+checkout, installation and capacity acceptance remain open. The fresh email
+account exposed missing SDK-session hydration at consent, and the companion
+checkout omitted the required operation ID. Both are being fixed before the
+journey is rerun. See `release-evidence/product-activation-20260920.json`.
+
+The earlier `qzbfx` idle observation (175,509,504 bytes sampled maximum) is
+historical, before the product-flag deployment. It is not a full-job measurement.
 See `release-evidence/worker-idle-cgroup-5d0117b.json`.
-This packet describes the next service
-configuration, not a claim that the new product is live. Dylon has not approved
-a compute upgrade or concurrency change.
 
 ## Service configuration
 
@@ -62,7 +71,7 @@ Frontend must be rebuilt with `VITE_MCP_PIVOT_ENABLED=true` and the existing
 Supabase/public API variables. Changing runtime environment alone cannot alter
 the built bundle. API CORS must admit `https://app.redirx.dev`.
 
-## Prepared Stripe destinations — disabled
+## Stripe destinations — enabled in test mode
 
 | Family | Destination | Endpoint |
 | --- | --- | --- |
@@ -70,12 +79,14 @@ the built bundle. API CORS must admit `https://app.redirx.dev`.
 | Subscription | `we_1UHa9bReyTnSoYHgikl6voLO` | `/api/v2/billing/stripe-test/subscriptions/webhook` |
 
 Both target `https://redirx-api.onrender.com`, pin event API version
-`2024-12-18.acacia`, and were independently retrieved as test-mode and disabled.
-Secrets were saved privately and are absent from git. There were no existing
-destinations in this sandbox before creation. No Render configuration has yet
-been changed for them, and no delivery acceptance is claimed.
+`2024-12-18.acacia`, and were created disabled, then enabled after API deployment
+and independently retrieved as enabled/test-mode. Secrets were installed privately
+and are absent from git. Each endpoint accepted its own locally signed unsupported
+event (200), rejected the other destination's signature (400), and rejected signed
+live-mode input (400). These are configuration probes, not genuine Stripe delivery.
+See `release-evidence/stripe-destinations-activation.json`.
 
-Deploy f0229e5 or its reviewed descendant before enabling them. That change
+The deployed revision includes f0229e5. That change
 supports independent secrets and acknowledges unrelated billing events after
 signature verification and provider retrieval. Both destinations receive some
 of the same event types; foreign-family delivery must return200 without creating
@@ -85,15 +96,15 @@ tests; genuine external delivery is still a separate acceptance step.
 
 ## Cutover and acceptance order
 
-1. **Done for API/worker:** reviewed lean and webhook code deployed from
-   `deploy/mcp-product-5d0117b` at the exact SHA. Keep gateway/front-end pins explicit and
+1. **Done for all four product services:** reviewed code deployed from
+   `deploy/mcp-product-5d0117b` at the exact SHA. Keep future pins explicit and
    auto-deploy off. Preserve existing legacy environment values.
-2. Configure the scoped API/worker product variables, with worker support ready
+2. **Configuration and enablement done:** scoped API/worker product variables, with worker support ready
    before new work is admitted. Enable the two test destinations only when the
    matching API revision and both secrets are installed. Verify actual signed
    deliveries and duplicate handling, not merely endpoint liveness.
-3. Deploy the gateway and rebuild the companion; verify tools/list against the
-   contract and the signed-out/signed-in route matrix. Confirm legacy reviews,
+3. **Gateway/companion deployed; native OAuth and eleven tools verified.** Finish
+   the signed-out/signed-in route matrix and fresh email consent. Confirm legacy reviews,
    purchased artifacts and existing history survive.
 4. Run OAuth free500 and paid501 acceptance on controlled origins/accounts,
    including real content work, exception decisions, artifacts, installation and

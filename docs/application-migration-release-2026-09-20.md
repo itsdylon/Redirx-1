@@ -85,8 +85,8 @@ New reviewed ordered tail is **052 → 053 → 054 → 055 → 056**. The long-U
 
 1. Snapshot deployed API/worker/gateway/frontend SHAs and feature flags, migration ledger, schema-only dump, row counts and the normal recoverable database backup. Preserve 033 grants/RLS and its fresh-admin-client prerequisite. Record vector namespace and the outputs below. Resolve any missing prerequisite or non-cascading deletion behavior before application enablement.
 2. Deploy the reviewed compatible application/worker with pivot flags **off**; verify legacy operations and internal service identity still work. Ensure every worker is upgraded before any pivot job can be queued. Never leave an old worker able to claim new marked jobs.
-3. Use one migration runner/owner and explicit file order. Set a bounded session `lock_timeout` appropriate to the maintenance window; a lock timeout is a stop-and-inspect, not permission to disable constraints. 032 backfill and ordinary index creation hold real locks. There is no justified zero-downtime claim.
-4. Apply each complete transactional file and record its hash/success in the existing migration ledger. Do not concatenate the repository's entire migrations directory or blindly reapply completed files:
+3. Use the reviewed `scripts/release/apply_pivot_migrations.py` runner/owner and explicit file order. Apply **all pending reviewed bodies and their history records in one transaction**. It holds the advisory lock and SHARE locks on migration_sessions/user_profiles until final commit, rechecks active jobs and exact history under those locks, and sends the PostgREST notification on commit. A five-second lock timeout is a stop-and-inspect, not permission to disable constraints. The sixty-second statement timeout is not a total transaction deadline. Acquired locks, including those affecting auth-user writes, persist through the whole packet. There is no zero-downtime claim.
+4. The runner verifies all 24 hashes against the reviewed manifest, strips only each reviewed outer BEGIN/COMMIT pair, and stores each original complete source in the existing migration ledger. It emits applied journal records only after the whole packet commits. This supersedes per-file commit instructions: otherwise a legacy session arriving after032's backfill could be missed. Do not concatenate the repository's entire migrations directory or blindly reapply completed files:
 
    `032_durable_migrations.sql`
 
@@ -136,7 +136,7 @@ New reviewed ordered tail is **052 → 053 → 054 → 055 → 056**. The long-U
 
    `056_exact_long_url_storage.sql`
 
-5. Keep ingress/workers disabled throughout intermediate states. 041's final publication logic consumes authority/revision introduced later by 046/048/051. 043 is later expanded by 045/048. 037 drops/recreates `claim_next_job(text,timestamptz)` to add `mcp_run_id`; 046 replaces run authority/finalization. Intermediate functionality is not the release contract.
+5. Keep pivot flags disabled until postflight. The atomic transaction hides intermediate states and blocks legacy queue writes during the packet. 041's final publication logic consumes authority/revision introduced later by 046/048/051. 043 is later expanded by045/048. 037 drops/recreates `claim_next_job(text,timestamptz)` to add `mcp_run_id`;046 replaces run authority/finalization. Intermediate functionality is not the release contract. After commit, repeat the owned-session/backfill census before product activation; later legacy arrivals must not be overlooked.
 6. Reload PostgREST schema cache after the complete packet (standard `NOTIFY pgrst, 'reload schema'`) and read back expected table constraints, trigger definitions, function signatures, privileges and grants. Verify anonymous/authenticated denial through the actual hosted API, not only catalog privileges.
 7. Run account-isolated acceptance on the hosted environment: plan/import; 500 free/501 payment-required boundary; claimed worker dispatch; same-path/different-content matching; decision revision; immutable export download/replay; explicit installation; included partial retry; paid-slot monitoring lifecycle; ownership denial. Use approved fixture domains/provider test objects only. Verify authenticated direct mapping/session mutations fail, while ordinary legacy flows work. Test account cleanup on a disposable production-shaped copy before claiming safe rollout.
 8. Enable the specific flags only after this evidence; gateway repoint and external billing acceptance remain root-owned release actions.
@@ -148,7 +148,25 @@ New reviewed ordered tail is **052 → 053 → 054 → 055 → 056**. The long-U
 - 041 stores content and immutable scope; 042 references installed deployments. 043/045 consume both, with 045 relying on `auth.users.email` and `email_confirmed_at` and 040 traffic metrics. 048 requires 046's Studio binding and replaces 045's authority constraint. 049 needs the prior recurring authority.
 - 050 requires complete engine/session columns and the run authorization functions. 051 adds global revision and its trigger. 053 is the final privilege reset; future migrations introducing new pivot objects must explicitly declare their privileges too. 054 must ship with the worker that skips unfenced optional MatchRepair writes for pivot runs.055 (2e1c796) must follow054 before enabling any pivot job: its parent cleanup preserves the confirmed NO ACTION legacy FK behavior.
 - 038/040/043/045/049 contain non-idempotent CREATE statements. A committed file must be skipped on retry. Several earlier files use CREATE OR REPLACE: reapplying 032 or 037 AFTER 046 can silently downgrade a newer function body. Only 053's own repeat application was explicitly tested for ACL stability; no blanket repeatability claim applies.
-- Partial file failure rolls back that file's transaction. Stop, keep flags off, diagnose the first failure, and resume the reviewed order. Do not use IF EXISTS surgery to skip unexplained missing objects.
+- Any SQL/history failure rolls back the entire pending packet. Stop, keep flags off, and independently inspect history before any retry, especially after an ambiguous network failure at COMMIT. Do not use IF EXISTS surgery or replay earlier definitions to skip unexplained missing objects.
+
+### Atomic runner and preservation evidence
+
+The revised transaction boundary was rehearsed on the restored actual public/auth schema, under the same non-superuser proxy described above. All24 bodies and history rows committed in one transaction (165 ms locally), with144 synthetic legacy sessions unchanged and76 durable records/runs created. Four exclusion constraints and sampled final ACLs passed. This is local partial-schema evidence, not hosted performance or full backup recovery: [atomic rehearsal](release-evidence/application-schema-atomic-rehearsal.json).
+
+The native PostgreSQL runner suite passed15 tests, including later-file rollback of earlier DDL/history, exact-source replay, concurrent legacy insertion blocked before commit, intermediate schema/history invisibility, and aggregate fingerprints detecting edits/duplicates while tolerating additive columns. The fingerprint utility reads all original public tables in one REPEATABLE READ, READ ONLY transaction; individual row contents stay in PostgreSQL. The initial production baseline covers31 public tables and18,568 rows. It is not a data backup or a writer pause; any difference must be investigated.
+
+Run from the reviewed integration checkout using the application virtualenv. The private target file contains only the previously verified host/port/user/database. No DSN goes in argv or output:
+
+```sh
+python scripts/release/apply_pivot_migrations.py \
+  --dsn-file /private/tmp/redirx-operation-20260919/application-db-url.secret \
+  --ca-file /private/tmp/supabase-root.pem \
+  --target-file /private/tmp/redirx-operation-20260919/application-migration-preflight.json \
+  --version-prefix 202609200200
+```
+
+This is a dry run. After reviewing it, the authorized apply adds `--apply --journal <new-exclusive-jsonl-path>`. An existing journal is refused before mutation. Each recorded migration's original SQL source is compared byte-for-byte before accepting it as already applied; noncontiguous or mismatched history stops the runner. After commit, run `scripts/release/fingerprint_existing_data.py` with the same private target/CA/DSN arguments, `--before <baseline-json>` and `--output <new-path>`. Compare original columns, backfill ownership/counts, final ACLs and hosted PostgREST behavior before activation.
 
 ## Long-URL storage correction — reviewed local packet, production apply pending
 

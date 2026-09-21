@@ -278,3 +278,32 @@ class JevSdkOffline(unittest.TestCase):
         store=Mock();store.cache_get.return_value=None
         with self.assertRaises(ProviderUnavailable):JevClient(store,provider).ask({}, {'target':{'type':'choice','criteria':{'x':'x'}}})
         self.assertEqual(len(count),1);store.cache_put.assert_not_called()
+
+
+class JevFailureDiagnostics(unittest.TestCase):
+    def test_cache_failure_reports_only_allowlisted_stage_and_type(self):
+        import io
+        from contextlib import redirect_stdout
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        from src.redirx.jev.jev import JevClient, MODEL
+        store=Mock();store.cache_get.return_value=None
+        store.cache_put.side_effect=TypeError('private-token secret-url request-payload')
+        provider=Mock();provider.system_one.return_value=SimpleNamespace(
+            model=MODEL,usage=SimpleNamespace(input_tokens=1,output_tokens=0),answers={})
+        output=io.StringIO()
+        with redirect_stdout(output),self.assertRaises(TypeError):
+            JevClient(store,provider).ask({}, {})
+        line=output.getvalue().strip();record=json.loads(line.removeprefix('JEV_DIAGNOSTIC '))
+        self.assertEqual(record,{'stage':'cache_publish','exception':'TypeError','status':None,'code':None})
+        for secret in ('private-token','secret-url','request-payload'):self.assertNotIn(secret,line)
+        self.assertEqual(provider.system_one.call_count,1);self.assertEqual(store.reserve.call_count,1)
+
+    def test_unknown_diagnostic_fields_cannot_emit_provider_payload(self):
+        from src.redirx.jev.jev import safe_failure_diagnostic
+        evil=type('SecretExceptionName', (Exception,), {'status_code':'secret-status','status':'secret-status','code':'secret-code'})('secret-message')
+        self.assertEqual(safe_failure_diagnostic(evil,'secret-stage'),
+            {'stage':'unknown','exception':'OtherException','status':None,'code':None})
+        known=RuntimeError('secret-message');known.status_code=429;known.code='PGRST202'
+        self.assertEqual(safe_failure_diagnostic(known,'budget_reservation'),
+            {'stage':'budget_reservation','exception':'RuntimeError','status':429,'code':'PGRST202'})

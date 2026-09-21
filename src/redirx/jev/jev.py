@@ -53,6 +53,38 @@ def validate_response(result, questions):
                 if type(value) not in (int,float) or not math.isfinite(value): raise ProviderUnavailable('provider_response_invalid')
 
 
+_DIAGNOSTIC_STAGES = frozenset({'request_prepare','cache_lookup','budget_reservation',
+    'pacing','provider_request','response_validation','cache_publish'})
+_DIAGNOSTIC_CLASSES = frozenset({'AssertionError','AttributeError','KeyError','NameError',
+    'TypeError','ValueError','RuntimeError','TimeoutError','ReadError','ConnectError',
+    'RemoteProtocolError','LocalProtocolError','APIError','ValidationError',
+    'ProviderUnavailable','TypeSafeError','TypeSafeAPIError','TypeSafeBadRequestError',
+    'TypeSafeAuthenticationError','TypeSafePermissionDeniedError','TypeSafeNotFoundError',
+    'TypeSafeUnprocessableEntityError','TypeSafeRateLimitError','TypeSafeInternalServerError',
+    'TypeSafeAPIConnectionError','TypeSafeAPITimeoutError','TypeSafeAPIResponseValidationError'})
+_DIAGNOSTIC_CODES = frozenset({'PGRST202','PGRST203','PGRST301','42501','40001','40P01',
+    '57014','P0001','operation_conflict','provider_accounting_discrepancy','invalid_input',
+    'provider_unavailable','provider_rate_limited','provider_credit_exhausted',
+    'provider_accounting_unavailable','provider_response_invalid','provider_budget_exhausted',
+    'request_capacity_exceeded'})
+
+
+def safe_failure_diagnostic(exc, stage):
+    """Finite allowlists only: never format the exception or inspect its payload."""
+    name=type(exc).__name__
+    status=getattr(exc,'status_code',None)
+    if type(status) is not int: status=getattr(exc,'status',None)
+    code=getattr(exc,'code',None)
+    return {'stage':stage if stage in _DIAGNOSTIC_STAGES else 'unknown',
+            'exception':name if name in _DIAGNOSTIC_CLASSES else 'OtherException',
+            'status':status if type(status) is int and status in {400,401,402,403,404,408,409,422,429,500,502,503,504} else None,
+            'code':code if type(code) is str and code in _DIAGNOSTIC_CODES else None}
+
+
+def _report_failure(exc, stage):
+    print('JEV_DIAGNOSTIC '+json.dumps(safe_failure_diagnostic(exc,stage),sort_keys=True),flush=True)
+
+
 class JevClient:
     def __init__(self, store, client=None):
         self.store = store
@@ -65,24 +97,38 @@ class JevClient:
         self.client = client
 
     def ask(self, state, questions):
+        # A request-local trace avoids cross-thread stage attribution.
+        trace={'stage':'request_prepare'}
+        try:
+            return self._ask(state,questions,trace)
+        except Exception as exc:
+            _report_failure(exc,trace['stage'])
+            raise
+
+    def _ask(self, state, questions, trace):
         request = {'m': self.model, 'prompt': PROMPT_VERSION, 's': state, 'q': questions}
         blob = encoded(request)
         if len(blob) > MAX_REQUEST_BYTES:
             raise ProviderUnavailable('request_capacity_exceeded')
         key = hashlib.sha256(blob).hexdigest()
+        trace['stage']='cache_lookup'
         hit = self.store.cache_get(key)
         if hit is not None:
+            trace['stage']='response_validation'
             validate_response(hit,questions)
             self.cached_requests += 1
             return {**hit, 'cached': True}
         # Reserve the model's documented total-input ceiling, then settle to
         # measured input tokens. Unknown/crashed calls retain this reservation.
+        trace['stage']='budget_reservation'
         reservation = self.store.reserve(math.ceil(MAX_BILLABLE_INPUT_TOKENS * PRICE_IN_PER_MTOK))
+        trace['stage']='pacing'
         global _NEXT_REQUEST
         with _RATE_LOCK:
             time.sleep(max(0,_NEXT_REQUEST-time.monotonic()))
             _NEXT_REQUEST=time.monotonic()+0.15
         start = time.perf_counter()
+        trace['stage']='provider_request'
         try:
             response = self.client.system_one(state, questions, model=self.model)
             result = {'answers': {key: value.model_dump(mode='json') for key, value in response.answers.items()},
@@ -90,10 +136,13 @@ class JevClient:
                                 'output_tokens': response.usage.output_tokens or 0},
                       'latency': time.perf_counter() - start, 'model': response.model}
         except Exception as exc:
+            _report_failure(exc,'provider_request')
             status = getattr(exc, 'status_code', None)
             code = 'provider_rate_limited' if status == 429 else 'provider_credit_exhausted' if status == 402 else 'provider_unavailable'
             raise ProviderUnavailable(code) from None
+        trace['stage']='response_validation'
         validate_response(result,questions)
+        trace['stage']='cache_publish'
         self.store.cache_put(key, result, reservation, math.ceil(result['usage']['input_tokens']*PRICE_IN_PER_MTOK))
         self.live_requests += 1
         self.input_tokens += result['usage']['input_tokens']

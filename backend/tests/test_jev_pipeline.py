@@ -68,7 +68,7 @@ class NativeJev(unittest.TestCase):
         self.assertEqual(second['status'],'queued')
         self.assertTrue(self.service.refine(A,f['migration'],r['run_id'],1,key)['replayed'])
         self.assertEqual(self.service.state(r['run_id'])['pass'],2)
-        job2=self.claim();self.runs.authorize_dispatch(job2,'worker-test');store2=DurableStore(self.native,job2,'worker-test');state2=store2.rpc('prepare_jev_pass')
+        job2=self.claim();self.assertGreater(job2['attempt_count'],job['attempt_count']);self.runs.authorize_dispatch(job2,'worker-test');store2=DurableStore(self.native,job2,'worker-test');state2=store2.rpc('prepare_jev_pass')
         self.assertEqual(state2['seeds'][0]['new_url'],decision['target_url'])
         # New inference cannot replace a user decision or immutable engine row.
         store2.rpc('save_jev_proposal',p_pass=2,p_seed_revision=1,p_old_url='https://old.example/Page/0?q=A',p_proposal={'target_url':'https://new.example/Page/1?q=A','confidence':0.8})
@@ -135,6 +135,24 @@ class NativeJev(unittest.TestCase):
         self.assertEqual(self.sql('SELECT count(*) n FROM migration_mapping_decision_events WHERE run_id=%s',[r['run_id']])[0]['n'],1)
         store.rpc('prepare_jev_pass')
         self.assertEqual(self.sql('SELECT count(*) n FROM migration_mapping_decision_events WHERE run_id=%s',[r['run_id']])[0]['n'],1)
+
+    def test_failed_same_pass_resume_never_reuses_old_attempt_authority(self):
+        f,r,job,old_store,state=self.prepared()
+        self.runs.finalize_session(job,'worker-test','permanently_failed','provider_unavailable')
+        self.service.refine(A,f['migration'],r['run_id'],0,uuid4().hex)
+        resumed=self.claim();self.runs.authorize_dispatch(resumed,'worker-test')
+        self.assertGreater(resumed['attempt_count'],job['attempt_count'])
+        current=DurableStore(self.native,resumed,'worker-test')
+        self.assertEqual(current.rpc('prepare_jev_pass')['pass'],state['pass'])
+        for write in (
+            lambda:old_store.reserve(100),
+            lambda:old_store.cache_put('c'*64,{'stale':True}),
+            lambda:self.proposal(old_store,f,state),
+        ):
+            with self.assertRaises(Exception) as error:write()
+            self.assertEqual(getattr(error.exception,'message',None),'operation_conflict')
+        current.cache_put('d'*64,{'current':True})
+        self.assertEqual(current.cache_get('d'*64),{'current':True})
 
     def test_parallel_budget_reservation_and_previous_day_settlement(self):
         from concurrent.futures import ThreadPoolExecutor

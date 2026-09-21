@@ -88,6 +88,15 @@ JEV_RUN_CAPACITY_FIXTURE=1 PREFLIGHT_TEST_DATABASE_URL=postgresql://postgres:fix
 The operation directory contains the exact local execution logs and dependency
 isolation path. These commands make no real provider calls.
 
+## Independent review correction
+
+Refinement now preserves monotonically increasing session attempt generations.
+Resetting the counter could let an old in-flight worker regain cache/budget
+authority when the same worker claimed a resumed session. Two targeted native
+tests pass after the fix: completed-pass refinement and failed same-pass resume.
+The latter explicitly proves old budget, cache and proposal writes are rejected
+while the new attempt can write. The original fifteen-test suite was not repeated.
+
 ## Mandatory coordinated rollout
 
 1. Freeze exact app/gateway/frontend/landing pins. Preserve the original dirty

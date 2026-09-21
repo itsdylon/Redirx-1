@@ -186,7 +186,9 @@ BEGIN
   IF j.pass>=3 OR j.seed_revision=j.pass_seed_revision THEN RAISE EXCEPTION 'refinement_limit' USING ERRCODE='P0001'; END IF;
   UPDATE jev_runs SET pass=pass+1,prepared=false WHERE run_id=p_run_id;
  END IF;
- UPDATE migration_sessions SET status='pending',attempt_count=0,started_at=NULL,completed_at=NULL,
+ -- Attempt generations must never repeat on the same session/worker tuple.
+ -- Old in-flight cache/budget writes remain fenced after explicit resume.
+ UPDATE migration_sessions SET status='pending',started_at=NULL,completed_at=NULL,
   locked_by=NULL,locked_at=NULL,lease_expires_at=NULL,last_error=NULL WHERE id=s.id;
  UPDATE migration_operations SET status='queued' WHERE id=r.operation_id;
  answer:=jsonb_build_object('migration_id',p_migration_id,'run_id',p_run_id,'operation_id',r.operation_id,'status','queued','replayed',false);

@@ -31,7 +31,10 @@ for (const [name, tool] of Object.entries(contract.tools)) {
     assert.ok(tool.required.includes(parameter), `${name} missing path argument ${parameter}`);
   }
 }
-assert.equal(Object.keys(contract.tools).length, 11);
+assert.deepEqual(Object.keys(contract.tools).sort(), [
+  'export_redirects', 'get_migration', 'import_inventory', 'list_matches', 'plan_migration',
+  'refine_matches', 'resolve_matches', 'run_migration', 'verify_redirects',
+]);
 assert.equal(policy.automatic_monitoring_renewal, false);
 assert.equal(policy.studio.automatic_overages, false);
 console.log(`Pivot contract valid: ${Object.keys(contract.tools).length} tools, ${contract.pricing_fixtures.length} shared pricing cases; activation=${policy.activation}.`);

@@ -43,11 +43,11 @@ table does not prove those journeys passed. Earlier production OAuth acceptance
 exercised the legacy gateway. Record each advertised client's version and result;
 this document does not claim verified interoperability for particular clients.
 
-## Eleven-tool workflow
+## Nine-tool workflow
 
 The [shared contract](../contracts/pivot-v1.json) defines business names and REST
 mappings; [gateway schemas](src/tools/pivot.ts) define actual MCP arguments.
-`MCP_PIVOT_ENABLED=true` registers these eleven business tools and artifact
+`MCP_PIVOT_ENABLED=true` registers these nine business tools and artifact
 resources, replacing the legacy tools. The legacy telemetry `get_more_tools`
 helper is also disabled in pivot mode.
 
@@ -60,7 +60,9 @@ including that field. The table lists the business arguments.
 | Tool | Required business arguments | Result / optional arguments |
 | --- | --- | --- |
 | `plan_migration` | `old_site`, `new_site`, `idempotency_key` | Durable plan/discovery. Optional `name`, `site_aliases: {old: [], new: []}`. |
+| `import_inventory` | `migration_id`, `side`, `urls`, `idempotency_key` | Explicit HTTP(S) URL strings into an owned immutable inventory; no crawl. Free Jev bounds: 500 old / 2000 new URLs, 2 MiB URL text total. |
 | `run_migration` | `migration_id`, `old_inventory_id`, `new_inventory_id`, `idempotency_key` | Entitled run or recoverable payment state. Optional `quote_id`. |
+| `refine_matches` | `migration_id`, `run_id`, `expected_seed_revision`, `idempotency_key` | Resume a paused Jev pass or improve unresolved mappings with confirmed examples; up to three total passes. |
 | `get_migration` | `migration_id` | Progress/next action. Optional `run_id`, `operation_id`. |
 | `list_matches` | `migration_id`, `run_id` | Optional `filter`, opaque `cursor`, `limit` (default 100, maximum 500). |
 | `resolve_matches` | `migration_id`, `run_id`, `idempotency_key`, `decisions` | 1–100 audited decisions; inspect per-row outcomes. |
@@ -90,10 +92,11 @@ timing, `data`, and `error`. Poll with the returned timing and retain the migrat
 ID for reconnection. Matching success does not imply deployment; partial coverage
 does not imply a passed verification.
 
-Explicit inventory import, checkout, operation status and deployment confirmation
-also have authorized REST resources; they are not additional MCP tools. Follow the
+Checkout, operation status and deployment confirmation also have authorized REST
+resources; they are not additional MCP tools. Follow the
 [backend contract](../docs/architecture/mcp-primary-contract.md) and returned handoffs.
-Do not invent an `import_inventory` tool.
+`import_inventory` is a real MCP tool (see the table above); do not confuse it
+with these REST-only resources.
 
 ## Commercial policy — test mode
 

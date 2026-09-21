@@ -1,0 +1,456 @@
+{
+  "method": "conservative Python AST import closure, dynamic/SQL/config consumers additionally protected by manifest",
+  "roots": [
+    "backend/app.py",
+    "backend/worker.py",
+    "backend/services/jev_pipeline_service.py"
+  ],
+  "files": {
+    "backend/services/jev_pipeline_service.py": [
+      "backend/services/migration_planning_service.py",
+      "backend/services/migration_repository.py",
+      "backend/services/migration_run_service.py",
+      "src/redirx/jev/data.py",
+      "src/redirx/jev/examples.py",
+      "src/redirx/jev/jev.py",
+      "src/redirx/jev/pipeline.py",
+      "src/redirx/jev/retrieve.py"
+    ],
+    "backend/services/migration_repository.py": [
+      "src/redirx/database.py"
+    ],
+    "src/redirx/database.py": [
+      "src/redirx/config.py"
+    ],
+    "src/redirx/config.py": [],
+    "src/redirx/jev/pipeline.py": [
+      "src/redirx/jev/data.py",
+      "src/redirx/jev/jev.py",
+      "src/redirx/jev/questions.py"
+    ],
+    "src/redirx/jev/questions.py": [],
+    "src/redirx/jev/jev.py": [],
+    "src/redirx/jev/data.py": [],
+    "src/redirx/jev/retrieve.py": [
+      "src/redirx/jev/data.py"
+    ],
+    "src/redirx/jev/examples.py": [
+      "src/redirx/jev/data.py",
+      "src/redirx/jev/retrieve.py"
+    ],
+    "backend/services/migration_run_service.py": [
+      "backend/services/inventory_import_service.py",
+      "backend/services/job_limits.py",
+      "backend/services/migration_planning_service.py",
+      "backend/services/migration_quote_service.py",
+      "backend/services/migration_repository.py"
+    ],
+    "backend/services/inventory_import_service.py": [
+      "backend/services/inventory_policy.py",
+      "backend/services/migration_repository.py"
+    ],
+    "backend/services/inventory_policy.py": [],
+    "backend/services/migration_quote_service.py": [
+      "backend/services/migration_repository.py",
+      "backend/services/pivot_policy.py"
+    ],
+    "backend/services/pivot_policy.py": [],
+    "backend/services/migration_planning_service.py": [
+      "backend/services/inventory_policy.py",
+      "backend/services/migration_discovery_service.py",
+      "backend/services/migration_discovery_workflow.py",
+      "backend/services/migration_repository.py"
+    ],
+    "backend/services/migration_discovery_service.py": [
+      "backend/services/discovery_parsing.py",
+      "backend/services/inventory_policy.py",
+      "backend/services/migration_gsc_service.py",
+      "backend/services/migration_planning_service.py",
+      "backend/services/migration_repository.py",
+      "src/redirx/rate_limit.py",
+      "src/redirx/robots.py",
+      "src/redirx/safe_fetch.py"
+    ],
+    "backend/services/migration_gsc_service.py": [
+      "backend/services/gsc_service.py",
+      "backend/services/inventory_policy.py",
+      "backend/services/migration_planning_service.py",
+      "backend/services/migration_repository.py",
+      "src/redirx/config.py"
+    ],
+    "backend/services/gsc_service.py": [
+      "src/redirx/config.py",
+      "src/redirx/database.py"
+    ],
+    "src/redirx/rate_limit.py": [
+      "src/redirx/config.py"
+    ],
+    "src/redirx/robots.py": [],
+    "src/redirx/safe_fetch.py": [],
+    "backend/services/discovery_parsing.py": [],
+    "backend/services/migration_discovery_workflow.py": [
+      "backend/services/migration_discovery_service.py",
+      "backend/services/migration_planning_service.py",
+      "backend/services/migration_repository.py"
+    ],
+    "backend/services/job_limits.py": [],
+    "backend/worker.py": [
+      "backend/services/deep_preview_service.py",
+      "backend/services/email_service.py",
+      "backend/services/jev_pipeline_service.py",
+      "backend/services/job_limits.py",
+      "backend/services/match_repair_service.py",
+      "backend/services/migration_run_service.py",
+      "backend/services/migration_subscription_service.py",
+      "backend/services/pivot_background.py",
+      "backend/services/pivot_resource_budget.py",
+      "backend/services/stripe_service.py",
+      "backend/services/watch_service.py",
+      "src/redirx/config.py",
+      "src/redirx/database.py",
+      "src/redirx/jev/jev.py",
+      "src/redirx/lib.py",
+      "src/redirx/rate_limit.py"
+    ],
+    "backend/services/email_service.py": [],
+    "backend/services/stripe_service.py": [
+      "backend/services/entitlement_service.py",
+      "backend/services/pricing_service.py"
+    ],
+    "backend/services/entitlement_service.py": [
+      "backend/services/analytics_service.py",
+      "backend/services/pricing_service.py",
+      "src/redirx/config.py",
+      "src/redirx/database.py"
+    ],
+    "backend/services/pricing_service.py": [
+      "backend/services/analytics_service.py"
+    ],
+    "backend/services/analytics_service.py": [],
+    "backend/services/watch_service.py": [
+      "backend/services/analytics_service.py",
+      "backend/services/email_service.py",
+      "src/redirx/database.py"
+    ],
+    "backend/services/match_repair_service.py": [
+      "src/redirx/database.py"
+    ],
+    "backend/services/pivot_resource_budget.py": [
+      "src/redirx/bounded_content.py"
+    ],
+    "src/redirx/bounded_content.py": [],
+    "backend/services/pivot_background.py": [
+      "backend/services/migration_discovery_scheduler.py",
+      "backend/services/migration_monitoring_service.py",
+      "backend/services/migration_verification_service.py",
+      "src/redirx/rate_limit.py"
+    ],
+    "backend/services/migration_verification_service.py": [
+      "backend/services/inventory_policy.py",
+      "backend/services/migration_planning_service.py",
+      "backend/services/migration_repository.py",
+      "src/redirx/redirect_probe.py",
+      "src/redirx/safe_fetch.py"
+    ],
+    "src/redirx/redirect_probe.py": [
+      "src/redirx/rate_limit.py",
+      "src/redirx/safe_fetch.py"
+    ],
+    "backend/services/migration_monitoring_service.py": [
+      "backend/services/email_service.py",
+      "backend/services/migration_artifact_service.py",
+      "backend/services/migration_planning_service.py",
+      "backend/services/migration_repository.py",
+      "backend/services/migration_verification_service.py",
+      "src/redirx/config.py"
+    ],
+    "backend/services/migration_artifact_service.py": [
+      "backend/services/inventory_policy.py",
+      "backend/services/migration_artifact_readers.py",
+      "backend/services/migration_repository.py",
+      "backend/services/redirect_export.py"
+    ],
+    "backend/services/redirect_export.py": [],
+    "backend/services/migration_artifact_readers.py": [
+      "backend/services/migration_repository.py",
+      "backend/services/redirect_export.py"
+    ],
+    "backend/services/migration_discovery_scheduler.py": [
+      "backend/services/migration_discovery_service.py",
+      "backend/services/migration_repository.py"
+    ],
+    "backend/services/migration_subscription_service.py": [
+      "backend/services/inventory_import_service.py",
+      "backend/services/job_limits.py",
+      "backend/services/migration_planning_service.py",
+      "backend/services/migration_quote_service.py",
+      "backend/services/migration_repository.py",
+      "backend/services/pivot_resource_budget.py"
+    ],
+    "backend/services/deep_preview_service.py": [
+      "backend/services/results_formatter.py",
+      "src/redirx/config.py",
+      "src/redirx/database.py"
+    ],
+    "backend/services/results_formatter.py": [
+      "src/redirx/database.py"
+    ],
+    "src/redirx/lib.py": [
+      "src/redirx/stages.py",
+      "src/redirx/url_matcher.py"
+    ],
+    "src/redirx/url_matcher.py": [],
+    "src/redirx/stages.py": [
+      "src/redirx/async_batch.py",
+      "src/redirx/bounded_content.py",
+      "src/redirx/config.py",
+      "src/redirx/content_fetch.py",
+      "src/redirx/database.py",
+      "src/redirx/discovery.py",
+      "src/redirx/rate_limit.py",
+      "src/redirx/safe_fetch.py",
+      "src/redirx/url_matcher.py"
+    ],
+    "src/redirx/discovery.py": [],
+    "src/redirx/content_fetch.py": [
+      "src/redirx/async_batch.py",
+      "src/redirx/bounded_content.py",
+      "src/redirx/rate_limit.py",
+      "src/redirx/stages.py"
+    ],
+    "src/redirx/async_batch.py": [],
+    "backend/app.py": [
+      "backend/extensions.py",
+      "backend/routes/api_key_routes.py",
+      "backend/routes/auth_routes.py",
+      "backend/routes/billing_routes.py",
+      "backend/routes/demo_routes.py",
+      "backend/routes/discovery_routes.py",
+      "backend/routes/email_routes.py",
+      "backend/routes/gsc_routes.py",
+      "backend/routes/internal_routes.py",
+      "backend/routes/migration_artifact_routes.py",
+      "backend/routes/migration_checkout_routes.py",
+      "backend/routes/migration_discovery_routes.py",
+      "backend/routes/migration_gsc_routes.py",
+      "backend/routes/migration_mapping_routes.py",
+      "backend/routes/migration_outcome_routes.py",
+      "backend/routes/pipeline_routes.py",
+      "backend/routes/url_match_routes.py",
+      "backend/routes/user_routes.py",
+      "backend/routes/v1_routes.py",
+      "backend/routes/v2_routes.py",
+      "backend/routes/watch_routes.py"
+    ],
+    "backend/routes/migration_artifact_routes.py": [
+      "backend/extensions.py",
+      "backend/routes/v2_routes.py",
+      "backend/services/migration_artifact_service.py",
+      "backend/services/migration_planning_service.py",
+      "backend/services/migration_repository.py"
+    ],
+    "backend/routes/v2_routes.py": [
+      "backend/extensions.py",
+      "backend/services/api_key_service.py",
+      "backend/services/companion_auth_service.py",
+      "backend/services/inventory_import_service.py",
+      "backend/services/jev_pipeline_service.py",
+      "backend/services/mcp_delegation_service.py",
+      "backend/services/migration_discovery_workflow.py",
+      "backend/services/migration_planning_service.py",
+      "backend/services/migration_quote_service.py",
+      "backend/services/migration_repository.py",
+      "backend/services/migration_run_service.py",
+      "backend/services/migration_status_service.py",
+      "backend/services/migration_subscription_service.py"
+    ],
+    "backend/services/migration_status_service.py": [
+      "backend/services/jev_pipeline_service.py",
+      "backend/services/migration_monitoring_service.py",
+      "backend/services/migration_planning_service.py",
+      "backend/services/migration_repository.py",
+      "backend/services/migration_verification_service.py"
+    ],
+    "backend/services/companion_auth_service.py": [
+      "backend/services/auth_service.py",
+      "src/redirx/database.py"
+    ],
+    "backend/services/auth_service.py": [],
+    "backend/services/mcp_delegation_service.py": [
+      "src/redirx/config.py"
+    ],
+    "backend/services/api_key_service.py": [
+      "src/redirx/database.py"
+    ],
+    "backend/extensions.py": [
+      "backend/services/analytics_service.py"
+    ],
+    "backend/routes/migration_outcome_routes.py": [
+      "backend/extensions.py",
+      "backend/routes/v2_routes.py",
+      "backend/services/migration_artifact_service.py",
+      "backend/services/migration_monitoring_service.py",
+      "backend/services/migration_planning_service.py",
+      "backend/services/migration_repository.py",
+      "backend/services/migration_verification_service.py"
+    ],
+    "backend/routes/migration_mapping_routes.py": [
+      "backend/extensions.py",
+      "backend/routes/v2_routes.py",
+      "backend/services/mapping_decision_service.py",
+      "backend/services/migration_planning_service.py",
+      "backend/services/migration_repository.py"
+    ],
+    "backend/services/mapping_decision_service.py": [
+      "backend/services/jev_pipeline_service.py",
+      "backend/services/migration_repository.py",
+      "src/redirx/database.py"
+    ],
+    "backend/routes/migration_discovery_routes.py": [
+      "backend/extensions.py",
+      "backend/routes/v2_routes.py",
+      "backend/services/migration_discovery_service.py",
+      "backend/services/migration_repository.py"
+    ],
+    "backend/routes/migration_gsc_routes.py": [
+      "backend/extensions.py",
+      "backend/routes/v2_routes.py",
+      "backend/services/migration_gsc_service.py",
+      "backend/services/migration_repository.py"
+    ],
+    "backend/routes/migration_checkout_routes.py": [
+      "backend/extensions.py",
+      "backend/routes/v2_routes.py",
+      "backend/services/migration_checkout_service.py",
+      "backend/services/migration_planning_service.py",
+      "backend/services/migration_repository.py",
+      "backend/services/migration_subscription_checkout_service.py"
+    ],
+    "backend/services/migration_subscription_checkout_service.py": [
+      "backend/services/migration_checkout_service.py",
+      "backend/services/migration_planning_service.py",
+      "backend/services/migration_repository.py",
+      "backend/services/migration_subscription_service.py",
+      "backend/services/migration_subscription_webhook_service.py"
+    ],
+    "backend/services/migration_subscription_webhook_service.py": [
+      "backend/services/migration_checkout_service.py",
+      "backend/services/migration_repository.py",
+      "backend/services/migration_subscription_service.py"
+    ],
+    "backend/services/migration_checkout_service.py": [
+      "backend/services/migration_planning_service.py",
+      "backend/services/migration_quote_service.py",
+      "backend/services/migration_repository.py"
+    ],
+    "backend/routes/internal_routes.py": [
+      "backend/services/analytics_service.py",
+      "backend/services/gsc_service.py",
+      "backend/services/mcp_delegation_service.py",
+      "src/redirx/config.py",
+      "src/redirx/database.py"
+    ],
+    "backend/routes/v1_routes.py": [
+      "backend/extensions.py",
+      "backend/services/api_key_service.py",
+      "backend/services/entitlement_service.py",
+      "backend/services/ingestion_service.py",
+      "backend/services/job_limits.py",
+      "backend/services/mcp_delegation_service.py",
+      "backend/services/pipeline_runner.py",
+      "backend/services/redirect_export.py",
+      "backend/services/results_formatter.py",
+      "backend/services/watch_service.py",
+      "src/redirx/config.py",
+      "src/redirx/database.py",
+      "src/redirx/discovery.py"
+    ],
+    "backend/services/pipeline_runner.py": [
+      "backend/services/job_limits.py",
+      "src/redirx/database.py"
+    ],
+    "backend/services/ingestion_service.py": [
+      "backend/services/gsc_service.py",
+      "src/redirx/config.py",
+      "src/redirx/database.py",
+      "src/redirx/discovery.py",
+      "src/redirx/url_kind.py"
+    ],
+    "src/redirx/url_kind.py": [],
+    "backend/routes/watch_routes.py": [
+      "backend/extensions.py",
+      "backend/services/auth_service.py",
+      "backend/services/redirect_export.py",
+      "backend/services/watch_service.py",
+      "src/redirx/database.py"
+    ],
+    "backend/routes/api_key_routes.py": [
+      "backend/extensions.py",
+      "backend/services/api_key_service.py",
+      "backend/services/auth_service.py"
+    ],
+    "backend/routes/discovery_routes.py": [
+      "backend/extensions.py",
+      "backend/services/auth_service.py",
+      "backend/services/ingestion_service.py",
+      "src/redirx/config.py",
+      "src/redirx/database.py",
+      "src/redirx/discovery.py"
+    ],
+    "backend/routes/gsc_routes.py": [
+      "backend/routes/migration_gsc_routes.py",
+      "backend/services/auth_service.py",
+      "backend/services/gsc_service.py",
+      "src/redirx/config.py",
+      "src/redirx/database.py"
+    ],
+    "backend/routes/email_routes.py": [
+      "backend/services/auth_service.py",
+      "backend/services/email_nudge_cron.py",
+      "backend/services/email_service.py",
+      "backend/services/email_templates_registry.py"
+    ],
+    "backend/services/email_nudge_cron.py": [
+      "backend/services/email_service.py"
+    ],
+    "backend/services/email_templates_registry.py": [],
+    "backend/routes/billing_routes.py": [
+      "backend/routes/error_utils.py",
+      "backend/services/auth_service.py",
+      "backend/services/pricing_service.py",
+      "backend/services/stripe_service.py"
+    ],
+    "backend/routes/error_utils.py": [],
+    "backend/routes/url_match_routes.py": [
+      "backend/extensions.py",
+      "backend/services/auth_service.py",
+      "backend/services/pipeline_runner.py",
+      "src/redirx/database.py"
+    ],
+    "backend/routes/demo_routes.py": [
+      "backend/extensions.py",
+      "backend/services/site_auditor.py"
+    ],
+    "backend/services/site_auditor.py": [],
+    "backend/routes/user_routes.py": [
+      "backend/extensions.py"
+    ],
+    "backend/routes/auth_routes.py": [
+      "backend/extensions.py",
+      "backend/services/email_service.py"
+    ],
+    "backend/routes/pipeline_routes.py": [
+      "backend/extensions.py",
+      "backend/services/auth_service.py",
+      "backend/services/deep_preview_service.py",
+      "backend/services/entitlement_service.py",
+      "backend/services/job_limits.py",
+      "backend/services/pipeline_runner.py",
+      "backend/services/pricing_service.py",
+      "backend/services/redirect_export.py",
+      "backend/services/results_formatter.py",
+      "src/redirx/config.py",
+      "src/redirx/database.py"
+    ]
+  }
+}

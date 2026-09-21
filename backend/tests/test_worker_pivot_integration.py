@@ -19,6 +19,7 @@ class PivotWorkerTests(unittest.IsolatedAsyncioTestCase):
                        'mcp_run_id': 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
                        'old_urls': ['https://old.example/a'], 'new_urls': ['https://new.example/a'],
                        'attempt_count': attempt, 'pipeline_type': 'content'}
+                stack.enter_context(patch('backend.services.jev_pipeline_service.JevService')).return_value.state.return_value = None
                 authority = stack.enter_context(patch('backend.worker.MigrationRunService')).return_value
                 subscriptions = stack.enter_context(patch('backend.worker.MigrationSubscriptionService')).return_value
                 stack.enter_context(patch('backend.worker.DeepPreviewService'))
@@ -51,6 +52,7 @@ class PivotWorkerTests(unittest.IsolatedAsyncioTestCase):
                 if pivot:
                     job['mcp_run_id'] = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'
                 failure = RuntimeError('fixture engine failure')
+                stack.enter_context(patch('backend.services.jev_pipeline_service.JevService')).return_value.state.return_value = None
                 authority = stack.enter_context(patch('backend.worker.MigrationRunService')).return_value
                 subscriptions = stack.enter_context(patch('backend.worker.MigrationSubscriptionService')).return_value
                 stack.enter_context(patch('backend.worker.DeepPreviewService'))

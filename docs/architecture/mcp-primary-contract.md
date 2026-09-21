@@ -1,5 +1,10 @@
 # MCP-primary contract, version 1
 
+2026-09-20 Jev V1 amendment: the free URL-first workflow in `contracts/jev-mvp-v1.json`
+supersedes this document’s new-run commercial/content-engine instructions when
+`JEV_MVP_ENABLED=true`. `import_inventory` and `refine_matches` are now first-class
+MCP tools. Historical paid/verification records and their APIs remain preserved.
+
 Status: implementation contract; not a production capability announcement.
 Policy activation: test-only until the commercial choices below are resolved.
 

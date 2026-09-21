@@ -551,6 +551,7 @@ class RedirxWorker:
         is_preview = bool(job.get('is_preview', False))
         pivot_service = MigrationRunService() if job.get('mcp_run_id') else None
         pivot_migration_id = None
+        jev_job = False
 
         async def finish(status, error=None):
             if pivot_service is not None:
@@ -573,6 +574,19 @@ class RedirxWorker:
             if pivot_service is not None:
                 authorization = pivot_service.authorize_dispatch(job, self.worker_id)
                 pivot_migration_id = authorization.get('migration_id')
+
+            if pivot_service is not None:
+                from backend.services.jev_pipeline_service import JevService, JevPipelineRunner, enabled as jev_enabled
+                jev_service = JevService(pivot_service.repository)
+                jev_job = jev_service.state(job['mcp_run_id']) is not None
+                if jev_job:
+                    if not jev_enabled():
+                        from src.redirx.jev.jev import ProviderUnavailable
+                        raise ProviderUnavailable('jev_paused')
+                    await JevPipelineRunner(jev_service.client).run(job,self.worker_id,self.session_db.update_session_progress)
+                    await finish('completed')
+                    self.jobs_processed += 1
+                    return True
 
             # Get URLs from job
             old_urls = job.get('old_urls', [])
@@ -744,6 +758,14 @@ class RedirxWorker:
             return True
 
         except Exception as e:
+            if jev_job:
+                # Provider errors and budget exhaustion stop automatic retries.
+                # refine_matches resumes the saved pass explicitly, at no new
+                # free allowance. Never include provider payloads in job errors.
+                from src.redirx.jev.jev import ProviderUnavailable
+                safe = str(e) if isinstance(e,ProviderUnavailable) else 'jev_run_interrupted: saved progress can resume with refine_matches.'
+                await finish('permanently_failed',safe)
+                return False
             error_msg = f"Error: {str(e)}\n{traceback.format_exc()}"
             print(f"[Worker] Job {session_id} failed: {e}")
             traceback.print_exc()

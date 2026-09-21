@@ -55,9 +55,11 @@
   "operation_statuses": ["queued", "running", "needs_input", "payment_required", "needs_review", "succeeded", "partial", "failed", "cancelled"],
   "terminal_operation_statuses": ["succeeded", "partial", "failed", "cancelled"],
   "monitoring_statuses": ["awaiting_deployment", "active", "paused", "expired", "cancelled"],
-  "next_actions": ["poll", "provide_inventory", "connect_search_console", "complete_payment", "request_custom_quote", "run_migration", "resolve_matches", "export_redirects", "install_artifact", "verify_redirects", "manage_monitoring", "reconnect", "retry", "none"],
+  "next_actions": ["poll", "provide_inventory", "connect_search_console", "complete_payment", "request_custom_quote", "run_migration", "resolve_matches", "export_redirects", "install_artifact", "verify_redirects", "manage_monitoring", "reconnect", "retry", "none", "refine_matches"],
   "limits": { "default_page_size": 100, "max_page_size": 500, "max_decisions_per_call": 100 },
   "tools": {
+    "import_inventory": {"method": "POST", "path": "/migrations/{migration_id}/inventories", "required": ["migration_id", "side", "urls", "idempotency_key"], "read_only": false},
+    "refine_matches": {"method": "POST", "path": "/migrations/{migration_id}/runs/{run_id}/refine", "required": ["migration_id", "run_id", "expected_seed_revision", "idempotency_key"], "read_only": false},
     "plan_migration": { "method": "POST", "path": "/migrations", "required": ["old_site", "new_site", "idempotency_key"], "read_only": false },
     "run_migration": { "method": "POST", "path": "/migrations/{migration_id}/runs", "required": ["migration_id", "inventory_ids", "idempotency_key"], "read_only": false },
     "get_migration": { "method": "GET", "path": "/migrations/{migration_id}", "required": ["migration_id"], "read_only": true },
@@ -81,5 +83,17 @@
     { "old_pages": 5001, "amount_cents": 19900, "kind": "fixed" },
     { "old_pages": 15000, "amount_cents": 19900, "kind": "fixed" },
     { "old_pages": 15001, "amount_cents": null, "kind": "custom" }
-  ]
+  ],
+  "jev": {
+    "engine": "jev-url-v1",
+    "activation": "free",
+    "max_old_urls": 500,
+    "max_new_urls": 2000,
+    "max_url_bytes": 2097152,
+    "max_passes": 3,
+    "new_runs_per_24h": 5,
+    "scrapes_page_content": false,
+    "confirmed_example_action": "set_target",
+    "confidence_kind": "model_estimate"
+  }
 }

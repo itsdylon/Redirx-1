@@ -64,7 +64,7 @@ class MigrationStatusService:
                 data['summary'] = 'The migration requires an existing grant or payment before dispatch.'
             return _json(result)
         operation = self._one('migration_operations', 'id,status,created_at', owner, migration, id=run['operation_id']) if run.get('operation_id') else None
-        session = self._one('migration_sessions', 'id,status,current_stage,total_stages,created_at', owner,
+        session = self._one('migration_sessions', 'id,status,current_stage,total_stages,last_error,created_at', owner,
                             id=run['legacy_session_id']) if run.get('legacy_session_id') else None
         status = operation['status'] if operation else {'completed': 'succeeded', 'processing': 'running', 'pending': 'queued',
                   'permanently_failed': 'failed', 'failed': 'failed'}.get(session['status'] if session else '', 'needs_input')
@@ -75,6 +75,11 @@ class MigrationStatusService:
             'status': status, 'progress': progress, 'inventory_ids': {'old': run['old_inventory_id'], 'new': run['new_inventory_id']},
             'rerun_of': run['rerun_of'], 'created_at': run['created_at']})
         data['run_id'] = str(run['id'])
+        if os.getenv('JEV_MVP_ENABLED','false').lower() == 'true':
+            from .jev_pipeline_service import JevService
+            JevService(self.repository).enrich(str(run['id']),data)
+            if data.get('jev'):
+                data['run']['engine']='jev-url-v1'
         result.update(operation_id=str(run['operation_id']) if run.get('operation_id') else None, status=status,
                       next_action='poll' if status in ('queued', 'running') else 'resolve_matches' if status == 'succeeded' else 'retry', progress=progress)
         data['summary'] = 'Migration run is complete; review its mappings before export.' if status == 'succeeded' else 'Migration run progress is persisted.'
@@ -82,7 +87,18 @@ class MigrationStatusService:
             result['retry_after_seconds'] = 10
             return _json(result)
         result.pop('retry_after_seconds', None)
-        if status != 'succeeded': return _json(result)
+        if status != 'succeeded':
+            if status == 'failed' and data.get('jev'):
+                result['next_action']='refine_matches'
+                reason=(session.get('last_error') or '').split(':',1)[0] if session else ''
+                if reason in {'provider_rate_limited','provider_credit_exhausted','provider_unavailable','provider_budget_exhausted','embedding_unavailable','engine_version_unavailable','jev_paused','request_capacity_exceeded','jev_run_interrupted'}:
+                    data['jev']['pause_reason']=reason
+                if reason=='provider_budget_exhausted':
+                    now=datetime.now(timezone.utc)
+                    result['retry_after_seconds']=86400-(now.hour*3600+now.minute*60+now.second)
+
+                data['summary']='Jev paused with saved progress. Resolve provider availability or budget, then resume with refine_matches and current seed_revision.'
+            return _json(result)
         artifact = self._one('migration_artifacts', 'id,run_id,decision_revision,format,content_hash,included_count,excluded_count,created_at',
                              owner, migration, run_id=run['id'])
         if not artifact: return _json(result)

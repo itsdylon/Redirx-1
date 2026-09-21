@@ -1,3 +1,4 @@
+import os
 """Opt-in durable planning and explicit inventory resources."""
 from functools import wraps
 from hashlib import sha256
@@ -111,6 +112,8 @@ def body(allowed=None):
 @limiter.limit('30 per minute', key_func=account_limit_key)
 def plan_migration():
     service = MigrationPlanningService()
+    if os.getenv('JEV_MVP_ENABLED','false').lower() == 'true':
+        return jsonify(service.plan(request.api_user_id,body()))
     return jsonify(plan_and_start_discovery(request.api_user_id, body(), repository=service.repository))
 
 
@@ -175,7 +178,9 @@ def operation_status(operation_id):
 @authenticated
 @limiter.limit('30 per minute', key_func=account_limit_key)
 def run_migration(migration_id):
-    value = body({'inventory_ids', 'quote_id', 'grant_id', 'subscription_id', 'rerun_of', 'idempotency_key'})
+    value = body({'inventory_ids', 'quote_id', 'grant_id', 'subscription_id', 'rerun_of', 'idempotency_key','confirmed_pairs'})
+    if value.get('confirmed_pairs') is not None and os.getenv('JEV_MVP_ENABLED','false').lower() != 'true':
+        raise InvalidInputError('Confirmed examples require the Jev workflow.')
     if value.get('grant_id') is not None and value.get('subscription_id') is not None:
         raise InvalidInputError('Choose either a purchase grant or a Studio subscription.')
     key = validate_key(value.get('idempotency_key'))
@@ -191,9 +196,19 @@ def run_migration(migration_id):
                  'run:' + sha256(key.encode()).hexdigest()))
     if quote['inventory_ids'] != inventories:
         raise InvalidInputError('The quote must match both requested inventory snapshots.')
-    if quote['kind'] == 'custom':
+    if quote['kind'] == 'custom' and os.getenv('JEV_MVP_ENABLED','false').lower() != 'true':
         return jsonify(envelope(migration_id, quote['operation_id'], status='needs_input',
                                 next_action='request_custom_quote', data=quote))
+    from backend.services.jev_pipeline_service import JevService, enabled as jev_enabled, LIMITS
+    if jev_enabled():
+        if any(value.get(field) is not None for field in ('grant_id','subscription_id','rerun_of')):
+            raise InvalidInputError('Jev V1 is free; omit paid grant/subscription/rerun fields. Use refine_matches for an existing Jev run.')
+        if quote['kind'] != 'free':
+            raise InvalidInputError('Jev V1 supports at most 500 old pages, 2000 new pages, and 2 MiB of URL text. No paid upgrade is required or available.')
+        result = JevService(quotes.repository).start(request.api_user_id,migration_id,inventories['old'],inventories['new'],quote['quote_id'],key,value.get('confirmed_pairs'))
+        return jsonify(envelope(migration_id,result['operation_id'],status=result['status'],
+            next_action='poll' if result['status'] in ('queued','running') else 'resolve_matches',
+            data={**result,'engine':'jev-url-v1','free':True,'limits':LIMITS}))
     from backend.services.migration_subscription_service import (
         MigrationSubscriptionService, SubscriptionAllowanceExhaustedError,
         SubscriptionPaymentRequiredError,
@@ -235,3 +250,14 @@ def run_migration(migration_id):
                    'succeeded': 'resolve_matches', 'failed': 'retry'}[result['status']]
     return jsonify(envelope(migration_id, result['operation_id'], status=result['status'],
                             next_action=next_action, data={**quote, **result}))
+
+@v2_blueprint.post('/migrations/<migration_id>/runs/<run_id>/refine')
+@authenticated
+@limiter.limit('10 per minute', key_func=account_limit_key)
+def refine_matches(migration_id, run_id):
+    from backend.services.jev_pipeline_service import JevService, enabled as jev_enabled
+    if not jev_enabled():
+        raise InvalidInputError('Jev refinement is currently paused. Existing results remain available.')
+    value=body({'expected_seed_revision','idempotency_key'})
+    result=JevService().refine(request.api_user_id,migration_id,run_id,value.get('expected_seed_revision'),value.get('idempotency_key'))
+    return jsonify(envelope(migration_id,result['operation_id'],status=result['status'],next_action='poll',data=result))

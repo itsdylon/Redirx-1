@@ -57,7 +57,7 @@ class MigrationRunService:
                         raise RepositoryUnavailableError('Migration allowance timing is temporarily unavailable.') from None
                     raise FreeMigrationRateLimitedError(wait) from None
                 if message == 'capacity_exceeded':
-                    raise ImportCapacityExceededError('The inventory exceeds the configured content processing capacity.') from None
+                    raise ImportCapacityExceededError('Jev V1 accepts at most 500 old URLs, 2000 new URLs and 2 MiB total URL text; no paid upgrade is available.' if name=='reserve_jev_run' else 'The inventory exceeds the configured content processing capacity.') from None
                 if message in _ERRORS:
                     error_type, safe_message = _ERRORS[message]
                     raise error_type(safe_message) from None
@@ -77,7 +77,7 @@ class MigrationRunService:
                     _uuid(result[field], field)
             if result['status'] not in {'payment_required','queued','running','succeeded','failed'}:
                 raise ValueError('Invalid status')
-            if name == 'reserve_migration_run':
+            if name in {'reserve_migration_run','reserve_jev_run'}:
                 if not {'run_id','session_id','quote_id','inventory_ids','rerun_of','replayed'} <= result.keys():
                     raise ValueError('Missing reservation fields')
                 if result['status'] == 'payment_required':

@@ -132,8 +132,14 @@ class MappingDecisionService:
             raise RepositoryUnavailableError("Mapping decisions are temporarily unavailable.")
         if not all(isinstance(item, Mapping) for item in data["items"]):
             raise RepositoryUnavailableError("Mapping decisions are temporarily unavailable.")
-        return {"items": [dict(item) for item in data["items"]], "next_cursor": data["next_cursor"],
-                "selection_revision": data["selection_revision"]}
+        result = {"items": [dict(item) for item in data["items"]], "next_cursor": data["next_cursor"],
+                  "selection_revision": data["selection_revision"]}
+        import os
+        if os.getenv('JEV_MVP_ENABLED','false').lower() == 'true':
+            from .jev_pipeline_service import JevService
+            from types import SimpleNamespace
+            result = JevService(SimpleNamespace(client=self.client)).enrich(run,result)
+        return result
 
     def resolve_matches(
         self, user_id: UUID | str, migration_id: UUID | str, run_id: UUID | str,

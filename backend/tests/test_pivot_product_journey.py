@@ -34,10 +34,11 @@ from backend.routes.v2_routes import v2_blueprint
 from backend.routes.migration_mapping_routes import create_migration_mapping_blueprint
 from backend.routes.migration_artifact_routes import create_migration_artifact_blueprint
 from backend.routes.migration_outcome_routes import create_migration_outcome_blueprint
-from backend.services.migration_repository import MigrationRepository
+from backend.services.migration_repository import MigrationRepository, MigrationNotFoundError
 from backend.services.migration_run_service import MigrationRunService
 from backend.services.mcp_delegation_service import MCPDelegationService
-from backend.services.migration_verification_service import MigrationVerificationService, run_verification_batch
+from backend.services.migration_verification_service import (
+    MigrationVerificationService, VerificationEntitlementError, run_verification_batch)
 from backend.services.migration_monitoring_service import MigrationMonitoringService, run_monitoring_batch
 from src.redirx.safe_fetch import SSRFBlockedError
 from backend.tests import test_migration_run_service as run_fixture
@@ -189,8 +190,8 @@ class NativeProductJourney(unittest.TestCase):
         self.assertTrue(self.read_bridge()['ready'])
         self.bridge.stdin.write(json.dumps({'method':'list','account':'A'})+'\n'); self.bridge.stdin.flush()
         tools=self.read_bridge()['result']['tools']
-        self.assertEqual({tool['name'] for tool in tools},{'plan_migration','run_migration','get_migration','list_matches',
-            'resolve_matches','export_redirects','verify_redirects','manage_monitoring','get_monitoring_status','get_monitoring_fixes','connect_search_console'})
+        self.assertEqual({tool['name'] for tool in tools},{'plan_migration','import_inventory','run_migration','refine_matches',
+            'get_migration','list_matches','resolve_matches','export_redirects','verify_redirects'})
 
     def stop_bridge(self):
         if self.bridge.poll() is None:
@@ -341,9 +342,13 @@ class NativeProductJourney(unittest.TestCase):
         self.assertEqual(self.sql("SELECT count(*) AS n FROM migration_verifications WHERE migration_id=%s AND kind='included'",[mid])[0]['n'],1)
         measured=self.tool('get_migration',{'migration_id':mid})['data']['verification']
         self.assertEqual(measured['outcome'],'issues_found');self.assertEqual(measured['unchecked'],0)
-        monitor_args={'migration_id':mid,'action':'start','artifact_id':aid,'deployment_id':did,'idempotency_key':'monitor-'+mid}
-        denied_monitor=self.tool('manage_monitoring',monitor_args)
-        self.assertEqual(denied_monitor['error']['code'],'payment_required')
+        # manage_monitoring/get_monitoring_status/get_monitoring_fixes are no longer
+        # public MCP tools (browser/REST only now); the backend service they wrap is
+        # unchanged, so this journey drives it directly instead of through self.tool.
+        monitoring_service=MigrationMonitoringService(self.repo)
+        with self.assertRaises(VerificationEntitlementError) as denied_monitor:
+            monitoring_service.manage(A,mid,'start',artifact_id=aid,deployment_id=did,idempotency_key='monitor-'+mid)
+        self.assertEqual(denied_monitor.exception.code,'payment_required')
         # Fixture Stripe fact enters the real service-only paid-period authority.
         # No public billing handler is mocked and no real provider is contacted.
         now=datetime.now(timezone.utc);suffix=uuid4().hex
@@ -351,30 +356,31 @@ class NativeProductJourney(unittest.TestCase):
             'p_customer_id':'cus_'+suffix,'p_sku':'monitoring','p_status':'active','p_period_start':(now-timedelta(hours=1)).isoformat(),
             'p_period_end':(now+timedelta(days=30)).isoformat(),'p_invoice_id':'in_'+suffix,'p_amount_cents':2900,'p_currency':'usd',
             'p_event_id':'evt_'+suffix,'p_event_hash':'a'*64,'p_event_at':now.isoformat(),'p_livemode':False,'p_deployment_id':did}).execute().data
-        monitor_args.update(subscription_id=paid['subscription_id'],idempotency_key='paid-monitor-'+mid)
-        monitor=self.tool('manage_monitoring',monitor_args)
+        monitor=monitoring_service.manage(A,mid,'start',artifact_id=aid,deployment_id=did,
+            subscription_id=paid['subscription_id'],idempotency_key='paid-monitor-'+mid)
         self.assertEqual(monitor['data']['state'],'active',monitor)
         monitor_id=monitor['data']['monitoring_id'];anchor=monitor['data']['deployment_confirmed_at']
-        monitoring_service=MigrationMonitoringService(self.repo)
         self.assertEqual(asyncio.run(run_monitoring_batch(monitoring_service,'journey-monitor',50))['recorded'],3)
-        monitor_status=self.tool('get_monitoring_status',{'migration_id':mid,'monitoring_id':monitor_id})
+        monitor_status=monitoring_service.status(A,mid,monitor_id)
         self.assertEqual(monitor_status['data']['coverage']['failed'],1)
-        self.assertEqual(self.tool('get_monitoring_status',{'migration_id':mid,'monitoring_id':monitor_id},account='B')['error']['code'],'not_found')
-        fixes=self.tool('get_monitoring_fixes',{'migration_id':mid,'monitoring_id':monitor_id,'after':-1,'limit':1})
+        with self.assertRaises(MigrationNotFoundError) as denied_status:
+            monitoring_service.status(B,mid,monitor_id)
+        self.assertEqual(denied_status.exception.code,'not_found')
+        fixes=monitoring_service.fixes(A,mid,monitor_id,after=-1,limit=1)
         self.assertEqual(len(fixes['data']['items']),1)
         self.assertEqual(fixes['data']['recovery_artifact']['artifact_id'],aid)
         self.assertIsNone(fixes['data']['next_cursor'])
         for action in ('pause','resume'):
-            changed=self.tool('manage_monitoring',{'migration_id':mid,'monitoring_id':monitor_id,'action':action,'idempotency_key':action+'-'+mid})
+            changed=monitoring_service.manage(A,mid,action,monitoring_id=monitor_id,idempotency_key=action+'-'+mid)
             self.assertEqual(changed['data']['state'],'paused' if action=='pause' else 'active')
             self.assertEqual(changed['data']['deployment_confirmed_at'],anchor)
         self.origin_servers['old'].modes['/page/1']='pass'
         self.sql('UPDATE migration_monitors SET next_check_at=now() WHERE id=%s',[monitor_id])
         self.assertEqual(asyncio.run(run_monitoring_batch(monitoring_service,'journey-monitor-fix',50))['recorded'],3)
-        fixed=self.tool('get_monitoring_status',{'migration_id':mid})
+        fixed=monitoring_service.status(A,mid,monitor_id)
         self.assertEqual(fixed['data']['coverage']['outcome'],'passed')
-        self.assertEqual(self.tool('get_monitoring_fixes',{'migration_id':mid})['data']['items'],[])
-        cancelled=self.tool('manage_monitoring',{'migration_id':mid,'monitoring_id':monitor_id,'action':'cancel','idempotency_key':'cancel-'+mid})
+        self.assertEqual(monitoring_service.fixes(A,mid,monitor_id)['data']['items'],[])
+        cancelled=monitoring_service.manage(A,mid,'cancel',monitoring_id=monitor_id,idempotency_key='cancel-'+mid)
         self.assertEqual(cancelled['data']['state'],'cancelled')
         self.assertEqual(self.sql("SELECT count(*) AS n FROM migration_monitor_alerts WHERE monitoring_id=%s AND state='sent'",[monitor_id])[0]['n'],0)
         # An immutable artifact remains downloadable after a newer decision;

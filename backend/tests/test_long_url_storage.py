@@ -553,9 +553,12 @@ class LongURLStorage(cleanup.PivotParentCleanup):
             'p_invoice_id': 'in_' + suffix, 'p_amount_cents': 2900, 'p_currency': 'usd', 'p_event_id': 'evt_' + suffix,
             'p_event_hash': 'a' * 64, 'p_event_at': now.isoformat(), 'p_livemode': False,
             'p_deployment_id': did}).execute().data
-        monitor = self.tool('manage_monitoring', {'migration_id': mid, 'action': 'start', 'artifact_id': aid,
-            'deployment_id': did, 'subscription_id': paid['subscription_id'],
-            'idempotency_key': 'long-monitor-' + mid})
+        # manage_monitoring is no longer a public MCP tool (browser/REST only now);
+        # the backend service is unchanged, so call it directly instead of through
+        # self.tool.
+        monitor = MigrationMonitoringService(self.repo).manage(A, mid, 'start', artifact_id=aid,
+            deployment_id=did, subscription_id=paid['subscription_id'],
+            idempotency_key='long-monitor-' + mid)
         self.assertEqual(monitor['data']['state'], 'active', monitor)
         self.assertEqual(asyncio.run(run_monitoring_batch(MigrationMonitoringService(self.repo),
                                                           'long-monitor-worker', 50))['recorded'], 3)

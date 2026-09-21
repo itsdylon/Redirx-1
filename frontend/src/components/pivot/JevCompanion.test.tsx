@@ -29,7 +29,9 @@ beforeEach(()=>{
 afterEach(()=>{cleanup();localStorage.clear();vi.unstubAllGlobals();});
 describe('free Jev companion with actual API transport',()=>{
  it('labels model proposals and saves confirmation only through revision-bound set_target',async()=>{
-  const user=userEvent.setup();mount();await screen.findByText('Jev proposal: https://new.test/a');
+  const user=userEvent.setup();mount();await screen.findByText('Proposed destination: https://new.test/a');
+  expect(screen.getByRole('heading',{name:'Free URL mapping'})).toBeInTheDocument();
+  expect(screen.queryByText('Free Jev URL mapping')).not.toBeInTheDocument();
   expect(screen.getByText(/Model estimate: 84.0%/)).toBeInTheDocument();
   expect(screen.queryByRole('button',{name:'Approve',exact:true})).not.toBeInTheDocument();
   expect(screen.queryByText('Payment required')).not.toBeInTheDocument();expect(screen.queryByText('Monitoring')).not.toBeInTheDocument();
@@ -52,7 +54,7 @@ describe('free Jev companion with actual API transport',()=>{
   expect(screen.getByRole('button',{name:'Confirm proposed destination'})).toBeDisabled();
   expect(screen.getByRole('button',{name:'Refine with confirmed examples'})).toBeDisabled();
   status='failed';await userEvent.setup().click(screen.getByRole('button',{name:'Refresh status'}));
-  await waitFor(()=>expect(screen.getByRole('button',{name:'Resume Jev pass'})).toBeEnabled());
+  await waitFor(()=>expect(screen.getByRole('button',{name:'Resume matching pass'})).toBeEnabled());
  });
  it('explains the explicit import workflow and free bounds without a subscription offer',async()=>{
   vi.stubGlobal('fetch',vi.fn(async()=>json(envelope({items:[],next_cursor:null}))));

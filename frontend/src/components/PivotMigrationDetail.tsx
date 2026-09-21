@@ -185,12 +185,12 @@ export function PivotMigrationDetail() {
       <Button disabled={busy || loading || !summary?.operation_id} onClick={() => void pay()}>Continue to checkout</Button>
     </section>}
     {isJev && data?.jev && <section className="space-y-3 border-t pt-6" aria-labelledby="jev-heading">
-      <h2 id="jev-heading" className="text-lg font-semibold">Free Jev URL mapping</h2>
+      <h2 id="jev-heading" className="text-lg font-semibold">Free URL mapping</h2>
       <p className="text-sm">Pass {data.jev.pass} of {data.jev.limits.passes}. Confirmed-example revision {data.jev.seed_revision}. Model confidence is an estimate, not a verified match.</p>
       <p className="text-sm text-muted-foreground">Confirm known destinations to guide another pass over unresolved pages. Existing confirmed decisions remain saved. URL text is matched without fetching page content.</p>
       <Button variant="outline" disabled={busy || loading || ['queued', 'running'].includes(data.run?.status || '') ||
         (data.jev.pass >= data.jev.limits.passes && data.run?.status !== 'failed')}
-        onClick={() => void refine()}>{data.run?.status === 'failed' ? 'Resume Jev pass' : 'Refine with confirmed examples'}</Button>
+        onClick={() => void refine()}>{data.run?.status === 'failed' ? 'Resume matching pass' : 'Refine with confirmed examples'}</Button>
       {data.jev.pass >= data.jev.limits.passes && data.run?.status !== 'failed' && <p className="text-sm">All three passes are used. Continue reviewing and exporting this run.</p>}
     </section>}
     {data?.run_id && <section className="space-y-3 border-t pt-6" aria-labelledby="mappings-heading">
@@ -212,7 +212,7 @@ export function PivotMigrationDetail() {
       <ul className="divide-y">{rows.map(row => <li key={row.mapping_id} className="space-y-3 py-4">
         <p className="break-all text-sm font-medium">{row.old_url} → {row.decision_target || row.new_url || 'No destination'}</p>
         {row.jev_proposal && <div className="space-y-1 text-sm">
-          <p className="break-all">Jev proposal: {row.jev_proposal.target_url || 'No confident destination'}</p>
+          <p className="break-all">Proposed destination: {row.jev_proposal.target_url || 'No confident destination'}</p>
           {typeof row.jev_proposal.confidence === 'number' && Number.isFinite(row.jev_proposal.confidence) &&
             <p>Model estimate: {(row.jev_proposal.confidence * 100).toFixed(1)}% · pass {row.jev_proposal.pass}</p>}
           {row.jev_proposal.stale && <p>This proposal predates the latest confirmed examples. Review it or refine again.</p>}

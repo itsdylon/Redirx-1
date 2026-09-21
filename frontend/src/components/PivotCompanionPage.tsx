@@ -28,13 +28,13 @@ export function PivotCompanionPage() {
   return <ToolLayout title="Migration companion"><main className="mx-auto max-w-4xl space-y-8 py-4">
     <header className="space-y-3">
       <h1 className="text-3xl font-semibold">Your migrations</h1>
-      <p className="max-w-prose text-muted-foreground">Start a free Jev URL migration in your MCP client. Import old and new URL lists, review proposed destinations here, then export the reviewed map.</p>
+      <p className="max-w-prose text-muted-foreground">Start a free URL migration in your MCP client. Import old and new URL lists, review proposed destinations here, then export the reviewed map.</p>
     </header>
     <section className="space-y-3 border-t pt-6" aria-labelledby="connect-heading">
       <h2 id="connect-heading" className="text-lg font-semibold">Connect your agent</h2>
       <p className="text-sm">Add this Streamable HTTP server in your MCP client, then choose its sign-in action and approve RedirX access.</p>
       <code className="block break-all rounded-md bg-muted p-3 text-sm">{MCP_URL}</code>
-      <p className="text-sm text-muted-foreground">The client handles OAuth and refreshes access automatically. Ask it to plan the migration, import both URL inventories, then run Jev.</p>
+      <p className="text-sm text-muted-foreground">The client handles OAuth and refreshes access automatically. Ask it to plan the migration, import both URL inventories, then start matching.</p>
     </section>
     <p className="text-sm text-muted-foreground">Free while we build: up to 500 old URLs, 2,000 new URLs, 2 MiB of URL text, five new runs per 24 hours and three passes per run. No page-content scraping. Known, verified URL pairs can guide matching.</p>
     <section aria-labelledby="history-heading" className="space-y-3 border-t pt-6">

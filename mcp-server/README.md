@@ -60,16 +60,16 @@ including that field. The table lists the business arguments.
 | Tool | Required business arguments | Result / optional arguments |
 | --- | --- | --- |
 | `plan_migration` | `old_site`, `new_site`, `idempotency_key` | Durable plan/discovery. Optional `name`, `site_aliases: {old: [], new: []}`. |
-| `run_migration` | `migration_id`, `old_inventory_id`, `new_inventory_id`, `idempotency_key` | Entitled run or recoverable payment state. Optional `quote_id`, `grant_id`, `subscription_id`, `rerun_of`. |
+| `run_migration` | `migration_id`, `old_inventory_id`, `new_inventory_id`, `idempotency_key` | Entitled run or recoverable payment state. Optional `quote_id`. |
 | `get_migration` | `migration_id` | Progress/next action. Optional `run_id`, `operation_id`. |
 | `list_matches` | `migration_id`, `run_id` | Optional `filter`, opaque `cursor`, `limit` (default 100, maximum 500). |
 | `resolve_matches` | `migration_id`, `run_id`, `idempotency_key`, `decisions` | 1–100 audited decisions; inspect per-row outcomes. |
 | `export_redirects` | `migration_id`, `run_id`, `format`, `revision`, `idempotency_key` | Immutable artifact. Optional `allow_partial` defaults false. |
 | `verify_redirects` | `migration_id`, `artifact_id`, `idempotency_key`, deployment inputs below | Included post-installation check and coverage. |
-| `manage_monitoring` | `migration_id`, `action`, `idempotency_key`, action inputs below | Start/pause/resume/cancel; does not purchase a subscription. |
-| `get_monitoring_status` | `migration_id` | Optional `monitoring_id`; coverage, grant state and issues. |
-| `get_monitoring_fixes` | `migration_id` | Optional `monitoring_id`, integer `after` (default -1), `limit` (default 100, maximum 500). |
-| `connect_search_console` | `action` | Optional `migration_id`, `property`, `start_date`, `end_date`; mutations require `idempotency_key`. |
+
+Monitoring management and Search Console connection are not part of the public
+MCP tool surface; those flows remain available through the existing browser
+product and their REST routes.
 
 Important argument details:
 
@@ -83,13 +83,6 @@ Important argument details:
   `deployment_confirmation: true`, `live_origin`, and explicit `origin_rewrites`.
   Do not combine the forms. `{}` preserves artifact destinations. Confirm only
   installation that actually happened.
-- Monitoring `start` requires `artifact_id` and `deployment_id`, with optional
-  `subscription_id` and `alert_email`. Other actions require `monitoring_id` and
-  cannot change artifact, subscription or contact.
-- Search Console actions: `connect`, `status`, `properties`, `disconnect`, `sync`.
-  `connect`, `disconnect`, and `sync` require an idempotency key. Dates use
-  `YYYY-MM-DD`. Consent is a browser handoff; agents never collect Google credentials.
-  Core migration work does not require GSC.
 
 The gateway currently returns the canonical JSON envelope in MCP text content:
 `contract_version`, durable IDs, `status`, `next_action`, optional progress/retry

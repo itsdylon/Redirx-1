@@ -5,6 +5,18 @@ supersedes this document’s new-run commercial/content-engine instructions when
 `JEV_MVP_ENABLED=true`. `import_inventory` and `refine_matches` are now first-class
 MCP tools. Historical paid/verification records and their APIs remain preserved.
 
+2026-09-20 public-surface amendment: `connect_search_console`, `manage_monitoring`,
+`get_monitoring_status`, and `get_monitoring_fixes` are removed from the public MCP
+tool surface (`mcp-server/src/tools/pivot.ts`, `contracts/pivot-v1.json`). Their
+backend routes, services, entitlements, and history are unchanged and remain
+reachable from the browser product; an MCP agent can no longer call them, and
+no `next_action` value names them anymore. `run_migration`'s advertised schema
+no longer accepts `grant_id`, `subscription_id`, or `rerun_of` — Jev's admission
+path rejects all three outright — but keeps `quote_id`, which the free-quote
+match/validation flow still consumes. The tool descriptions below predate this
+amendment; where they describe the four removed tools, read them as describing
+REST-only behavior, not a callable MCP tool.
+
 Status: implementation contract; not a production capability announcement.
 Policy activation: test-only until the commercial choices below are resolved.
 

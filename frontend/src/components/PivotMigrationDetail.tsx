@@ -186,12 +186,12 @@ export function PivotMigrationDetail() {
     </section>}
     {isJev && data?.jev && <section className="space-y-3 border-t pt-6" aria-labelledby="jev-heading">
       <h2 id="jev-heading" className="text-lg font-semibold">Free Jev URL mapping</h2>
-      <p className="text-sm">Pass {data.jev.pass} of {data.jev.limits.max_passes}. Confirmed-example revision {data.jev.seed_revision}. Model confidence is an estimate, not a verified match.</p>
+      <p className="text-sm">Pass {data.jev.pass} of {data.jev.limits.passes}. Confirmed-example revision {data.jev.seed_revision}. Model confidence is an estimate, not a verified match.</p>
       <p className="text-sm text-muted-foreground">Confirm known destinations to guide another pass over unresolved pages. Existing confirmed decisions remain saved. URL text is matched without fetching page content.</p>
       <Button variant="outline" disabled={busy || loading || ['queued', 'running'].includes(data.run?.status || '') ||
-        (data.jev.pass >= data.jev.limits.max_passes && data.run?.status !== 'failed')}
+        (data.jev.pass >= data.jev.limits.passes && data.run?.status !== 'failed')}
         onClick={() => void refine()}>{data.run?.status === 'failed' ? 'Resume Jev pass' : 'Refine with confirmed examples'}</Button>
-      {data.jev.pass >= data.jev.limits.max_passes && data.run?.status !== 'failed' && <p className="text-sm">All three passes are used. Continue reviewing and exporting this run.</p>}
+      {data.jev.pass >= data.jev.limits.passes && data.run?.status !== 'failed' && <p className="text-sm">All three passes are used. Continue reviewing and exporting this run.</p>}
     </section>}
     {data?.run_id && <section className="space-y-3 border-t pt-6" aria-labelledby="mappings-heading">
       <h2 id="mappings-heading" className="text-lg font-semibold">Mapping review</h2>

@@ -9,7 +9,7 @@ export interface PivotMigration { id: string; name?: string | null; old_origin?:
 export type PivotMatchFilter = 'all' | 'needs_review' | 'unmatched' | 'rejected' | 'approved';
 export interface JevRun {
   engine: 'jev-url-v1'; model: string; pass: number; seed_revision: number;
-  limits: { max_old_urls: number; max_new_urls: number; max_url_bytes: number; max_passes: number; new_runs_per_24h: number };
+  limits: { old_pages: number; new_pages: number; inventory_bytes: number; passes: number; new_runs_per_24h: number };
 }
 export interface PivotMatch {
   mapping_id: string; old_url: string; new_url?: string | null; decision_target?: string | null;

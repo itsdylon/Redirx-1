@@ -8,7 +8,7 @@ import { PivotCompanionPage } from '../PivotCompanionPage';
 vi.mock('../ToolLayout', () => ({ ToolLayout: ({ children }: { children: ReactNode }) => <>{children}</> }));
 const envelope = (data: unknown, changes = {}) => ({ contract_version: '1.0.0', migration_id: 'm1', operation_id: 'op1', status: 'succeeded', next_action: 'none', data, error: null, ...changes });
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), {status, headers:{'Content-Type':'application/json'}});
-const limits={max_old_urls:500,max_new_urls:2000,max_url_bytes:2097152,max_passes:3,new_runs_per_24h:5};
+const limits={old_pages:500,new_pages:2000,inventory_bytes:2097152,passes:3,new_runs_per_24h:5};
 let calls: Array<{path:string; method:string; body:any}>;
 let pass:number, seed:number, stale:boolean, status:string, failures:number;
 function mount(){return render(<MemoryRouter initialEntries={['/migrations/m1']}><Routes><Route path="/migrations/:migrationId" element={<PivotMigrationDetail/>}/></Routes></MemoryRouter>);}
@@ -47,6 +47,8 @@ describe('free Jev companion with actual API transport',()=>{
  });
  it('keeps stale proposals for review, stops after three passes, and allows failed-pass resume',async()=>{
   pass=3;stale=true;mount();await screen.findByText(/predates the latest confirmed/);
+  expect(screen.getByText(/Pass 3 of 3/)).toBeInTheDocument();
+  expect(screen.getByText('All three passes are used. Continue reviewing and exporting this run.')).toBeInTheDocument();
   expect(screen.getByRole('button',{name:'Confirm proposed destination'})).toBeDisabled();
   expect(screen.getByRole('button',{name:'Refine with confirmed examples'})).toBeDisabled();
   status='failed';await userEvent.setup().click(screen.getByRole('button',{name:'Refresh status'}));

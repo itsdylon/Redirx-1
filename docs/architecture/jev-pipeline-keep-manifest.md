@@ -121,3 +121,25 @@ that dynamically selected modules are unused. Check environment strings, SQL RPC
 names, triggers, package entry points, templates, scheduler modules and historical
 records before any deletion. Remove only independently proven unused components
 in a separate reviewed patch; keep every unclassified file protected.
+
+## Post-launch analytics wave additions (2026-09-21)
+
+New owned files and protected changes from the reviewed post-launch wave; keep with the pipeline:
+
+- `backend/services/analytics_service.py` new `AppEvent` members and the outcome-transition
+  capture sites in `migration_planning_service.py`, `inventory_import_service.py`,
+  `routes/v2_routes.py`, `jev_pipeline_service.py`, `migration_run_service.py`,
+  `routes/migration_mapping_routes.py`, `migration_artifact_service.py`,
+  `migration_verification_service.py`. Events fire on outcome transitions only (replay-safe,
+  before/after status reads where RPCs return no transition flag); properties carry
+  ids/counts/statuses only — never URL inventories, tokens, CSV contents or MCP context.
+- `backend/tests/test_new_pivot_analytics_events.py` (mocked unit coverage for the above).
+- `frontend/src/lib/analyticsEvents.ts`: typed catalogue for NEW frontend events only; legacy
+  bare-string events intentionally not retrofitted yet.
+- `frontend/src/contexts/AuthContext.tsx`: auth success/failure capture with entry_path,
+  identify-once gating, reset-on-logout — do not reintroduce per-render identify churn.
+- `mcp-server/test/pivot-tools.test.ts` and `scripts/check_pivot_contract.mjs`: assert the exact
+  nine-tool public surface; a build of `mcp-server/dist` older than `src` will still serve the
+  wider surface locally — rebuild before trusting a spawned tools/list.
+- `backend/tests/test_long_url_storage.py`: migration 056 is applied once by the inherited
+  `NativeProductJourney.setUpClass`; never re-apply it in a subclass (one-shot rewrite).

@@ -34,11 +34,13 @@ issues resource-bound tokens. The gateway verifies issuer, audience, signature,
 subject, client and scope. See the [authorization service](../mcp-auth-server/README.md)
 and [production OAuth evidence](../docs/oauth-broker-acceptance-2026-09-19.md).
 
-This README describes the source contract at the product release pin. API/worker
-deployment and the lean worker's [idle Linux observation](../docs/release-evidence/worker-idle-cgroup-5d0117b.json)
-are recorded separately. A fresh production eleven-tool `tools/list` comparison
-and complete 500-page free/501-page paid sandbox journeys remain pending in the
-evidence available for this documentation packet. A health response or this tool
+This README describes the source contract of the current nine-tool release
+candidate. API/worker deployment and the lean worker's [idle Linux observation](../docs/release-evidence/worker-idle-cgroup-5d0117b.json)
+are recorded separately. The last live production `tools/list` acceptance
+captured the earlier thirteen-tool surface (2026-09-21 audit); a fresh
+production comparison against this nine-tool candidate is pending its
+deployment, and complete 500-page free/501-page paid sandbox journeys remain
+pending in the evidence available for this documentation packet. A health response or this tool
 table does not prove those journeys passed. Earlier production OAuth acceptance
 exercised the legacy gateway. Record each advertised client's version and result;
 this document does not claim verified interoperability for particular clients.
@@ -212,14 +214,15 @@ a source compatibility default, but its observed generic audience failed the
 resource gate. The released issuer is the broker above; do not substitute a generic
 audience or disable verification.
 
-- [Native eleven-tool journeys](../docs/acceptance/native-pivot-journey.md): actual
-  MCP/Flask/native SQL, with documented provider/network fixtures.
+- [Native pivot journeys](../docs/acceptance/native-pivot-journey.md) (historical,
+  recorded at the eleven-tool pin): actual MCP/Flask/native SQL, with documented
+  provider/network fixtures.
 - [Production OAuth](../docs/oauth-broker-acceptance-2026-09-19.md): identity,
   resource binding, refresh/restart/replay and legacy backend discovery.
 - [Public fixture readiness](../docs/acceptance/public-fixture-readiness-2026-09-20.md):
   bounded provider/storage estimates and a deployed sampler, not yet a completed migration.
 
 `scripts/production-oauth-probe.mjs` is the **legacy-tool** OAuth probe. Its optional
-`discover` invocation does not work with the eleven-tool surface. Use authorization-only
+`discover` invocation does not work with the pivot surface (any pin). Use authorization-only
 mode when appropriate, and separately reviewed pivot journey acceptance for the new
 business tools. Generated documentation does not replace an actual client/version result.

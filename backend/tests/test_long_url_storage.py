@@ -1,10 +1,15 @@
 """056 long-URL storage acceptance: the 8192-character contract end to end.
 
-Extends the deepest existing native fixture (001/019/026/032/034-051/053/054/055
-plus production-shaped NO ACTION engine FKs) with 056, so every inherited pivot
+Extends the deepest existing native fixture (001/019/026/032/034-051/053/054/
+055/056 plus production-shaped NO ACTION engine FKs), so every inherited pivot
 journey, evidence-fence and parent-cleanup test re-runs under the new index
-shapes. 052 is not applied: it introduces no object 056 touches and needs a real
-pgvector install, which this fixture does not have.
+shapes. 056 is applied once, by the inherited NativeProductJourney.setUpClass
+glob (it already matches '056_*.sql'); this class must not replay it — 056 is
+explicitly non-idempotent (see its own header: "Do not replay any of those
+files afterwards") and a second application fails on its first DROP CONSTRAINT,
+since the first application already renamed that constraint away. 052 is not
+applied: it introduces no object 056 touches and needs a real pgvector
+install, which this fixture does not have.
 
 URLs here are incompressible sha256 hex, not repeated characters: a repeated
 character TOASTs away and never reaches the index-key limit that 026/032/040/043
@@ -50,11 +55,11 @@ def entropy(seed, size):
 
 @unittest.skipUnless(os.getenv('PREFLIGHT_TEST_DATABASE_URL'), 'requires disposable loopback PostgreSQL')
 class LongURLStorage(cleanup.PivotParentCleanup):
-    @classmethod
-    def setUpClass(cls):
-        super().setUpClass()
-        with psycopg.connect(cls.dsn, autocommit=True) as c:
-            c.execute((ROOT / 'database/migrations/056_exact_long_url_storage.sql').read_text())
+    # No setUpClass override: NativeProductJourney.setUpClass (the root of
+    # this inheritance chain) already applies 056_exact_long_url_storage.sql
+    # via its own migration glob. Re-applying it here used to fail — 056 is
+    # documented as non-idempotent and its first DROP CONSTRAINT only exists
+    # to be dropped once.
 
     # ---- helpers -------------------------------------------------------
 

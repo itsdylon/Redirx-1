@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
+import { usePostHog } from '@posthog/react';
 import { checkout, downloadArtifact, getPivotMigration, listPivotMatches, monitoring, resolvePivotMatch, refinePivotMatches,
   type MigrationDetail, type MonitoringData, type MonitoringIssue, type PivotEnvelope, type PivotMatch, type PivotMatchFilter } from '../api/pivot';
+import { FrontendEvent, safeCapture } from '../lib/analyticsEvents';
 import { ToolLayout } from './ToolLayout';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -64,6 +66,7 @@ function MonitoringPanel({ migrationId, monitoringId }: { migrationId: string; m
 export function PivotMigrationDetail() {
   const { migrationId = '' } = useParams();
   const [search] = useSearchParams();
+  const posthog = usePostHog();
   const scope = useRequestScope(migrationId);
   const [summary, setSummary] = useState<PivotEnvelope<MigrationDetail> | null>(null);
   const [rows, setRows] = useState<PivotMatch[]>([]);
@@ -107,6 +110,13 @@ export function PivotMigrationDetail() {
     finally { if (!signal.aborted) setBusy(false); }
   }
   async function decide(row: PivotMatch, action: string, confirmedTarget?: string) {
+    // Fired on the user's initiated click, before the request resolves. The
+    // backend's own mapping_decisions_applied event (migration_mapping_routes.py)
+    // is the one that says the decision was actually persisted — this one says
+    // a person chose to try.
+    safeCapture(posthog, FrontendEvent.PIVOT_REVIEW_DECISION_INITIATED, {
+      migration_id: migrationId, run_id: summary?.data.run_id, action,
+    });
     await perform(async signal => {
       const decision = { mapping_id: row.mapping_id, expected_revision: row.revision, action,
         ...(action === 'set_target' ? { target_url: confirmedTarget ?? targets[row.mapping_id] } : {}) };
@@ -122,6 +132,9 @@ export function PivotMigrationDetail() {
   async function refine() {
     const run = summary?.data.run_id, jev = summary?.data.jev;
     if (!run || !jev) return;
+    safeCapture(posthog, FrontendEvent.PIVOT_REFINE_INITIATED, {
+      migration_id: migrationId, run_id: run, pass: jev.pass,
+    });
     await perform(async signal => {
       await refinePivotMatches(migrationId, run, jev.seed_revision,
         scope.key(`refine:${run}:${jev.pass}:${jev.seed_revision}`), signal);
@@ -151,6 +164,9 @@ export function PivotMigrationDetail() {
     });
   }
   async function download() {
+    safeCapture(posthog, FrontendEvent.PIVOT_EXPORT_INITIATED, {
+      migration_id: migrationId, artifact_id: summary?.data.artifact?.artifact_id,
+    });
     await perform(async signal => {
       const artifact = summary!.data.artifact!;
       const result = await downloadArtifact(migrationId, artifact.artifact_id, signal);

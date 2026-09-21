@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { usePostHog } from '@posthog/react';
 import type { OAuthAuthorizationDetails } from '@supabase/auth-js';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { setAuthRedirect } from '../lib/authRedirect';
+import { FrontendEvent, safeCapture } from '../lib/analyticsEvents';
 import { Button } from './ui/button';
 import { Card } from './ui/card';
 
@@ -24,6 +26,7 @@ function goToClient(redirectUrl: string): void {
 export function OAuthConsentPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const posthog = usePostHog();
   const [searchParams] = useSearchParams();
   const authorizationId = searchParams.get('authorization_id');
   const [details, setDetails] = useState<OAuthAuthorizationDetails | null>(null);
@@ -91,6 +94,11 @@ export function OAuthConsentPage() {
         setState('error');
         return;
       }
+      // No client identifiers beyond what PostHog already has on this
+      // identified user (distinct_id) — deliberately no client_name/client_id,
+      // since a requesting-client property here would let one property value
+      // fan out into per-integration breakdowns nobody asked to track.
+      safeCapture(posthog, FrontendEvent.OAUTH_CONSENT_DECIDED, { decision: action === 'approve' ? 'approved' : 'denied' });
       setState('redirecting');
       goToClient(data.redirect_url);
     } catch (decisionError: unknown) {

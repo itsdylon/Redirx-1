@@ -1,12 +1,15 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { usePostHog } from '@posthog/react';
 import { listPivotMigrations, type PivotMigration } from '../api/pivot';
+import { FrontendEvent, safeCapture } from '../lib/analyticsEvents';
 import { ToolLayout } from './ToolLayout';
 import { Button } from './ui/button';
 import { useRequestScope } from './pivot/useRequestScope';
 
 const MCP_URL = 'https://redirx-mcp-server.onrender.com/mcp';
 export function PivotCompanionPage() {
+  const posthog = usePostHog();
   const scope = useRequestScope('companion');
   const [items, setItems] = useState<PivotMigration[]>([]);
   const [next, setNext] = useState<string | null>(null);
@@ -46,7 +49,8 @@ export function PivotCompanionPage() {
       {error && <p role="alert">{error}</p>}
       {!error && loaded && !items.length && <p className="text-sm text-muted-foreground">No migrations yet. Ask your connected agent to plan a migration from your old site to your new site.</p>}
       <ul className="divide-y">
-        {items.map(item => <li key={item.id}><Link to={`/migrations/${item.id}`} className="block space-y-1 py-4 hover:underline">
+        {items.map(item => <li key={item.id}><Link to={`/migrations/${item.id}`} className="block space-y-1 py-4 hover:underline"
+          onClick={() => safeCapture(posthog, FrontendEvent.PIVOT_MIGRATION_OPENED, { migration_id: item.id, status: item.status })}>
           <span className="block break-words font-medium">{item.name || item.old_origin || 'Untitled migration'}</span>
           <span className="block break-all text-sm text-muted-foreground">{item.old_origin} → {item.new_origin}</span>
           <span className="text-sm">{item.status || 'Open migration'}</span>

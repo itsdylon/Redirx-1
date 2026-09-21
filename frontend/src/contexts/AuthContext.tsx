@@ -6,6 +6,7 @@ import { ApiError, throwApiErrorFromResponse } from '../utils/errorHandler';
 import { consumeAuthRedirect, setAuthRedirect } from '../lib/authRedirect';
 import type { Session } from '@supabase/supabase-js';
 import { clearBrowserSession, AUTH_CLEARED_EVENT } from '../lib/authSessionStorage';
+import { FrontendEvent, authFailureReason, safeCapture, type AuthEntryPath } from '../lib/analyticsEvents';
 
 interface User {
   id: string;
@@ -62,6 +63,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const mutationQueue = useRef<Promise<unknown>>(Promise.resolve());
   const initialization = useRef<Promise<void> | null>(null);
   const refreshInFlight = useRef<Promise<void> | null>(null);
+  const identifiedUserId = useRef<string | null>(null);
 
   // Explicit login, initialization, refresh and logout cannot overwrite one
   // another out of order. The SDK owns refresh and its cross-tab auth lock.
@@ -166,14 +168,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  // Identify user in PostHog when auth state changes
+  // Identify user in PostHog once per authenticated session join.
+  //
+  // Gated on the distinct user id actually changing (identifiedUserId.current),
+  // not on `user` object identity: a profile refetch, session refresh, or tab
+  // focus revalidation publishes a new `user` object with the same id, and the
+  // old `useEffect([user, posthog])` re-ran identify() on every one of those —
+  // coverage gap 8 (176 $identify over 15 days for nowhere near 176 sessions).
+  // clearSession()'s posthog.reset() (below) still runs unconditionally on
+  // logout; clearing identifiedUserId here just makes sure the *next* login,
+  // even by the same person in the same tab, re-identifies against the fresh
+  // anonymous id reset() started.
   useEffect(() => {
     if (user) {
-      posthog?.identify(user.id, {
-        email: user.email,
-        plan: user.plan,
-        is_admin: user.is_admin,
-      });
+      if (identifiedUserId.current !== user.id) {
+        identifiedUserId.current = user.id;
+        posthog?.identify(user.id, {
+          email: user.email,
+          plan: user.plan,
+          is_admin: user.is_admin,
+        });
+      }
+    } else {
+      identifiedUserId.current = null;
     }
   }, [user, posthog]);
 
@@ -229,52 +246,67 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const login = (email: string, password: string) => enqueue(async () => {
-    const response = await fetch(`${API_BASE_URL}/api/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password })
-    });
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password })
+      });
 
-    if (!response.ok) {
-      await throwApiErrorFromResponse(response, 'Sign-in failed. Please try again.');
+      if (!response.ok) {
+        await throwApiErrorFromResponse(response, 'Sign-in failed. Please try again.');
+      }
+
+      const data = await response.json();
+      await applySessionTokens(
+        data.access_token,
+        data.refresh_token,
+      );
+      safeCapture(posthog, FrontendEvent.AUTH_SUCCEEDED, { entry_path: 'login' as AuthEntryPath });
+    } catch (error) {
+      safeCapture(posthog, FrontendEvent.AUTH_FAILED, { entry_path: 'login' as AuthEntryPath, reason: authFailureReason(error) });
+      throw error;
     }
-
-    const data = await response.json();
-    await applySessionTokens(
-      data.access_token,
-      data.refresh_token,
-    );
   });
 
   const register = (email: string, password: string, fullName: string): Promise<RegisterResult> => enqueue(async () => {
-    const response = await fetch(`${API_BASE_URL}/api/auth/register`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password, full_name: fullName })
-    });
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/auth/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password, full_name: fullName })
+      });
 
-    if (!response.ok) {
-      await throwApiErrorFromResponse(response, 'Registration failed. Please try again.');
-    }
+      if (!response.ok) {
+        await throwApiErrorFromResponse(response, 'Registration failed. Please try again.');
+      }
 
-    const data = await response.json();
+      const data = await response.json();
 
-    // Check if email confirmation is required
-    if (data.email_confirmation_required) {
+      // Check if email confirmation is required
+      if (data.email_confirmation_required) {
+        // Unconditional: unlike the legacy `signup_from_quick_match` capture
+        // in SignupPage.tsx, this does not depend on a quick-match referral.
+        safeCapture(posthog, FrontendEvent.AUTH_SUCCEEDED, { entry_path: 'signup' as AuthEntryPath });
+        return {
+          emailConfirmationRequired: true,
+          email: data.email
+        };
+      }
+
+      await applySessionTokens(
+        data.access_token,
+        data.refresh_token,
+      );
+      safeCapture(posthog, FrontendEvent.AUTH_SUCCEEDED, { entry_path: 'signup' as AuthEntryPath });
+
       return {
-        emailConfirmationRequired: true,
-        email: data.email
+        emailConfirmationRequired: false
       };
+    } catch (error) {
+      safeCapture(posthog, FrontendEvent.AUTH_FAILED, { entry_path: 'signup' as AuthEntryPath, reason: authFailureReason(error) });
+      throw error;
     }
-
-    await applySessionTokens(
-      data.access_token,
-      data.refresh_token,
-    );
-
-    return {
-      emailConfirmationRequired: false
-    };
   });
 
   const startOAuth = async (
@@ -282,6 +314,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     redirectPath?: string,
     _source?: string
   ): Promise<void> => {
+    const entryPath: AuthEntryPath = provider === 'google' ? 'oauth-google' : 'oauth-github';
     if (redirectPath) {
       setAuthRedirect(redirectPath);
     }
@@ -295,51 +328,64 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
 
     if (error) {
+      safeCapture(posthog, FrontendEvent.AUTH_FAILED, { entry_path: entryPath, reason: authFailureReason(error) });
       throw error;
     }
+    // The browser navigates away to the provider immediately after this
+    // resolves, so there is no later client-side moment to confirm the
+    // provider accepted it. This reports the start succeeding, not the
+    // eventual sign-in — 'callback' below reports that outcome once the
+    // browser returns.
+    safeCapture(posthog, FrontendEvent.AUTH_SUCCEEDED, { entry_path: entryPath });
   };
 
   const completeOAuthCallback = (): Promise<string> => enqueue(async () => {
-    const hashParams = new URLSearchParams(
-      window.location.hash.startsWith('#')
-        ? window.location.hash.substring(1)
-        : window.location.hash
-    );
-    const searchParams = new URLSearchParams(window.location.search);
+    try {
+      const hashParams = new URLSearchParams(
+        window.location.hash.startsWith('#')
+          ? window.location.hash.substring(1)
+          : window.location.hash
+      );
+      const searchParams = new URLSearchParams(window.location.search);
 
-    let accessToken = hashParams.get('access_token');
-    let refreshToken = hashParams.get('refresh_token');
+      let accessToken = hashParams.get('access_token');
+      let refreshToken = hashParams.get('refresh_token');
 
-    if (!accessToken || !refreshToken) {
-      const code = searchParams.get('code');
-      if (code) {
-        try {
-          const { data, error } = await supabase.auth.exchangeCodeForSession(code);
-          if (!error && data.session) {
-            accessToken = data.session.access_token;
-            refreshToken = data.session.refresh_token;
+      if (!accessToken || !refreshToken) {
+        const code = searchParams.get('code');
+        if (code) {
+          try {
+            const { data, error } = await supabase.auth.exchangeCodeForSession(code);
+            if (!error && data.session) {
+              accessToken = data.session.access_token;
+              refreshToken = data.session.refresh_token;
+            }
+          } catch (error) {
+            console.warn('OAuth code exchange failed, falling back to current session.');
           }
-        } catch (error) {
-          console.warn('OAuth code exchange failed, falling back to current session.');
         }
       }
-    }
 
-    if (!accessToken || !refreshToken) {
-      const { data: { session }, error: getSessionError } = await supabase.auth.getSession();
-      if (getSessionError) {
-        throw getSessionError;
+      if (!accessToken || !refreshToken) {
+        const { data: { session }, error: getSessionError } = await supabase.auth.getSession();
+        if (getSessionError) {
+          throw getSessionError;
+        }
+        accessToken = session?.access_token || null;
+        refreshToken = session?.refresh_token || null;
       }
-      accessToken = session?.access_token || null;
-      refreshToken = session?.refresh_token || null;
-    }
 
-    if (!accessToken || !refreshToken) {
-      throw new Error('Unable to complete sign-in. The link may have expired.');
-    }
+      if (!accessToken || !refreshToken) {
+        throw new Error('Unable to complete sign-in. The link may have expired.');
+      }
 
-    await applySessionTokens(accessToken, refreshToken);
-    return consumeAuthRedirect() || '/';
+      await applySessionTokens(accessToken, refreshToken);
+      safeCapture(posthog, FrontendEvent.AUTH_SUCCEEDED, { entry_path: 'callback' as AuthEntryPath });
+      return consumeAuthRedirect() || '/';
+    } catch (error) {
+      safeCapture(posthog, FrontendEvent.AUTH_FAILED, { entry_path: 'callback' as AuthEntryPath, reason: authFailureReason(error) });
+      throw error;
+    }
   });
 
   const logout = () => enqueue(async () => {

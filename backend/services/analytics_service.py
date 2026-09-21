@@ -73,6 +73,25 @@ class AppEvent(str, Enum):
     MIGRATION_RUN_STARTED = "migration_run_started"
     REDIRECT_ARTIFACT_EXPORTED = "redirect_artifact_exported"
 
+    # --- JEV pivot funnel (docs/mcp-pivot-execution-plan.md, coverage gap 1) --
+    # The JEV path (v2_routes.py + jev_pipeline_service.py) shares
+    # MIGRATION_RUN_STARTED and REDIRECT_ARTIFACT_EXPORTED above with the
+    # legacy Deep Match funnel rather than duplicating them — same business
+    # meaning, one row shape. These five are new because the JEV funnel has
+    # no legacy equivalent to reuse: a durable plan/import step, an explicit
+    # refine pass, a resolve_matches review action, a terminal run outcome
+    # (queued/running is not a business event; succeeded/failed is), and an
+    # installation record. MIGRATION_RUN_COMPLETED covers both the initial
+    # run and a refine pass — they share one finalize_session() choke point
+    # in worker.py, and a `pass` property distinguishes which one completed
+    # rather than firing two events for one terminal transition.
+    MIGRATION_PLAN_CREATED = "migration_plan_created"
+    INVENTORY_IMPORT_COMPLETED = "inventory_import_completed"
+    MIGRATION_REFINE_STARTED = "migration_refine_started"
+    MIGRATION_RUN_COMPLETED = "migration_run_completed"
+    MAPPING_DECISIONS_APPLIED = "mapping_decisions_applied"
+    MIGRATION_ARTIFACT_INSTALLED = "migration_artifact_installed"
+
     # --- After the cutover ------------------------------------------------
     MIGRATION_VERIFICATION_COMPLETED = "migration_verification_completed"
     MONITORING_ACTIVATED = "monitoring_activated"

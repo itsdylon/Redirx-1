@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 from datetime import datetime, timezone
 
+from .analytics_service import AppEvent, capture
 from .inventory_policy import InventoryPolicyError, normalize_origin
 from .migration_repository import (
     InvalidInputError, MigrationRepository, RepositoryUnavailableError, _strict_uuid,
@@ -89,6 +90,14 @@ class MigrationPlanningService:
         summary = self.get(owner, migration_id)
         summary['operation_id'] = operation_id
         summary['data']['replayed'] = result['replayed']
+        if not result['replayed']:
+            # This is the JEV-only branch of plan_migration (v2_routes.py never
+            # reaches here for the legacy discovery path), so a plan created via
+            # this method is always a JEV pivot migration. A replay is the same
+            # idempotency key resubmitted, not a new plan — never fire twice for
+            # one plan.
+            capture(AppEvent.MIGRATION_PLAN_CREATED, user_id=owner, migration_id=migration_id,
+                    properties={"operation_id": operation_id, "engine": "jev-url-v1"})
         return summary
 
     def get(self, user_id, migration_id):

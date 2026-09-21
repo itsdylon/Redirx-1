@@ -8,6 +8,7 @@ from decimal import Decimal
 from uuid import UUID
 
 from src.redirx.jev.jev import JevClient, ProviderUnavailable, MODEL, PROMPT_VERSION, encoded
+from .analytics_service import AppEvent, capture
 from .migration_repository import MigrationRepository, InvalidInputError, OperationConflictError, RepositoryUnavailableError
 from .migration_planning_service import validate_key
 from .migration_run_service import MigrationRunService, _uuid
@@ -57,6 +58,13 @@ class JevService:
                 from .migration_repository import MigrationNotFoundError
                 raise MigrationNotFoundError('Migration run not found.') from None
             raise RepositoryUnavailableError('Refinement is temporarily unavailable.') from None
+        if isinstance(result, dict) and not result.get('replayed'):
+            # refine_jev_run's own idempotency key covers exact re-submission;
+            # a replay must not look like a second refine pass starting.
+            capture(AppEvent.MIGRATION_REFINE_STARTED, user_id=user_id, migration_id=migration_id, properties={
+                "run_id": run_id, "operation_id": result.get('operation_id'),
+                "expected_seed_revision": revision,
+            })
         return result
 
     def enrich(self, run_id, result):

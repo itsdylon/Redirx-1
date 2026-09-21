@@ -2,6 +2,7 @@
 import base64
 import binascii
 import json
+from collections import Counter
 
 from flask import Blueprint, jsonify, request
 from werkzeug.exceptions import BadRequest, RequestEntityTooLarge, UnsupportedMediaType
@@ -9,6 +10,7 @@ from werkzeug.exceptions import BadRequest, RequestEntityTooLarge, UnsupportedMe
 from backend.extensions import limiter
 from backend.routes.v2_routes import (authenticated, account_limit_key, body, failure,
     repository_error, invalid_json, too_large, rate_limited)
+from backend.services.analytics_service import AppEvent, capture
 from backend.services.mapping_decision_service import MappingDecisionService
 from backend.services.migration_planning_service import envelope, validate_key
 from backend.services.migration_repository import MigrationRepositoryError, InvalidInputError, _strict_uuid
@@ -100,6 +102,17 @@ def create_migration_mapping_blueprint(service_factory=None):
         result = factory().resolve_matches(request.api_user_id, migration_id, run_id, decisions, value.get('idempotency_key'))
         applied = sum(item.get('code') == 'ok' for item in result['outcomes'])
         failed = len(result['outcomes']) - applied
+        if not result.get('replayed') and applied:
+            # Counts per action, not one event per mapping row: a single review
+            # batch can carry up to 100 decisions, and per-row events would be
+            # exactly the poll-shaped spam the hard rule forbids. Each 'ok'
+            # outcome carries its own 'action' (resolve_migration_match_decisions
+            # in 038_mapping_decisions.sql), so this is a straight tally, not a
+            # re-derivation from the request body.
+            by_action = Counter(item['action'] for item in result['outcomes'] if item.get('code') == 'ok')
+            capture(AppEvent.MAPPING_DECISIONS_APPLIED, user_id=request.api_user_id, migration_id=migration_id,
+                    properties={"run_id": run_id, "operation_id": result['operation_id'],
+                                "applied": applied, "not_applied": failed, "by_action": dict(by_action)})
         return jsonify(envelope(migration_id, result['operation_id'], status='partial' if failed else 'succeeded',
             next_action='resolve_matches', data={**result, 'applied': applied, 'not_applied': failed,
                 'summary': f'{applied} mapping decisions applied; {failed} require further input.'}))

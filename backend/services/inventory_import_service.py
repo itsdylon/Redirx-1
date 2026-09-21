@@ -12,6 +12,7 @@ from collections.abc import Mapping
 from typing import Any
 from uuid import UUID
 
+from .analytics_service import AppEvent, capture
 from .inventory_policy import (
     CapacityExceededError as PolicyCapacityExceededError,
     InventoryPolicyError,
@@ -184,4 +185,13 @@ class InventoryImportService:
             raise
         except Exception as exc:
             raise _map_rpc_error(exc) from None
-        return _summary(data, policy_result=policy_result, migration_id=migration, side=side)
+        outcome = _summary(data, policy_result=policy_result, migration_id=migration, side=side)
+        if not outcome["replayed"]:
+            # 'partial'/'complete' are both terminal for a single import call —
+            # the RPC does the import synchronously, so unlike a run there is
+            # no separate queued/running phase to poll past here.
+            capture(AppEvent.INVENTORY_IMPORT_COMPLETED, user_id=owner, migration_id=migration, properties={
+                "operation_id": outcome["operation_id"], "side": side,
+                "status": outcome["status"], "page_count": outcome["page_count"],
+            })
+        return outcome

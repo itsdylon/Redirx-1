@@ -13,6 +13,7 @@ import aiohttp
 
 from src.redirx.redirect_probe import probe, MAX_HOPS
 from src.redirx.safe_fetch import create_safe_connector
+from .analytics_service import AppEvent, capture
 from .inventory_policy import canonical_url_identity, InventoryPolicyError
 from .migration_repository import (MigrationRepository, MigrationRepositoryError,
     MigrationNotFoundError, InvalidInputError, _strict_uuid)
@@ -75,6 +76,18 @@ def assess_probe(result, expected_url):
 class MigrationVerificationService:
     def __init__(self, repository=None):
         self.repository = repository if repository is not None else MigrationRepository()
+        # Per-instance dedup for the terminal capture in record(): a single
+        # PivotBackgroundRunner constructs one MigrationVerificationService and
+        # reuses it for the worker process's whole life (pivot_background.py),
+        # so this survives every batch that worker claims. complete_verification_item
+        # (048_studio_included_verification.sql) returns only a bare boolean —
+        # no flag says whether THIS call was the one that flipped the row to
+        # terminal — so this guard is what keeps concurrent item completions in
+        # the same batch from each independently reading the just-flipped
+        # status and firing the event more than once. A second worker PROCESS
+        # claiming a later batch of the same oversized verification is a real,
+        # accepted gap this does not close; see the capture note below.
+        self._verifications_completed = set()
 
     def _rpc(self, name, params):
         # The base repository intentionally handles only shared errors. Map this
@@ -148,8 +161,40 @@ class MigrationVerificationService:
         return self._rpc('claim_verification_batch', {'p_worker':worker_id,'p_limit':batch_size})
 
     def record(self, verification_id, item, worker_id, state, finding):
-        return self._rpc('complete_verification_item', {'p_verification':verification_id,'p_ordinal':item['ordinal'],
+        applied = self._rpc('complete_verification_item', {'p_verification':verification_id,'p_ordinal':item['ordinal'],
             'p_worker':worker_id,'p_attempt':item['attempt'],'p_state':state,'p_finding':finding})
+        if applied:
+            self._maybe_capture_completed(verification_id)
+        return applied
+
+    def _maybe_capture_completed(self, verification_id):
+        key = str(verification_id)
+        if key in self._verifications_completed:
+            return
+        try:
+            rows = self.repository._execute(self.repository.client.table('migration_verifications')
+                .select('id,user_id,migration_id,artifact_id,deployment_id,status,passed,failed,unchecked,total')
+                .eq('id', key)).data
+        except Exception:
+            return
+        if not rows:
+            return
+        row = rows[0]
+        if row.get('status') not in ('succeeded', 'partial'):
+            return
+        self._verifications_completed.add(key)
+        # Only 'included' verification (this JEV/pivot service) fires here.
+        # The legacy Watch feature's own MIGRATION_VERIFICATION_COMPLETED call
+        # (watch_service.py) is untouched; 'verification_kind' distinguishes
+        # the two in the same event stream instead of adding a new enum name
+        # for what is, from the funnel's point of view, the same milestone.
+        capture(AppEvent.MIGRATION_VERIFICATION_COMPLETED, user_id=row.get('user_id'),
+                migration_id=row.get('migration_id'), properties={
+                    "verification_id": key, "verification_kind": "included",
+                    "artifact_id": row.get('artifact_id'), "deployment_id": row.get('deployment_id'),
+                    "status": row.get('status'), "passed": row.get('passed'),
+                    "failed": row.get('failed'), "unchecked": row.get('unchecked'), "total": row.get('total'),
+                })
 
 
 async def run_verification_batch(service, worker_id, batch_size=50):

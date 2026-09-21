@@ -5,6 +5,7 @@ import os
 import json
 from collections.abc import Mapping
 
+from .analytics_service import AppEvent, capture
 from .job_limits import PIVOT_CONTENT_MAX_OLD_URLS, PIVOT_CONTENT_MAX_NEW_URLS
 from .migration_planning_service import validate_key
 from .migration_quote_service import _ERRORS, QuoteNotReadyError
@@ -119,10 +120,54 @@ class MigrationRunService:
     def finalize_session(self, job, worker_id, status, error=None):
         if status == 'completed':
             _activation()
-        return self._call('finalize_migration_run_session', {
+        # Read the pre-call session status so a terminal outcome fires exactly
+        # once. finalize_migration_run_session's own early-return branch (an
+        # already-terminal session, e.g. a retried worker call after a lost
+        # response) returns the same JSON shape as a real transition — no
+        # 'replayed' flag distinguishes them here the way other RPCs do — so
+        # the distinguishing read has to happen on this side of the call.
+        # worker.py never runs two finalize_session calls for the same job
+        # concurrently (one lease, one worker at a time), so this is a plain
+        # before/after compare, not a race-prone one.
+        pre_status = self._session_status(job.get('id'))
+        result = self._call('finalize_migration_run_session', {
             **self._worker_params(job, worker_id), 'p_status': status,
             'p_error': str(error)[:5000] if error is not None else None,
         })
+        if status in ('completed', 'permanently_failed') and pre_status not in ('completed', 'permanently_failed'):
+            self._capture_run_completed(job, result)
+        return result
+
+    def _session_status(self, session_id):
+        if not session_id:
+            return None
+        try:
+            rows = self.repository.client.table('migration_sessions').select('status').eq(
+                'id', str(session_id)).limit(1).execute().data
+        except Exception:
+            return None
+        return rows[0].get('status') if rows else None
+
+    def _capture_run_completed(self, job, result):
+        user_id = job.get('user_id')
+        if not user_id:
+            return
+        jev_state = None
+        run_id = job.get('mcp_run_id')
+        if run_id:
+            try:
+                from .jev_pipeline_service import JevService
+                jev_state = JevService(self.repository).state(run_id)
+            except Exception:
+                jev_state = None
+        properties = {
+            "run_id": result.get('run_id'), "operation_id": result.get('operation_id'),
+            "status": result.get('status'), "engine": "jev-url-v1" if jev_state else "deep_match",
+        }
+        if jev_state is not None:
+            properties["pass"] = jev_state.get('pass')
+        capture(AppEvent.MIGRATION_RUN_COMPLETED, user_id=user_id,
+                migration_id=result.get('migration_id'), properties=properties)
 
     @staticmethod
     def _worker_params(job, worker_id):

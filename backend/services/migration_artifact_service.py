@@ -12,6 +12,7 @@ from typing import Any, Callable
 from uuid import UUID
 from urllib.parse import urlsplit
 
+from .analytics_service import AppEvent, capture
 from .inventory_policy import normalize_origin
 from .migration_artifact_readers import MigrationArtifactReaders
 from .migration_repository import (InvalidInputError, MigrationNotFoundError,
@@ -290,7 +291,17 @@ class MigrationArtifactService:
                     or str(row.get("migration_id")) != migration
                     or str(row.get("user_id")) != owner):
                 raise RepositoryUnavailableError("Artifact operation is temporarily unavailable.")
-            return self._artifact_summary(row)
+            summary = self._artifact_summary(row)
+            # Fired here, not through entitlement_service.record_export(): the
+            # JEV path (this method) never calls record_export, which belongs
+            # to the legacy paid-export usage ledger. This is the only export
+            # completion event on the JEV path, gated on the RPC's own
+            # 'replayed' flag so a re-submitted idempotency key never re-fires.
+            capture(AppEvent.REDIRECT_ARTIFACT_EXPORTED, user_id=owner, migration_id=migration, properties={
+                "run_id": run, "artifact_id": summary["id"], "format": fmt,
+                "included_count": summary["included_count"], "excluded_count": summary["excluded_count"],
+            })
+            return summary
         except MigrationRepositoryError:
             raise
         except Exception:
@@ -383,7 +394,13 @@ class MigrationArtifactService:
                     or str(row.get("artifact_id")) != str(artifact)
                     or row.get("live_origin") != live or row.get("verification_inputs") != verification):
                 raise RepositoryUnavailableError("Deployment operation is temporarily unavailable.")
-            return self._deployment_summary(row, owner, migration, str(artifact))
+            summary = self._deployment_summary(row, owner, migration, str(artifact))
+            if not summary.get("replayed"):
+                capture(AppEvent.MIGRATION_ARTIFACT_INSTALLED, user_id=owner, migration_id=migration, properties={
+                    "artifact_id": str(artifact), "deployment_id": summary["deployment_id"],
+                    "status": summary["status"],
+                })
+            return summary
         except MigrationRepositoryError:
             raise
         except Exception:

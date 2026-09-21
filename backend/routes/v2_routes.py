@@ -7,6 +7,7 @@ from flask import Blueprint, jsonify, request
 from werkzeug.exceptions import BadRequest, RequestEntityTooLarge, UnsupportedMediaType
 
 from backend.extensions import limiter
+from backend.services.analytics_service import AppEvent, capture
 from backend.services.api_key_service import ApiKeyService, looks_like_api_key
 from backend.services.mcp_delegation_service import MCPDelegationService
 from backend.services.companion_auth_service import resolve_companion_session
@@ -206,6 +207,17 @@ def run_migration(migration_id):
         if quote['kind'] != 'free':
             raise InvalidInputError('Jev V1 supports at most 500 old pages, 2000 new pages, and 2 MiB of URL text. No paid upgrade is required or available.')
         result = JevService(quotes.repository).start(request.api_user_id,migration_id,inventories['old'],inventories['new'],quote['quote_id'],key,value.get('confirmed_pairs'))
+        if not result.get('replayed'):
+            # Fired directly here rather than via record_deep_match_run(): that
+            # helper also writes to the legacy free-run usage ledger, which is
+            # the Deep Match abuse ceiling and does not apply to Jev's own
+            # LIMITS (500/2000/2MiB/5 runs per day, enforced above and in the
+            # reserve_jev_run RPC). The legacy pivot branch below still calls
+            # record_deep_match_run and remains the only other MIGRATION_RUN_STARTED
+            # source — one event, two call sites, never both for one run.
+            capture(AppEvent.MIGRATION_RUN_STARTED, user_id=request.api_user_id, migration_id=migration_id,
+                    properties={"run_id": result.get('run_id'), "operation_id": result['operation_id'],
+                                "engine": "jev-url-v1", "metered": False})
         return jsonify(envelope(migration_id,result['operation_id'],status=result['status'],
             next_action='poll' if result['status'] in ('queued','running') else 'resolve_matches',
             data={**result,'engine':'jev-url-v1','free':True,'limits':LIMITS}))

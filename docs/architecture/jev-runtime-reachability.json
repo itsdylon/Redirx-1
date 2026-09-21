@@ -7,6 +7,7 @@
   ],
   "files": {
     "backend/services/jev_pipeline_service.py": [
+      "backend/services/jev_database_transport.py",
       "backend/services/migration_planning_service.py",
       "backend/services/migration_repository.py",
       "backend/services/migration_run_service.py",
@@ -97,6 +98,7 @@
     "backend/worker.py": [
       "backend/services/deep_preview_service.py",
       "backend/services/email_service.py",
+      "backend/services/jev_database_transport.py",
       "backend/services/jev_pipeline_service.py",
       "backend/services/job_limits.py",
       "backend/services/match_repair_service.py",
@@ -451,6 +453,9 @@
       "backend/services/results_formatter.py",
       "src/redirx/config.py",
       "src/redirx/database.py"
+    ],
+    "backend/services/jev_database_transport.py": [
+      "src/redirx/config.py"
     ]
   }
 }

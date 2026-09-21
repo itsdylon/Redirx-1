@@ -17,6 +17,7 @@ to find the revision carrying this inventory. File provenance hashes are in
 | `src/redirx/jev/examples.py` | Existing nearest-confirmed-example bank. Only explicit audited `set_target`/approve/accept_repair records populate Page.true_new_url. | No model confidence promotes a seed; initial confirmed pairs become audited decisions. |
 | `src/redirx/jev/questions.py`, `pipeline.py` | Existing two-pass Jev question protocol, shortlist and decision probabilities. | Adapter uses zero content excerpts and never calls `decide`/GONE. All proposals require confirmation. Keep unused experimental policy helpers protected until separate cleanup. |
 | `src/redirx/jev/jev.py` | Direct pinned Jev provider, exact-question cache identity, schema/model/usage validation, no hidden retries, per-process pacing, budget reservations. | No automatic gateway fallback; `jev-1.13.0`, `redirx-jev-url-v1`. Unknown provider outcome/usage retains reserved cost. |
+| `backend/services/jev_database_transport.py` | Dedicated Jev worker HTTP/1 database client, no idle pooling; explicitly read-only queries retry once on transport read failure. | Do not extend retry to RPC mutations or model calls; six-page concurrency and global budget remain unchanged. |
 | `backend/services/jev_pipeline_service.py` | Free reservation, status enrichment, explicit refinement, durable run-scoped cache and embedding adapter, thread offloading for live lease heartbeats. | 500 old / 2000 new / 2 MiB URLs; three total passes; cache/input/seed/prompt revisions preserved across resume. |
 | `database/migrations/062_jev_url_harness.sql` | Atomic free wrapper, budget reservation/settlement, lease-fenced proposals/cache, audited initial seeds, bounded same-session refinement. | Additive directly after 058. Does not require deferred billing 059–061. Never rewrite migration after production application. |
 | `jev_runs` | Engine marker, model/prompt pins, bounded pass and frozen pass seed state; worker dispatch and read model. | Deleting marker could route a job into historical content engine. Protect markers for all retained runs. |
@@ -95,6 +96,8 @@ Original `jev-redirect-harness/{run.py,harness/evaluate.py,harness/baseline.py,
 recheck.py,simulate_drift.py,data,results,cache}` stays outside this production repo.
 Original harness has no Git metadata; SHA-256 source-file pins establish provenance.
 No evaluation dataset or hidden answer enters the new worker.
+
+`backend/tests/test_jev_database_transport.py`: actual HTTPX/PostgREST transport read recovery, bounded failure, zero mutation retry and worker-only transport settings.
 
 `backend/tests/test_jev_pipeline.py`: native SQL chain, free admission/replay,
 wrong-owner rejection, seed audit/revision, proposal immutability, old-lease

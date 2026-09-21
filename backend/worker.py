@@ -583,7 +583,9 @@ class RedirxWorker:
                     if not jev_enabled():
                         from src.redirx.jev.jev import ProviderUnavailable
                         raise ProviderUnavailable('jev_paused')
-                    await JevPipelineRunner(jev_service.client).run(job,self.worker_id,self.session_db.update_session_progress)
+                    from backend.services.jev_database_transport import jev_worker_database
+                    with jev_worker_database() as jev_client:
+                        await JevPipelineRunner(jev_client).run(job,self.worker_id,self.session_db.update_session_progress)
                     await finish('completed')
                     self.jobs_processed += 1
                     return True

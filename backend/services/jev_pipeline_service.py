@@ -11,6 +11,7 @@ from src.redirx.jev.jev import JevClient, ProviderUnavailable, MODEL, PROMPT_VER
 from .migration_repository import MigrationRepository, InvalidInputError, OperationConflictError, RepositoryUnavailableError
 from .migration_planning_service import validate_key
 from .migration_run_service import MigrationRunService, _uuid
+from .jev_database_transport import database_read
 
 LIMITS = {'old_pages': 500, 'new_pages': 2000, 'inventory_bytes': 2097152, 'passes': 3, 'new_runs_per_24h': 5}
 
@@ -25,7 +26,7 @@ class JevService:
         self.client = self.repository.client
 
     def state(self, run_id):
-        rows = self.client.table('jev_runs').select('*').eq('run_id', str(run_id)).limit(1).execute().data
+        rows = database_read(lambda:self.client.table('jev_runs').select('*').eq('run_id', str(run_id)).limit(1).execute().data)
         return rows[0] if rows else None
 
     def start(self, user_id, migration_id, old_id, new_id, quote_id, key, confirmed_pairs=None):
@@ -94,13 +95,13 @@ class DurableStore:
         return self.client.rpc(name, {**self.context, **kwargs}).execute().data
 
     def cache_get(self, key):
-        rows = self.client.table('jev_provider_cache').select('response').eq('run_id',self.run_id).eq('cache_key',key).limit(1).execute().data
+        rows = database_read(lambda:self.client.table('jev_provider_cache').select('response').eq('run_id',self.run_id).eq('cache_key',key).limit(1).execute().data)
         return rows[0]['response'] if rows else None
 
     def cache_get_many(self,keys):
         found={}
         for start in range(0,len(keys),50):
-            rows=self.client.table('jev_provider_cache').select('cache_key,response').eq('run_id',self.run_id).in_('cache_key',keys[start:start+50]).execute().data
+            rows=database_read(lambda:self.client.table('jev_provider_cache').select('cache_key,response').eq('run_id',self.run_id).in_('cache_key',keys[start:start+50]).execute().data)
             found.update({row['cache_key']:row['response'] for row in rows})
         return found
 
@@ -192,7 +193,7 @@ class JevPipelineRunner:
         retriever.prime_queries(old)
         if seeds: retriever.calibrate(seeds)
         bank=ExampleBank(seeds);provider=self.provider_factory(store)
-        rows=self.client.table('jev_proposals').select('old_url,pass').eq('run_id',site).limit(500).execute().data
+        rows=database_read(lambda:self.client.table('jev_proposals').select('old_url,pass').eq('run_id',site).limit(500).execute().data)
         done={row['old_url'] for row in rows if row['pass']==state['pass']}
         confirmed={row['old_url'] for row in state['seeds']}
         progress(UUID(str(job['id'])),2,'Jev: propose URL mappings',3)

@@ -246,6 +246,7 @@ class JevWorkerRouting(unittest.IsolatedAsyncioTestCase):
                 stack.enter_context(patch('backend.worker.DeepPreviewService'))
                 jev=stack.enter_context(patch('backend.services.jev_pipeline_service.JevService')).return_value
                 jev.state.return_value={'pass':1}
+                stack.enter_context(patch('backend.services.jev_database_transport.jev_worker_database'))
                 runner=stack.enter_context(patch('backend.services.jev_pipeline_service.JevPipelineRunner')).return_value;runner.run=AsyncMock()
                 pipeline=stack.enter_context(patch('backend.worker.Pipeline',side_effect=AssertionError('content must never run')))
                 budget=stack.enter_context(patch('backend.worker.reserve_pivot_temporary_capacity'))

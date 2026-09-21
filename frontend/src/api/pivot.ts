@@ -7,12 +7,17 @@ export interface PivotEnvelope<T = Record<string, unknown>> {
 }
 export interface PivotMigration { id: string; name?: string | null; old_origin?: string; new_origin?: string; status?: string; }
 export type PivotMatchFilter = 'all' | 'needs_review' | 'unmatched' | 'rejected' | 'approved';
+export interface JevRun {
+  engine: 'jev-url-v1'; model: string; pass: number; seed_revision: number;
+  limits: { max_old_urls: number; max_new_urls: number; max_url_bytes: number; max_passes: number; new_runs_per_24h: number };
+}
 export interface PivotMatch {
   mapping_id: string; old_url: string; new_url?: string | null; decision_target?: string | null;
+  jev_proposal?: { target_url?: string | null; confidence?: number; confidence_kind?: string; candidates?: unknown[]; pass: number; seed_revision: number; stale: boolean; confirmation_required?: boolean };
   revision: number; review_status: string; traffic_observed: boolean; traffic_clicks: number | null;
 }
 export interface MigrationDetail {
-  migration?: PivotMigration; summary?: string; run_id?: string; quote_id?: string;
+  jev?: JevRun; migration?: PivotMigration; summary?: string; run_id?: string; quote_id?: string;
   run?: { status: string; progress?: { current_stage: number | null; total_stages: number | null } };
   quote?: { amount_cents: number; currency: string; kind: string };
   artifact?: { artifact_id: string; format: string; included_count: number; excluded_count: number };
@@ -61,7 +66,7 @@ export const listPivotMigrations = (cursor?: string, signal?: AbortSignal) =>
 export const getPivotMigration = (id: string, signal?: AbortSignal) =>
   request<MigrationDetail>(`/migrations/${part(id)}`, { signal });
 export const listPivotMatches = (migration: string, run: string, cursor?: string, signal?: AbortSignal, filter: PivotMatchFilter = 'all') =>
-  request<{ items: PivotMatch[]; next_cursor?: string | null; selection_revision: number }>(
+  request<{ items: PivotMatch[]; next_cursor?: string | null; selection_revision: number; jev?: JevRun }>(
     `/migrations/${part(migration)}/runs/${part(run)}/matches?filter=${part(filter)}&limit=20${cursor ? `&cursor=${part(cursor)}` : ''}`, { signal });
 export const resolvePivotMatch = (migration: string, run: string, decision: Record<string, unknown>, key: string, signal?: AbortSignal) =>
   request<{ outcomes: Array<{ code: string; message?: string }> }>(`/migrations/${part(migration)}/runs/${part(run)}/matches`,
@@ -89,3 +94,7 @@ export const getSubscriptionCheckout = (id: string, returned = false, signal?: A
   request<SubscriptionCheckout>(`/billing/subscription-checkouts/${part(id)}${returned ? '/return' : ''}`, { signal });
 export const downloadArtifact = (migration: string, artifact: string, signal?: AbortSignal) =>
   request<{ content: string; format: string; artifact_id: string }>(`/migrations/${part(migration)}/artifacts/${part(artifact)}`, { signal });
+
+export const refinePivotMatches = (migration: string, run: string, expectedSeedRevision: number, key: string, signal?: AbortSignal) =>
+  request<MigrationDetail>(`/migrations/${part(migration)}/runs/${part(run)}/refine`,
+    post({ expected_seed_revision: expectedSeedRevision, idempotency_key: key }, signal));

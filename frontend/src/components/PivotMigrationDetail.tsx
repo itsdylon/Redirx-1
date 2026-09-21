@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
-import { checkout, downloadArtifact, getPivotMigration, listPivotMatches, monitoring, resolvePivotMatch,
+import { checkout, downloadArtifact, getPivotMigration, listPivotMatches, monitoring, resolvePivotMatch, refinePivotMatches,
   type MigrationDetail, type MonitoringData, type MonitoringIssue, type PivotEnvelope, type PivotMatch, type PivotMatchFilter } from '../api/pivot';
 import { ToolLayout } from './ToolLayout';
 import { Button } from './ui/button';
@@ -106,10 +106,10 @@ export function PivotMigrationDetail() {
     catch (e) { if (!signal.aborted) setMessage(e instanceof Error ? e.message : 'The action could not finish. Try again.'); }
     finally { if (!signal.aborted) setBusy(false); }
   }
-  async function decide(row: PivotMatch, action: string) {
+  async function decide(row: PivotMatch, action: string, confirmedTarget?: string) {
     await perform(async signal => {
       const decision = { mapping_id: row.mapping_id, expected_revision: row.revision, action,
-        ...(action === 'set_target' ? { target_url: targets[row.mapping_id] } : {}) };
+        ...(action === 'set_target' ? { target_url: confirmedTarget ?? targets[row.mapping_id] } : {}) };
       const result = await resolvePivotMatch(migrationId, summary!.data.run_id!, decision,
         scope.key(JSON.stringify(decision)), signal);
       if (signal.aborted) return;
@@ -117,6 +117,15 @@ export function PivotMigrationDetail() {
       if (!outcome || outcome.code !== 'ok') throw new Error(outcome?.message ||
         `Decision was not saved (${outcome?.code || 'missing result'}). Refresh the mappings and retry.`);
       setRefresh(n => n + 1);
+    });
+  }
+  async function refine() {
+    const run = summary?.data.run_id, jev = summary?.data.jev;
+    if (!run || !jev) return;
+    await perform(async signal => {
+      await refinePivotMatches(migrationId, run, jev.seed_revision,
+        scope.key(`refine:${run}:${jev.pass}:${jev.seed_revision}`), signal);
+      if (!signal.aborted) setRefresh(n => n + 1);
     });
   }
   async function more() {
@@ -153,8 +162,10 @@ export function PivotMigrationDetail() {
     });
   }
   const data = summary?.data;
-  const paymentRequired = summary?.status === 'payment_required' || summary?.next_action === 'complete_payment';
+  const isJev = data?.jev?.engine === 'jev-url-v1';
+  const paymentRequired = !isJev && (summary?.status === 'payment_required' || summary?.next_action === 'complete_payment');
   const monitorId = search.get('monitoring_id') || data?.monitoring_id;
+  const historicalServices = !isJev && !!(data?.quote_id || monitorId || data?.deployment_id);
   return <ToolLayout title="Migration detail"><main className="mx-auto max-w-4xl space-y-8 py-4">
     <header className="space-y-3">
       <Link to="/companion" className="text-sm underline">All migrations</Link>
@@ -172,6 +183,15 @@ export function PivotMigrationDetail() {
       <p className="text-sm text-muted-foreground">Payment is confirmed by the server. Returning from checkout does not start work by itself.</p>
       {!summary?.operation_id && <p role="alert">Payment details are incomplete. Refresh the migration before trying checkout again.</p>}
       <Button disabled={busy || loading || !summary?.operation_id} onClick={() => void pay()}>Continue to checkout</Button>
+    </section>}
+    {isJev && data?.jev && <section className="space-y-3 border-t pt-6" aria-labelledby="jev-heading">
+      <h2 id="jev-heading" className="text-lg font-semibold">Free Jev URL mapping</h2>
+      <p className="text-sm">Pass {data.jev.pass} of {data.jev.limits.max_passes}. Confirmed-example revision {data.jev.seed_revision}. Model confidence is an estimate, not a verified match.</p>
+      <p className="text-sm text-muted-foreground">Confirm known destinations to guide another pass over unresolved pages. Existing confirmed decisions remain saved. URL text is matched without fetching page content.</p>
+      <Button variant="outline" disabled={busy || loading || ['queued', 'running'].includes(data.run?.status || '') ||
+        (data.jev.pass >= data.jev.limits.max_passes && data.run?.status !== 'failed')}
+        onClick={() => void refine()}>{data.run?.status === 'failed' ? 'Resume Jev pass' : 'Refine with confirmed examples'}</Button>
+      {data.jev.pass >= data.jev.limits.max_passes && data.run?.status !== 'failed' && <p className="text-sm">All three passes are used. Continue reviewing and exporting this run.</p>}
     </section>}
     {data?.run_id && <section className="space-y-3 border-t pt-6" aria-labelledby="mappings-heading">
       <h2 id="mappings-heading" className="text-lg font-semibold">Mapping review</h2>
@@ -191,9 +211,17 @@ export function PivotMigrationDetail() {
       {!loading && matchesLoaded && !rows.length && <p className="text-sm">No saved mappings match this filter.</p>}
       <ul className="divide-y">{rows.map(row => <li key={row.mapping_id} className="space-y-3 py-4">
         <p className="break-all text-sm font-medium">{row.old_url} → {row.decision_target || row.new_url || 'No destination'}</p>
+        {row.jev_proposal && <div className="space-y-1 text-sm">
+          <p className="break-all">Jev proposal: {row.jev_proposal.target_url || 'No confident destination'}</p>
+          {typeof row.jev_proposal.confidence === 'number' && Number.isFinite(row.jev_proposal.confidence) &&
+            <p>Model estimate: {(row.jev_proposal.confidence * 100).toFixed(1)}% · pass {row.jev_proposal.pass}</p>}
+          {row.jev_proposal.stale && <p>This proposal predates the latest confirmed examples. Review it or refine again.</p>}
+        </div>}
         <p className="text-sm text-muted-foreground">{row.review_status.replaceAll('_', ' ')}. {row.traffic_observed ? `${row.traffic_clicks ?? 0} observed search clicks` : 'Search traffic not measured'}</p>
         <div className="flex flex-wrap gap-2">
-          <Button disabled={busy || loading || !row.new_url} onClick={() => void decide(row, 'approve')}>Approve</Button>
+          {isJev || row.jev_proposal ? <Button disabled={busy || loading || !row.jev_proposal?.target_url || row.jev_proposal.stale || row.review_status === 'approved'}
+            onClick={() => void decide(row, 'set_target', row.jev_proposal?.target_url || undefined)}>Confirm proposed destination</Button> :
+            <Button disabled={busy || loading || !row.new_url} onClick={() => void decide(row, 'approve')}>Approve</Button>}
           <Button variant="outline" disabled={busy || loading} onClick={() => void decide(row, 'reject')}>Reject</Button>
           <Button variant="outline" disabled={busy || loading} onClick={() => void decide(row, 'defer')}>Defer</Button>
         </div>
@@ -209,11 +237,11 @@ export function PivotMigrationDetail() {
       <h2 className="text-lg font-semibold">Redirect artifact</h2>
       <p className="text-sm">{data.artifact.included_count} redirects included; {data.artifact.excluded_count} excluded. Format: {data.artifact.format}.</p>
       <Button disabled={busy} onClick={() => void download()}>Download redirects</Button>
-      <p className="text-sm text-muted-foreground">Ask your agent to install the artifact and confirm deployment before verification.</p>
+      <p className="text-sm text-muted-foreground">Download the reviewed redirect map for installation on your platform.</p>
       {data.verification && <p>Verification: {data.verification.outcome}. {data.verification.checked} of {data.verification.total} checked.</p>}
     </section>}
-    <MonitoringPanel key={`${migrationId}:${monitorId || ''}`} migrationId={migrationId} monitoringId={monitorId} />
-    <SearchConsolePanel key={migrationId} migrationId={migrationId} />
-    <SubscriptionCheckoutPanel deploymentId={data?.deployment_id} />
+    {historicalServices && <><MonitoringPanel key={`${migrationId}:${monitorId || ''}`} migrationId={migrationId} monitoringId={monitorId} />
+    <SubscriptionCheckoutPanel deploymentId={data?.deployment_id} /></>}
+    {!isJev && <SearchConsolePanel key={migrationId} migrationId={migrationId} />}
   </main></ToolLayout>;
 }

@@ -89,19 +89,36 @@ function query(path: string, values: Record<string, string | number | undefined>
   return suffix ? `${path}?${suffix}` : path;
 }
 
-/** The opt-in v2 surface. Keep this list in lockstep with pivot-v1.json. */
+/** The opt-in v2 surface; Jev additions are pinned in jev-mvp-v1.json. */
 export function registerPivotTools(server: McpServer): void {
   server.registerTool('plan_migration', {
-    title: 'Plan a migration', description: 'Create an owned old-site/new-site migration plan. This starts no paid work.',
+    title: 'Plan a migration', description: 'Create an owned old-site/new-site plan. For free Jev, next call import_inventory for old and new URL lists; planning does not crawl or run the model.',
     inputSchema: { old_site: z.string().min(1).max(8192), new_site: z.string().min(1).max(8192), name: z.string().max(200).optional(), site_aliases: z.object({ old: z.array(z.string().max(8192)).max(100).optional(), new: z.array(z.string().max(8192)).max(100).optional() }).optional(), idempotency_key: IDEMPOTENCY },
     annotations: { readOnlyHint: false, idempotentHint: true, openWorldHint: true },
   }, (args, extra) => call(extra as ToolExtra, 'POST', '/migrations', args));
 
+  server.registerTool('import_inventory', {
+    title: 'Import a URL inventory', description: 'Import explicit HTTP(S) URL strings into an owned immutable old or new inventory. No crawl or page scraping. Use data.inventory.id only when data.inventory.status is complete for run_migration; partial imports need corrected input and a new key. Free Jev runs allow 500 unique old URLs, 2000 new URLs and 2 MiB URL text total.',
+    inputSchema: { migration_id: UUID, side: z.enum(['old', 'new']), urls: z.array(z.string().url().max(8192).regex(/^https?:\/\//i)).min(1).max(2000), idempotency_key: IDEMPOTENCY },
+    annotations: { readOnlyHint: false, idempotentHint: true, openWorldHint: false },
+  }, ({ migration_id, urls, ...args }, extra) => {
+    if (urls.reduce((bytes, url) => bytes + Buffer.byteLength(url, 'utf8'), 0) > 2097152) {
+      return invalidInput('URL text exceeds the 2 MiB free Jev input limit.');
+    }
+    return call(extra as ToolExtra, 'POST', `/migrations/${encodeURIComponent(migration_id)}/inventories`, { ...args, rows: urls });
+  });
+
   server.registerTool('run_migration', {
-    title: 'Run a migration', description: 'Reserve and dispatch an entitled migration run using immutable inventories. Payment-required states are recoverable.',
-    inputSchema: { migration_id: UUID, old_inventory_id: UUID, new_inventory_id: UUID, quote_id: UUID.optional(), grant_id: UUID.optional(), subscription_id: UUID.optional(), rerun_of: UUID.optional(), idempotency_key: IDEMPOTENCY },
+    title: 'Run a migration', description: 'Run the free Jev URL harness from immutable inventories: up to 500 old pages, 2000 new pages, 2 MiB URL text and five new runs per rolling 24 hours. No page-content scraping. Optional confirmed_pairs are explicitly verified old_url/new_url examples from these exact inventories, never guessed labels. Omit legacy payment fields for Jev.',
+    inputSchema: { migration_id: UUID, old_inventory_id: UUID, new_inventory_id: UUID, quote_id: UUID.optional(), grant_id: UUID.optional(), subscription_id: UUID.optional(), rerun_of: UUID.optional(), confirmed_pairs: z.array(z.object({ old_url: z.string().url().max(8192), new_url: z.string().url().max(8192) })).max(100).optional(), idempotency_key: IDEMPOTENCY },
     annotations: { readOnlyHint: false, idempotentHint: true, openWorldHint: true },
   }, ({ migration_id, old_inventory_id, new_inventory_id, ...args }, extra) => call(extra as ToolExtra, 'POST', `/migrations/${encodeURIComponent(migration_id)}/runs`, { inventory_ids: { old: old_inventory_id, new: new_inventory_id }, ...args }));
+
+  server.registerTool('refine_matches', {
+    title: 'Refine Jev matches', description: 'Resume a paused Jev pass, or improve unresolved URL mappings with explicitly confirmed examples. Up to three total passes; does not consume another free migration. Read current seed_revision first.',
+    inputSchema: { migration_id: UUID, run_id: UUID, expected_seed_revision: z.number().int().min(0), idempotency_key: IDEMPOTENCY },
+    annotations: { readOnlyHint: false, idempotentHint: true, openWorldHint: true },
+  }, ({ migration_id, run_id, ...args }, extra) => call(extra as ToolExtra, 'POST', `/migrations/${encodeURIComponent(migration_id)}/runs/${encodeURIComponent(run_id)}/refine`, args));
 
   server.registerTool('get_migration', {
     title: 'Get migration status', description: 'Read an owned migration summary and its next recoverable action.',
@@ -116,7 +133,7 @@ export function registerPivotTools(server: McpServer): void {
   }, ({ migration_id, run_id, filter, cursor, limit }, extra) => call(extra as ToolExtra, 'GET', query(`/migrations/${encodeURIComponent(migration_id)}/runs/${encodeURIComponent(run_id)}/matches`, { filter, cursor, limit })));
 
   server.registerTool('resolve_matches', {
-    title: 'Resolve match exceptions', description: 'Apply audited, optimistic-concurrency match decisions. Ambiguous matches are never blanket-approved.',
+    title: 'Resolve match exceptions', description: 'Apply audited, optimistic-concurrency decisions. For Jev, confirm a proposed target with set_target, mapping_id and expected_revision. Model predictions are never automatically verified examples.',
     inputSchema: { migration_id: UUID, run_id: UUID, idempotency_key: IDEMPOTENCY, decisions: z.array(z.object({ mapping_id: UUID, expected_revision: z.number().int().min(0), action: z.enum(ACTIONS), target_url: z.string().min(1).max(8192).optional(), rationale: z.string().max(2000).optional() })).min(1).max(100) },
     annotations: { readOnlyHint: false, idempotentHint: true },
   }, ({ migration_id, run_id, ...args }, extra) => call(extra as ToolExtra, 'PATCH', `/migrations/${encodeURIComponent(migration_id)}/runs/${encodeURIComponent(run_id)}/matches`, args));

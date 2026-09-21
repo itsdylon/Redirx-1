@@ -56,15 +56,63 @@ describe('opt-in pivot MCP tools', () => {
   beforeEach(() => { vi.stubGlobal('fetch', fetchMock); fetchMock.mockReset(); telemetry.capture.mockReset(); });
   afterEach(() => vi.unstubAllGlobals());
 
-  it('exposes exactly the eleven pinned tools through the native MCP SDK', async () => {
+  it('exposes the thirteen pinned tools including durable import and refinement through the native MCP SDK', async () => {
     const { client, close } = await connected();
     try {
       const result = await client.listTools();
       expect(result.tools.map(tool => tool.name).sort()).toEqual([
         'connect_search_console', 'export_redirects', 'get_migration', 'get_monitoring_fixes',
-        'get_monitoring_status', 'list_matches', 'manage_monitoring', 'plan_migration',
+        'get_monitoring_status', 'import_inventory', 'list_matches', 'manage_monitoring', 'plan_migration', 'refine_matches',
         'resolve_matches', 'run_migration', 'verify_redirects',
       ]);
+    } finally { await close(); }
+  });
+
+  it('imports explicit URL strings through the owned durable API without a crawler or URL fetch', async () => {
+    fetchMock.mockImplementation(async () => new Response(JSON.stringify(envelope({ inventory: { id: ids.run, status: 'complete' } })), { headers: { 'content-type': 'application/json' } }));
+    const { client, close } = await connected();
+    try {
+      const args = { migration_id: ids.migration, side: 'old', urls: ['https://old.test/a?x=1', 'https://old.test/b'], idempotency_key: 'import-stable' };
+      for (let i = 0; i < 2; i++) {
+        const result = await client.callTool({ name: 'import_inventory', arguments: args });
+        expect(JSON.parse((result.content[0] as { text: string }).text).data.inventory).toEqual({ id: ids.run, status: 'complete' });
+      }
+      expect(fetchMock.mock.calls.map(call => call[0])).toEqual(Array(2).fill(`https://backend.test/api/v2/migrations/${ids.migration}/inventories`));
+      for (const [, init] of fetchMock.mock.calls) {
+        expect(JSON.parse(init.body)).toEqual({ side: 'old', rows: args.urls, idempotency_key: 'import-stable' });
+        expect(init.headers.Authorization).toBe('Bearer delegation-account-a');
+      }
+    } finally { await close(); }
+  });
+
+  it('rejects malformed imports and oversized text before backend or provider work', async () => {
+    const { client, close } = await connected();
+    try {
+      const base = { migration_id: ids.migration, side: 'old', urls: ['https://old.test/a'], idempotency_key: 'import' };
+      for (const change of [{ side: 'other' }, { urls: [] }, { urls: ['file:///private/file'] },
+        { urls: Array(2001).fill('https://old.test/a') }, { urls: Array(1000).fill('https://old.test/' + 'x'.repeat(3000)) }]) {
+        expect((await client.callTool({ name: 'import_inventory', arguments: { ...base, ...change } })).isError).toBe(true);
+      }
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally { await close(); }
+  });
+
+  it('preserves confirmed pairs and revision-bound refinement without approving model results', async () => {
+    fetchMock.mockImplementation(async () => new Response(JSON.stringify(envelope({ run_id: ids.run }, { status: 'queued', next_action: 'poll' })), { headers: { 'content-type': 'application/json' } }));
+    const { client, close } = await connected();
+    try {
+      const confirmed = [{ old_url: 'https://old.test/a', new_url: 'https://new.test/a' }];
+      await client.callTool({ name: 'run_migration', arguments: { migration_id: ids.migration, old_inventory_id: ids.run, new_inventory_id: ids.mapping, confirmed_pairs: confirmed, idempotency_key: 'run' } });
+      expect(JSON.parse(fetchMock.mock.calls[0][1].body).confirmed_pairs).toEqual(confirmed);
+      const args = { migration_id: ids.migration, run_id: ids.run, expected_seed_revision: 4, idempotency_key: 'refine-stable' };
+      for (let i = 0; i < 2; i++) await client.callTool({ name: 'refine_matches', arguments: args });
+      for (const [url, init] of fetchMock.mock.calls.slice(1)) {
+        expect(url).toBe(`https://backend.test/api/v2/migrations/${ids.migration}/runs/${ids.run}/refine`);
+        expect(JSON.parse(init.body)).toEqual({ expected_seed_revision: 4, idempotency_key: 'refine-stable' });
+      }
+      const count = fetchMock.mock.calls.length;
+      expect((await client.callTool({ name: 'refine_matches', arguments: { ...args, expected_seed_revision: -1 } })).isError).toBe(true);
+      expect(fetchMock).toHaveBeenCalledTimes(count);
     } finally { await close(); }
   });
 
@@ -312,7 +360,7 @@ describe('opt-in pivot MCP tools', () => {
     try {
       const context = 'Checking the installed migration artifact against expected redirects before evaluating optional monitoring coverage for the completed website migration.';
       const tools = (await client.listTools()).tools;
-      expect(tools).toHaveLength(11);
+      expect(tools).toHaveLength(13);
       expect(tools.find(tool => tool.name === 'verify_redirects')!.inputSchema.properties).toHaveProperty('context');
       const result = await client.callTool({ name: 'verify_redirects', arguments: {
         migration_id: ids.migration, artifact_id: ids.run, deployment_id: ids.mapping, idempotency_key: 'telemetry', context,

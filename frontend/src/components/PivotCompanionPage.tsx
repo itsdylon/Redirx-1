@@ -3,8 +3,6 @@ import { Link } from 'react-router-dom';
 import { listPivotMigrations, type PivotMigration } from '../api/pivot';
 import { ToolLayout } from './ToolLayout';
 import { Button } from './ui/button';
-import { SubscriptionCheckoutPanel } from './SubscriptionCheckoutPanel';
-import { SearchConsolePanel } from './pivot/SearchConsolePanel';
 import { useRequestScope } from './pivot/useRequestScope';
 
 const MCP_URL = 'https://redirx-mcp-server.onrender.com/mcp';
@@ -30,14 +28,15 @@ export function PivotCompanionPage() {
   return <ToolLayout title="Migration companion"><main className="mx-auto max-w-4xl space-y-8 py-4">
     <header className="space-y-3">
       <h1 className="text-3xl font-semibold">Your migrations</h1>
-      <p className="max-w-prose text-muted-foreground">Start a migration in your MCP client. Return here to review exceptions, approve payment, and inspect live redirect checks.</p>
+      <p className="max-w-prose text-muted-foreground">Start a free Jev URL migration in your MCP client. Import old and new URL lists, review proposed destinations here, then export the reviewed map.</p>
     </header>
     <section className="space-y-3 border-t pt-6" aria-labelledby="connect-heading">
       <h2 id="connect-heading" className="text-lg font-semibold">Connect your agent</h2>
       <p className="text-sm">Add this Streamable HTTP server in your MCP client, then choose its sign-in action and approve RedirX access.</p>
       <code className="block break-all rounded-md bg-muted p-3 text-sm">{MCP_URL}</code>
-      <p className="text-sm text-muted-foreground">The client handles OAuth and refreshes access automatically. An API key is not required.</p>
+      <p className="text-sm text-muted-foreground">The client handles OAuth and refreshes access automatically. Ask it to plan the migration, import both URL inventories, then run Jev.</p>
     </section>
+    <p className="text-sm text-muted-foreground">Free while we build: up to 500 old URLs, 2,000 new URLs, 2 MiB of URL text, five new runs per 24 hours and three passes per run. No page-content scraping. Known, verified URL pairs can guide matching.</p>
     <section aria-labelledby="history-heading" className="space-y-3 border-t pt-6">
       <div className="flex items-center justify-between gap-3">
         <h2 id="history-heading" className="text-lg font-semibold">Migration history</h2>
@@ -55,7 +54,6 @@ export function PivotCompanionPage() {
       </ul>
       {next && <Button variant="outline" disabled={busy} onClick={() => void load(next)}>Load more migrations</Button>}
     </section>
-    <SearchConsolePanel />
-    <SubscriptionCheckoutPanel />
+
   </main></ToolLayout>;
 }

@@ -1,0 +1,90 @@
+{
+  "version": "1.0.0",
+  "workflow": "jev_url_v1",
+  "limits": {
+    "engine": "jev-url-v1",
+    "activation": "free",
+    "max_old_urls": 500,
+    "max_new_urls": 2000,
+    "max_url_bytes": 2097152,
+    "max_passes": 3,
+    "new_runs_per_24h": 5,
+    "scrapes_page_content": false,
+    "confirmed_example_action": "set_target",
+    "confidence_kind": "model_estimate"
+  },
+  "public_tools_source": "mcp-server/src/tools/pivot.ts",
+  "refine_matches": {
+    "required": [
+      "migration_id",
+      "run_id",
+      "expected_seed_revision",
+      "idempotency_key"
+    ],
+    "expected_seed_revision": "integer >= 0",
+    "idempotency_key": "nonblank string <= 200 characters"
+  },
+  "list_matches": {
+    "data_addition": {
+      "jev": [
+        "engine",
+        "model",
+        "prompt_version",
+        "pass",
+        "seed_revision",
+        "limits",
+        "provider_requests_reserved"
+      ]
+    },
+    "item_addition": {
+      "jev_proposal": [
+        "target_url",
+        "confidence",
+        "confidence_kind",
+        "candidates",
+        "pass",
+        "seed_revision",
+        "stale",
+        "confirmation_required"
+      ]
+    }
+  },
+  "privacy": {
+    "typesafe": "URL text and explicitly confirmed URL pairs",
+    "openai": "URL path text for dense candidate retrieval",
+    "storage": "owned Supabase run cache, inputs, proposals and review history",
+    "page_content": "not fetched by this engine"
+  },
+  "import_inventory": {
+    "required": [
+      "migration_id",
+      "side",
+      "urls",
+      "idempotency_key"
+    ],
+    "side": [
+      "old",
+      "new"
+    ],
+    "urls": "1\u20132000 HTTP(S) URL strings, each <=8192 characters; <=2097152 combined UTF-8 bytes per import; run limit applies across both inventories",
+    "rest": {
+      "method": "POST",
+      "path": "/api/v2/migrations/{migration_id}/inventories",
+      "body_mapping": "{side, rows: urls, idempotency_key}"
+    },
+    "readiness": "Use data.inventory.id only when data.inventory.status is complete. Partial imports require corrected input and a fresh idempotency key."
+  },
+  "run_migration": {
+    "confirmed_pairs": "Optional array up to100 explicitly confirmed {old_url,new_url} pairs; URLs must exist in the exact bound inventories."
+  },
+  "workflow_sequence": [
+    "plan_migration",
+    "import_inventory(old)",
+    "import_inventory(new)",
+    "run_migration",
+    "list_matches",
+    "resolve_matches(set_target)",
+    "refine_matches(optional)",
+    "export_redirects"
+  ]
+}

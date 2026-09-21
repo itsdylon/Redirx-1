@@ -206,7 +206,7 @@ class MigrationGSCService:
     def _failure(error, migration=None, operation=None):
         reconnect = error.code in ('reconnect_required', 'gsc_reauth_required', 'gsc_not_connected')
         code = 'reconnect_required' if reconnect else error.code if error.code in ('not_ready', 'origin_unavailable', 'invalid_input') else 'origin_unavailable'
-        action = 'connect_search_console' if reconnect else 'none' if code == 'not_ready' else 'retry'
+        action = 'none' if reconnect or code == 'not_ready' else 'retry'
         return envelope(migration, operation, status='needs_input' if reconnect else 'failed', next_action=action,
             data={'optional': True, 'connection_state': 'reconnect_required' if reconnect else 'unavailable'},
             error={'code': code, 'message': error.user_message, 'retryable': code == 'origin_unavailable', 'next_action': action})
@@ -241,7 +241,7 @@ class MigrationGSCService:
                 data = {'optional': True, 'connection_state': 'connected' if connected else account['state'], 'properties': properties}
                 if migration_id:
                     data['selection'] = self.store.selection(user, migration_id)
-                return envelope(migration_id, status='succeeded', next_action='none' if connected else 'connect_search_console', data=data)
+                return envelope(migration_id, status='succeeded', next_action='none', data=data)
             state, url = self._consent(user, idempotency_key) if action == 'connect' else (None, None)
             op = self.store.rpc('reserve_gsc_agent_operation', {'p_user_id': user, 'p_action': action,
                 'p_key': idempotency_key, 'p_request': payload,
@@ -254,7 +254,7 @@ class MigrationGSCService:
                 from datetime import datetime, timezone
                 if datetime.fromisoformat(str(op['expires_at']).replace('Z', '+00:00')) <= datetime.now(timezone.utc):
                     raise GSCError('reconnect_required', 'This consent link expired. Connect again with a new idempotency key.')
-                return envelope(migration_id, op['id'], status='needs_input', next_action='connect_search_console', data={
+                return envelope(migration_id, op['id'], status='needs_input', next_action='none', data={
                     'optional': True, 'authorization_url': url, 'expires_at': op['expires_at'], 'connection_state': 'connecting'})
             if op.get('replayed'):
                 # A process may have stopped mid-network-call. A new key is safe:
@@ -315,7 +315,7 @@ class MigrationGSCService:
         migration = op['request'].get('migration_id')
         try:
             if error or not isinstance(code, str) or not code or len(code) > 4096:
-                result = envelope(migration, op['id'], status='cancelled', next_action='connect_search_console', data={'optional': True, 'connection_state': 'disconnected'})
+                result = envelope(migration, op['id'], status='cancelled', next_action='none', data={'optional': True, 'connection_state': 'disconnected'})
                 return self._finish(op, result, state='disconnected')
             tokens = self.provider.exchange(code, self.redirect_uri, self._secret_value('pkce', state))
             return self._finish(op, envelope(migration, op['id'], status='succeeded', next_action='none',

@@ -109,8 +109,8 @@ export function registerPivotTools(server: McpServer): void {
   });
 
   server.registerTool('run_migration', {
-    title: 'Run a migration', description: 'Run the free Jev URL harness from immutable inventories: up to 500 old pages, 2000 new pages, 2 MiB URL text and five new runs per rolling 24 hours. No page-content scraping. Optional confirmed_pairs are explicitly verified old_url/new_url examples from these exact inventories, never guessed labels. Omit legacy payment fields for Jev.',
-    inputSchema: { migration_id: UUID, old_inventory_id: UUID, new_inventory_id: UUID, quote_id: UUID.optional(), grant_id: UUID.optional(), subscription_id: UUID.optional(), rerun_of: UUID.optional(), confirmed_pairs: z.array(z.object({ old_url: z.string().url().max(8192), new_url: z.string().url().max(8192) })).max(100).optional(), idempotency_key: IDEMPOTENCY },
+    title: 'Run a migration', description: 'Run the free Jev URL harness from immutable inventories: up to 500 old pages, 2000 new pages, 2 MiB URL text and five new runs per rolling 24 hours. No page-content scraping. Optional confirmed_pairs are explicitly verified old_url/new_url examples from these exact inventories, never guessed labels.',
+    inputSchema: { migration_id: UUID, old_inventory_id: UUID, new_inventory_id: UUID, quote_id: UUID.optional(), confirmed_pairs: z.array(z.object({ old_url: z.string().url().max(8192), new_url: z.string().url().max(8192) })).max(100).optional(), idempotency_key: IDEMPOTENCY },
     annotations: { readOnlyHint: false, idempotentHint: true, openWorldHint: true },
   }, ({ migration_id, old_inventory_id, new_inventory_id, ...args }, extra) => call(extra as ToolExtra, 'POST', `/migrations/${encodeURIComponent(migration_id)}/runs`, { inventory_ids: { old: old_inventory_id, new: new_inventory_id }, ...args }));
 
@@ -157,44 +157,5 @@ export function registerPivotTools(server: McpServer): void {
       return invalidInput('Supply deployment_id, or deployment_confirmation=true with live_origin and explicit origin_rewrites.');
     }
     return call(extra as ToolExtra, 'POST', `/migrations/${encodeURIComponent(migration_id)}/verifications`, args);
-  });
-
-  server.registerTool('manage_monitoring', {
-    title: 'Manage monitoring', description: 'Start monitoring with an owned artifact_id and deployment_id, optionally using an existing subscription_id. Pause, resume, or cancel using monitoring_id. This does not purchase or renew a subscription.',
-    inputSchema: z.strictObject({ migration_id: UUID, action: z.enum(['start', 'pause', 'resume', 'cancel']), artifact_id: UUID.optional(), deployment_id: UUID.optional(), monitoring_id: UUID.optional(), subscription_id: UUID.optional(), alert_email: z.string().email().max(254).optional(), idempotency_key: IDEMPOTENCY }),
-    annotations: { readOnlyHint: false, idempotentHint: true },
-  }, ({ migration_id, ...args }, extra) => {
-    if (args.action === 'start') {
-      if (!args.artifact_id || !args.deployment_id || args.monitoring_id !== undefined) {
-        return invalidInput('Start requires artifact_id and deployment_id; monitoring_id is only for an existing monitor.');
-      }
-    } else if (!args.monitoring_id || args.artifact_id !== undefined || args.deployment_id !== undefined
-        || args.subscription_id !== undefined || args.alert_email !== undefined) {
-      return invalidInput('Pause, resume, and cancel require monitoring_id and cannot change artifact, subscription, or contact.');
-    }
-    return call(extra as ToolExtra, 'POST', `/migrations/${encodeURIComponent(migration_id)}/monitoring`, args);
-  });
-
-  server.registerTool('get_monitoring_status', {
-    title: 'Get monitoring status', description: 'Read the selected monitor, or the latest owned monitor for this migration. Unchecked coverage is not healthy.',
-    inputSchema: z.strictObject({ migration_id: UUID, monitoring_id: UUID.optional() }),
-    annotations: { readOnlyHint: true, idempotentHint: true },
-  }, ({ migration_id, monitoring_id }, extra) => call(extra as ToolExtra, 'GET', query(`/migrations/${encodeURIComponent(migration_id)}/monitoring`, { monitoring_id })));
-
-  server.registerTool('get_monitoring_fixes', {
-    title: 'Get monitoring fixes', description: 'Page open monitoring findings by integer ordinal. Recovery artifacts restore the expected rules; they do not prove installation or resolution.',
-    inputSchema: z.strictObject({ migration_id: UUID, monitoring_id: UUID.optional(), after: z.number().int().min(-1).default(-1), limit: PAGE }),
-    annotations: { readOnlyHint: true, idempotentHint: true },
-  }, ({ migration_id, monitoring_id, after, limit }, extra) => call(extra as ToolExtra, 'GET', query(`/migrations/${encodeURIComponent(migration_id)}/monitoring/fixes`, { monitoring_id, after, limit })));
-
-  server.registerTool('connect_search_console', {
-    title: 'Connect Search Console', description: 'Begin consent, inspect properties, sync approved data, or disconnect. Never provide Google credentials to this tool.',
-    inputSchema: { action: z.enum(['connect', 'status', 'properties', 'disconnect', 'sync']), migration_id: UUID.optional(), property: z.string().max(2048).optional(), start_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(), end_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(), idempotency_key: IDEMPOTENCY.optional() },
-    annotations: { readOnlyHint: false, idempotentHint: true, openWorldHint: true },
-  }, (args, extra) => {
-    if (['connect', 'disconnect', 'sync'].includes(args.action) && !args.idempotency_key) {
-      return Promise.resolve({ isError: true, content: [{ type: 'text' as const, text: stableEnvelope(localError('invalid_input', 'idempotency_key is required for this action.')) }] });
-    }
-    return call(extra as ToolExtra, 'POST', '/connections/search-console/actions', args);
   });
 }

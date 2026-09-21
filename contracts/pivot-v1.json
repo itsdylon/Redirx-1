@@ -55,7 +55,7 @@
   "operation_statuses": ["queued", "running", "needs_input", "payment_required", "needs_review", "succeeded", "partial", "failed", "cancelled"],
   "terminal_operation_statuses": ["succeeded", "partial", "failed", "cancelled"],
   "monitoring_statuses": ["awaiting_deployment", "active", "paused", "expired", "cancelled"],
-  "next_actions": ["poll", "provide_inventory", "connect_search_console", "complete_payment", "request_custom_quote", "run_migration", "resolve_matches", "export_redirects", "install_artifact", "verify_redirects", "manage_monitoring", "reconnect", "retry", "none", "refine_matches"],
+  "next_actions": ["poll", "provide_inventory", "complete_payment", "request_custom_quote", "run_migration", "resolve_matches", "export_redirects", "install_artifact", "verify_redirects", "reconnect", "retry", "none", "refine_matches"],
   "limits": { "default_page_size": 100, "max_page_size": 500, "max_decisions_per_call": 100 },
   "tools": {
     "import_inventory": {"method": "POST", "path": "/migrations/{migration_id}/inventories", "required": ["migration_id", "side", "urls", "idempotency_key"], "read_only": false},
@@ -66,11 +66,7 @@
     "list_matches": { "method": "GET", "path": "/migrations/{migration_id}/runs/{run_id}/matches", "required": ["migration_id", "run_id"], "read_only": true },
     "resolve_matches": { "method": "PATCH", "path": "/migrations/{migration_id}/runs/{run_id}/matches", "required": ["migration_id", "run_id", "decisions", "idempotency_key"], "read_only": false },
     "export_redirects": { "method": "POST", "path": "/migrations/{migration_id}/artifacts", "required": ["migration_id", "run_id", "format", "revision", "idempotency_key"], "read_only": false },
-    "verify_redirects": { "method": "POST", "path": "/migrations/{migration_id}/verifications", "required": ["migration_id", "artifact_id", "idempotency_key"], "read_only": false },
-    "manage_monitoring": { "method": "POST", "path": "/migrations/{migration_id}/monitoring", "required": ["migration_id", "action", "idempotency_key"], "read_only": false },
-    "get_monitoring_status": { "method": "GET", "path": "/migrations/{migration_id}/monitoring", "required": ["migration_id"], "read_only": true },
-    "get_monitoring_fixes": { "method": "GET", "path": "/migrations/{migration_id}/monitoring/fixes", "required": ["migration_id"], "read_only": true },
-    "connect_search_console": { "method": "POST", "path": "/connections/search-console/actions", "required": ["action"], "read_only": false }
+    "verify_redirects": { "method": "POST", "path": "/migrations/{migration_id}/verifications", "required": ["migration_id", "artifact_id", "idempotency_key"], "read_only": false }
   },
   "formats": ["apache", "nginx", "wordpress", "vercel", "cloudflare", "shopify", "csv", "json"],
   "pricing_fixtures": [

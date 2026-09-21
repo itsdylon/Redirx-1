@@ -63,7 +63,7 @@ class MigrationMonitoringService(MigrationVerificationService):
             if rows: coverage=MigrationVerificationService._envelope(rows[0])['data']
         counts=self._rpc('monitor_alert_counts',{'p_monitor':str(row['id'])})
         counts['contact_verified']=bool(self._rpc('monitor_verified_email',{'p_user':str(row['user_id'])}))
-        action='install_artifact' if state=='awaiting_deployment' else 'complete_payment' if state=='expired' else 'manage_monitoring' if state=='paused' else 'none'
+        action='install_artifact' if state=='awaiting_deployment' else 'complete_payment' if state=='expired' else 'none'
         return envelope(str(row['migration_id']),status='needs_input' if state in ('awaiting_deployment','expired') else 'succeeded',next_action=action,data={
             'monitoring_id':str(row['id']),'artifact_id':str(row['artifact_id']),'deployment_id':str(row['deployment_id']),
             'live_origin':row['live_origin'],'state':state,'state_reason':row.get('state_reason'),

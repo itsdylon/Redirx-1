@@ -56,15 +56,19 @@ describe('opt-in pivot MCP tools', () => {
   beforeEach(() => { vi.stubGlobal('fetch', fetchMock); fetchMock.mockReset(); telemetry.capture.mockReset(); });
   afterEach(() => vi.unstubAllGlobals());
 
-  it('exposes the thirteen pinned tools including durable import and refinement through the native MCP SDK', async () => {
+  it('exposes exactly the nine pinned Jev tools through the native MCP SDK', async () => {
     const { client, close } = await connected();
     try {
       const result = await client.listTools();
       expect(result.tools.map(tool => tool.name).sort()).toEqual([
-        'connect_search_console', 'export_redirects', 'get_migration', 'get_monitoring_fixes',
-        'get_monitoring_status', 'import_inventory', 'list_matches', 'manage_monitoring', 'plan_migration', 'refine_matches',
-        'resolve_matches', 'run_migration', 'verify_redirects',
+        'export_redirects', 'get_migration', 'import_inventory', 'list_matches', 'plan_migration',
+        'refine_matches', 'resolve_matches', 'run_migration', 'verify_redirects',
       ]);
+      const run = result.tools.find(tool => tool.name === 'run_migration')!;
+      expect(run.inputSchema.properties).not.toHaveProperty('grant_id');
+      expect(run.inputSchema.properties).not.toHaveProperty('subscription_id');
+      expect(run.inputSchema.properties).not.toHaveProperty('rerun_of');
+      expect(run.inputSchema.properties).toHaveProperty('quote_id');
     } finally { await close(); }
   });
 
@@ -214,14 +218,19 @@ describe('opt-in pivot MCP tools', () => {
     } finally { await close(); }
   });
 
-  it('forwards an optional explicit Studio subscription only on run_migration', async () => {
+  it('drops legacy paid-plan fields from run_migration instead of forwarding them', async () => {
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(envelope({ run_id: ids.run }, { status: 'queued', next_action: 'poll' })), { headers: { 'content-type': 'application/json' } }));
     const { client, close } = await connected();
     try {
       await client.callTool({ name: 'run_migration', arguments: { migration_id: ids.migration,
-        old_inventory_id: ids.run, new_inventory_id: ids.mapping, subscription_id: ids.mapping, idempotency_key: 'studio-run' } });
-      expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toMatchObject({ subscription_id: ids.mapping,
-        inventory_ids: { old: ids.run, new: ids.mapping }, idempotency_key: 'studio-run' });
+        old_inventory_id: ids.run, new_inventory_id: ids.mapping, quote_id: ids.mapping,
+        // @ts-expect-error legacy fields are no longer part of the advertised schema
+        grant_id: ids.run, subscription_id: ids.mapping, rerun_of: ids.run, idempotency_key: 'jev-run' } });
+      const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+      expect(body).toMatchObject({ quote_id: ids.mapping, inventory_ids: { old: ids.run, new: ids.mapping }, idempotency_key: 'jev-run' });
+      expect(body).not.toHaveProperty('grant_id');
+      expect(body).not.toHaveProperty('subscription_id');
+      expect(body).not.toHaveProperty('rerun_of');
     } finally { await close(); }
   });
 
@@ -282,85 +291,13 @@ describe('opt-in pivot MCP tools', () => {
     } finally { await close(); }
   });
 
-  it('forwards existing monitor authority and binds lifecycle changes to monitoring_id', async () => {
-    fetchMock.mockImplementation(async () => new Response(JSON.stringify(envelope({})), { headers: { 'content-type': 'application/json' } }));
-    const { client, close } = await connected();
-    try {
-      const cases = [
-        { action: 'start', artifact_id: ids.run, deployment_id: ids.mapping, subscription_id: ids.run, alert_email: 'verified@example.test', idempotency_key: 'start' },
-        ...['pause', 'resume', 'cancel'].map(action => ({ action, monitoring_id: ids.mapping, idempotency_key: action })),
-      ];
-      for (const fields of cases) {
-        const result = await client.callTool({ name: 'manage_monitoring', arguments: { migration_id: ids.migration, ...fields } });
-        expect(result.isError).not.toBe(true);
-      }
-      expect(fetchMock.mock.calls.map(call => call[0])).toEqual(cases.map(() => `https://backend.test/api/v2/migrations/${ids.migration}/monitoring`));
-      expect(fetchMock.mock.calls.map(call => JSON.parse(call[1].body))).toEqual(cases);
-    } finally { await close(); }
-  });
-
-  it('rejects incomplete monitor starts and scope changes during pause/resume/cancel', async () => {
-    const { client, close } = await connected();
-    try {
-      for (const fields of [
-        { action: 'start', artifact_id: ids.run }, { action: 'start', deployment_id: ids.mapping },
-        { action: 'start', artifact_id: ids.run, deployment_id: ids.mapping, monitoring_id: ids.run },
-        { action: 'pause' }, { action: 'resume', monitoring_id: ids.mapping, artifact_id: ids.run },
-        { action: 'resume', monitoring_id: ids.mapping, subscription_id: ids.run },
-        { action: 'cancel', monitoring_id: ids.mapping, alert_email: 'other@example.test' },
-      ]) {
-        const result = await client.callTool({ name: 'manage_monitoring', arguments: { migration_id: ids.migration, idempotency_key: 'invalid', ...fields } });
-        expect(result.isError).toBe(true);
-        expect(JSON.parse((result.content[0] as { text: string }).text).error.code).toBe('invalid_input');
-      }
-      expect(fetchMock).not.toHaveBeenCalled();
-    } finally { await close(); }
-  });
-
-  it('forwards selected/latest monitor and integer pagination only for fixes', async () => {
-    fetchMock.mockImplementation(async () => new Response(JSON.stringify(envelope({ items: [], next_cursor: 102 })), { headers: { 'content-type': 'application/json' } }));
-    const { client, close } = await connected();
-    try {
-      await client.callTool({ name: 'get_monitoring_status', arguments: { migration_id: ids.migration } });
-      await client.callTool({ name: 'get_monitoring_status', arguments: { migration_id: ids.migration, monitoring_id: ids.mapping } });
-      const fixes = await client.callTool({ name: 'get_monitoring_fixes', arguments: { migration_id: ids.migration, monitoring_id: ids.mapping, after: 100, limit: 2 } });
-      await client.callTool({ name: 'get_monitoring_fixes', arguments: { migration_id: ids.migration } });
-      expect(fetchMock.mock.calls[0][0]).toBe(`https://backend.test/api/v2/migrations/${ids.migration}/monitoring`);
-      expect(fetchMock.mock.calls.map(call => Object.fromEntries(new URL(call[0]).searchParams))).toEqual([
-        {}, { monitoring_id: ids.mapping }, { monitoring_id: ids.mapping, after: '100', limit: '2' }, { after: '-1', limit: '100' },
-      ]);
-      expect(JSON.parse((fixes.content[0] as { text: string }).text).data.next_cursor).toBe(102);
-      expect(fetchMock.mock.calls.every(call => call[1].method === 'GET' && call[1].body === undefined)).toBe(true);
-    } finally { await close(); }
-  });
-
-  it('rejects obsolete cursors, status pagination, and invalid ordinal bounds', async () => {
-    const { client, close } = await connected();
-    try {
-      for (const fields of [{ cursor: 'opaque' }, { limit: 1 }, { after: 0 }]) {
-        expect((await client.callTool({ name: 'get_monitoring_status', arguments: { migration_id: ids.migration, ...fields } })).isError).toBe(true);
-      }
-      for (const fields of [{ cursor: 'opaque' }, { after: '10' }, { after: 1.5 }, { after: -2 }, { limit: 501 }, { limit: 0 }]) {
-        expect((await client.callTool({ name: 'get_monitoring_fixes', arguments: { migration_id: ids.migration, ...fields } })).isError).toBe(true);
-      }
-      expect(fetchMock).not.toHaveBeenCalled();
-      const tools = (await client.listTools()).tools;
-      const status = tools.find(tool => tool.name === 'get_monitoring_status')!;
-      expect(status.inputSchema.properties).toHaveProperty('monitoring_id');
-      expect(status.inputSchema.properties).not.toHaveProperty('limit');
-      expect(status.inputSchema.properties).not.toHaveProperty('cursor');
-      expect(tools.find(tool => tool.name === 'get_monitoring_fixes')!.inputSchema.properties).toHaveProperty('after');
-    } finally { await close(); }
-  });
-
-
   it('preserves telemetry intent on strict outcome schemas without forwarding context to the backend', async () => {
     fetchMock.mockImplementation(async () => new Response(JSON.stringify(envelope({})), { headers: { 'content-type': 'application/json' } }));
     const { client, close } = await connected();
     try {
       const context = 'Checking the installed migration artifact against expected redirects before evaluating optional monitoring coverage for the completed website migration.';
       const tools = (await client.listTools()).tools;
-      expect(tools).toHaveLength(13);
+      expect(tools).toHaveLength(9);
       expect(tools.find(tool => tool.name === 'verify_redirects')!.inputSchema.properties).toHaveProperty('context');
       const result = await client.callTool({ name: 'verify_redirects', arguments: {
         migration_id: ids.migration, artifact_id: ids.run, deployment_id: ids.mapping, idempotency_key: 'telemetry', context,

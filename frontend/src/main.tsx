@@ -9,6 +9,7 @@ import { AppWithToaster } from "./App.tsx";
 import { OnboardingProvider } from "./contexts/OnboardingContext";
 import { appQueryClient } from "./queries/queryClient";
 import "./styles/globals.css";
+import { scrubAuthSecrets } from "./lib/posthogScrub";
 
 // The landing page (redirx-landing/components/analytics/posthog-provider.tsx)
 // writes its PostHog cookie on `.redirx.dev` so a visitor carries one identity
@@ -32,6 +33,10 @@ const posthogOptions = {
   // docs/architecture/agentic-pivot.md) — so a React error that breaks signup
   // was visible only as a funnel that quietly stopped converting.
   capture_exceptions: true,
+  // The auth callback URL carries sign-in credentials (tokens in the fragment
+  // for implicit/email flows, `?code=` for PKCE), and the automatic pageview
+  // records the full URL. Scrub them before anything leaves the browser.
+  before_send: scrubAuthSecrets,
   loaded: (client: PostHog) => {
     // Registered on every event, autocapture included. The landing registers
     // source_repo "landing"; without this the app's events were identifiable

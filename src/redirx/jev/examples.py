@@ -43,6 +43,3 @@ class ExampleBank:
                 continue
             out.append({"old_url": ps[i].url, "new_url": ps[i].true_new_url})
         return out
-
-    def size(self) -> int:
-        return sum(len(v) for v in self.by_site.values())

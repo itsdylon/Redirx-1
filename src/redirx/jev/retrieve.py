@@ -2,21 +2,13 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
 import math
-import os
-import threading
 from collections import Counter, defaultdict
-from pathlib import Path
 
 import numpy as np
 
-from .data import Page, doc_tokens, embed_text, excerpt, humanize_path, path_tokens, text_tokens
-
-EMBED_MODEL = "text-embedding-3-small"
-EMBED_PRICE_PER_MTOK = 0.02  # USD, OpenAI list price for text-embedding-3-small
-
+from .data import Page, humanize_path, path_tokens
+from .ports import EmbeddingCache
 
 class BM25:
     def __init__(self, docs: list[list[str]], k1: float = 1.5, b: float = 0.75):
@@ -48,7 +40,7 @@ def analogical_rewrite(old_url: str, ex_old: str, ex_new: str) -> list[str] | No
     """Apply the token change of one verified pair (ex_old -> ex_new) to old_url, as a BM25 query.
 
     Tokens the example dropped are removed from the query, tokens it added are appended. Path
-    tokens are counted twice, mirroring doc_tokens. Returns None when the example shares nothing
+    tokens are counted twice, matching the path index. Returns None when the example shares nothing
     with this old URL (its pattern says nothing about it)."""
     o, eo, en = path_tokens(old_url), path_tokens(ex_old), path_tokens(ex_new)
     if not set(o) & set(eo):
@@ -72,19 +64,6 @@ def path_embed_text(p: Page) -> str:
     return f"path: {humanize_path(p.url)}"
 
 
-def content_embed_text(p: Page) -> str:
-    parts = []
-    if p.title:
-        parts.append(f"title: {p.title}")
-    if p.text:
-        parts.append(f"text: {excerpt(p.text, 1200)}")
-    return " | ".join(parts) or path_embed_text(p)
-
-
-def content_tokens(p: Page) -> list[str]:
-    return text_tokens(p.title, 40) + text_tokens(p.text, 300)
-
-
 def weighted_rrf(lists: list[tuple[list[int], float]], k: int = 60) -> list[int]:
     score: dict[int, float] = defaultdict(float)
     for ranks, w in lists:
@@ -96,33 +75,25 @@ def weighted_rrf(lists: list[tuple[list[int], float]], k: int = 60) -> list[int]
 class Retriever:
     """Per-site indexes over the new-page universe, one ranked list per voter, fused by weighted RRF.
 
-    Voters: `bm25_path` and `dense_path` always; `bm25_content` and `dense_content` when pages carry
-    title or text. Weights are equal unless `calibrate()` is given verified pairs, in which case each
+    Voters: path BM25 and optional dense URL embeddings. Weights are equal unless
+    `calibrate()` is given verified pairs, in which case each
     voter's weight is its recall@K on those pairs and voters far below the best are dropped. The
     pool for an old page is built without ever reading that page's label.
     """
 
-    VOTERS = ("bm25_path", "dense_path", "bm25_content", "dense_content")
-
-    def __init__(self, new_pages: list[Page], use_embeddings: bool, cache_dir: Path | None = None, depth: int = 100, embedding_cache=None):
+    def __init__(self, new_pages: list[Page], use_embeddings: bool, depth: int = 100, *, embedding_cache: EmbeddingCache | None = None):
         self.depth = depth
-        self.use_embeddings = use_embeddings
         self.by_site: dict[str, list[Page]] = defaultdict(list)
         for p in new_pages:
             self.by_site[p.site].append(p)
-        self.has_content = any(p.has_content for p in new_pages)
         self.bm25_path = {s: BM25([path_tokens(p.url) * 2 for p in ps]) for s, ps in self.by_site.items()}
-        self.bm25_content = {s: BM25([content_tokens(p) for p in ps]) for s, ps in self.by_site.items()} if self.has_content else {}
         self.emb_cache = embedding_cache if use_embeddings else None
         if use_embeddings and self.emb_cache is None:
             raise ValueError("A durable embedding cache is required")
         self.dense_path: dict[str, np.ndarray] = {}
-        self.dense_content: dict[str, np.ndarray] = {}
         if self.emb_cache is not None:
             for s, ps in self.by_site.items():
                 self.dense_path[s] = self.emb_cache.embed([path_embed_text(p) for p in ps])
-                if self.has_content:
-                    self.dense_content[s] = self.emb_cache.embed([content_embed_text(p) for p in ps])
         self.weights: dict[str, float] = {v: 1.0 for v in self.active_voters()}
         self.calibration: dict | None = None
 
@@ -130,18 +101,12 @@ class Retriever:
         out = ["bm25_path"]
         if self.emb_cache is not None:
             out.append("dense_path")
-        if self.has_content:
-            out.append("bm25_content")
-            if self.emb_cache is not None:
-                out.append("dense_content")
         return out
 
     def prime_queries(self, old_pages: list[Page]) -> None:
         """Embed all old pages in one batched pass so per-page calls hit the cache."""
         if self.emb_cache is not None:
             self.emb_cache.embed([path_embed_text(p) for p in old_pages])
-            if self.has_content:
-                self.emb_cache.embed([content_embed_text(p) for p in old_pages])
 
     def voter_lists(self, old: Page) -> dict[str, list[int]]:
         pages = self.by_site.get(old.site, [])
@@ -159,13 +124,6 @@ class Retriever:
             if not np.all(np.isfinite(sims)) or np.any(np.abs(sims)>1.01):
                 raise ValueError('Invalid dense URL similarity values')
             out["dense_path"] = [int(i) for i in np.argsort(-sims)[: self.depth]]
-        if self.has_content:
-            sc = self.bm25_content[old.site].scores(content_tokens(old))
-            out["bm25_content"] = [int(i) for i in np.argsort(-sc)[: self.depth] if sc[i] > 0]
-            if self.emb_cache is not None:
-                q = self.emb_cache.embed([content_embed_text(old)])[0]
-                sims = self.dense_content[old.site] @ q
-                out["dense_content"] = [int(i) for i in np.argsort(-sims)[: self.depth]]
         return out
 
     def calibrate(self, seed_pages: list[Page], k: int = 20, floor: float = 0.6) -> dict:

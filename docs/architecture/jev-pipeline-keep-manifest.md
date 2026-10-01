@@ -8,6 +8,16 @@ recorded in the release receipt; use `git log -- docs/architecture/jev-pipeline-
 to find the revision carrying this inventory. File provenance hashes are in
 `jev-harness-provenance.json`; repository reachability is in `jev-runtime-reachability.json`.
 
+## October 1 cleanup amendment
+
+The original entries below describe the expedited MVP preservation boundary.
+The separately authorized [cleanup audit](jev-cleanup-20261001.md) traces and removes
+unused experimental content helpers, alternate decision policies and evaluator
+fields. Those specific helpers are no longer protected or implemented. URL
+retrieval, the two-pass question protocol, provider accounting, audited seeds and
+all historical/shared application paths remain protected. `src/redirx/jev/ports.py`
+is the new algorithm interface; original provenance hashes remain historical pins.
+
 ## KEEP — Jev core (runtime)
 
 | Exact path / object | Why retained, caller and adaptation | Verification / cleanup constraint |

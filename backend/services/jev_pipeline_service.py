@@ -212,7 +212,7 @@ class JevPipelineRunner:
             # wrapper enforces its actual serialized input limit independently.
             while len(pool)>1 and sum(len(p.url.encode()) for p in pool)*2+len(page.url.encode())+sum(len(encoded(e)) for e in examples)>20000:
                 pool.pop()
-            record=map_page(page,pool,provider,Config(stage1_excerpt=0,stage2_excerpt=0),examples)
+            record=map_page(page,pool,provider,Config(),examples)
             proposal={'target_url':record['decision'],'confidence':record['p_decision'],
                       'confidence_kind':'model_estimate','candidates':record['stage1']['top'],
                       'input_tokens':record['tokens'],'provider_seconds':record['latency'],

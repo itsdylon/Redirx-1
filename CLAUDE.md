@@ -1,374 +1,106 @@
-# CLAUDE.md
+# RedirX engineering guide
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+## Start here
 
-## Project Overview
+The current path is MCP → owned migration/inventories → URL-first Jev proposals →
+explicit review → approved artifacts. The browser is a companion. Read `README.md`
+and trace the current entry points before treating an older architecture proposal
+as an implementation description.
 
-Redirx is a student project at Georgia Institute of Technology for automated 301 redirect generation during website migrations. The system analyzes old and new website URLs to intelligently pair them through multiple processing stages.
+The previous root guide described the legacy cosine/content engine as the primary
+architecture. It was replaced during the October 1 cleanup; old guide text remains
+in Git at `3ddece1:CLAUDE.md`. Historical rollout receipts describe their recorded
+moment, not live service state. Verify deployed SHAs before a release. `render.yaml`
+is not a reliable inventory of the current deployment.
 
-## Core Architecture
+## Boundaries that should survive a harness change
 
-The codebase uses a **pipeline-based architecture** where data flows through a series of async stages:
+- `src/redirx/jev/data.py`, `retrieve.py`, `examples.py`, `pipeline.py` and
+  `questions.py` implement URL retrieval and two-pass judgment. They depend on the
+  small `JudgmentProvider` / `EmbeddingCache` protocols in `ports.py`, not Flask,
+  the database or the concrete model client.
+- `src/redirx/jev/jev.py` owns the pinned provider protocol, request validation,
+  cache identity, pacing and billable-call accounting. Swapping a provider must
+  preserve those guarantees and explicitly version incompatible prompts/caches.
+- `backend/services/jev_pipeline_service.py` adapts owned jobs, audited seeds,
+  durable storage and embedding calls to the algorithm. Blocking work stays off
+  the async worker loop so lease heartbeats continue.
+- `backend/worker.py` owns dispatch and completion. `migration_*` services own
+  admission, ownership, review, artifacts and historical workflows. Keep these
+  product authorities independent of model decisions and MCP/browser transport.
 
-### Pipeline Flow
-1. **UrlPruneStage** - Filters out asset URLs (CSS, JS, images, etc.)
-2. **BlogPruneStage** - Filters individual blog posts, keeps landing pages
-3. **ExactUrlMatchStage** - Matches identical URL paths before scraping
-4. **WebScraperStage** - Scrapes HTML content from URLs using aiohttp
-5. **HtmlPruneStage** - Pairs pages with duplicate HTML content
-6. **EmbedStage** - Generates vector embeddings via OpenAI
-7. **PairingStage** - Matches old→new URLs via vector similarity
+Prefer concrete modules and these existing boundaries over a generic agent
+framework, plugin registry or parallel implementation of the same policy.
 
-The `Pipeline` class ([lib.py](src/redirx/lib.py)) orchestrates execution:
-- Accepts input (tuple of old URLs and new URLs lists)
-- Uses `iterate()` async generator to execute stages sequentially
-- Each stage transforms state and returns it to the next stage
-- State type changes as it progresses through the pipeline
+## Non-negotiable behavior
 
-### Key Classes
+- A Jev suggestion is never approval. Only explicit audited decisions become
+  confirmed examples or exportable redirects. Corrected examples invalidate older
+  proposals. Preserve optimistic revisions and idempotency keys across retries.
+- `confidence` is a model estimate, not a calibrated guarantee. URL-only refusal
+  stays unresolved for review; no automatic 410. In ambiguous redirect policy,
+  consult current Google guidance before changing behavior or labels.
+- Keep raw URL identity, case and encoding intact. Retrieval tokenization is not
+  URL identity. Export membership, origin and loop validation remain authoritative.
+- Look up the durable `jev_runs` marker before selecting an engine. A disabled Jev
+  switch pauses marked jobs; it must never send them into the old content engine.
+- Every paid provider attempt reserves budget first. Preserve the global $1/day
+  cap (including embeddings), unknown-outcome reservations and lease fencing.
+  No hidden SDK retry or automatic provider fallback. See `contracts/jev-mvp-v1.json`.
+- Current limits: 500 old / 2000 new URLs, 2 MiB raw URLs, five new runs per rolling
+  24 hours, three passes, at most 100 initial confirmed pairs. Database authority
+  wins over UI hints. One concurrent run is the measured worker envelope.
+- `jev_database_transport.py` may retry bounded reads once; never extend that to
+  RPC mutations or model calls. Preserve finite diagnostic allowlists; no provider
+  payloads, credentials or arbitrary exception text in telemetry.
+- OAuth issuer/audience/resource checks, delegated ownership and server-owned user
+  identity remain strict. A health response alone is not authenticated acceptance.
+- Applied SQL migrations are history: do not rewrite/drop them during cleanup.
+  Keep Jev migration 062 and markers; do not enable deferred billing 059–061.
+  Disabling new admissions does not authorize rolling back the worker to pre-Jev.
 
-**Pipeline** ([lib.py](src/redirx/lib.py)):
-- `__init__(input, stages)` - Initialize with input data and optional stage list
-- `iterate()` - Async generator that executes stages and yields intermediate state
-- `default_pipeline()` - Returns the standard 7-stage pipeline
+## Historical/shared code
 
-**Stage** ([stages.py](src/redirx/stages.py)):
-- Abstract base class for all pipeline stages
-- `execute(input) -> output` - Async method that transforms data
+Read the [pipeline inventory](docs/architecture/jev-pipeline-keep-manifest.md) and
+[companion inventory](docs/architecture/jev-companion-keep-manifest.md) before
+removing a legacy-looking module. Import reachability alone does not account for
+SQL triggers/RPCs, environment-selected backends, templates or external clients.
+The [October cleanup](docs/architecture/jev-cleanup-20261001.md) names the narrow
+experimental and unreferenced pieces independently verified for removal.
 
-**WebPage** ([stages.py](src/redirx/stages.py)):
-- Represents a scraped webpage with URL and HTML content
-- `scrape(session, url)` - Async classmethod to fetch webpage
-- Implements `__hash__()` with caching for deduplication
+- Old content matching, Match Repair, previews, billing, verification and Watch
+  still serve historical/shared paths. Do not silently retire public endpoints.
+- Match Repair is advisory until an audited review changes the mapping.
+- Watch uses separate URL comparison and loop identities, revalidates every hop
+  for SSRF, and runs in the worker. Only re-probed URLs can close issues; transient
+  failures need two sightings; preserve pre-deploy grace and alert delivery guards.
+- Legacy browser/v1 entitlement gates must agree. Keep API key management available
+  to signed-in free users and preserve historical auth/download return paths.
+- Keep Redis available for environment-selected rate-limit storage and scikit-learn
+  for historical matching/preview paths. No direct import is not proof of no use.
 
-**Mapping** ([stages.py](src/redirx/stages.py)):
-- Represents a pairing between old and new webpages
-- Used to accumulate redirect mappings through the pipeline
+## Verification
 
-### Important Patterns
+Use an isolated checkout/environment. Never copy production credentials into tests.
 
-- **All stage execution is async** - Use `async def` and `await`
-- **Concurrent scraping** - WebScraperStage uses `asyncio.TaskGroup` and `asyncio.gather()` to scrape URLs in parallel
-- **Type transformation** - Pipeline input/output types change between stages:
-  - Start: `tuple[list[str], list[str]]` (URL lists)
-  - After scraping: `tuple[list[WebPage], list[WebPage]]`
-  - After HTML pruning: `tuple[list[WebPage], list[WebPage], set[Mapping]]`
-
-## Database & Configuration
-
-**Supabase Backend:**
-- Uses PostgreSQL with pgvector extension for vector similarity search
-- Stores webpage embeddings (1536-dimensional vectors)
-- Handles migration sessions and URL mappings
-- **Push-based notifications** via PostgreSQL LISTEN/NOTIFY for instant job processing
-
-**Configuration** ([config.py](src/redirx/config.py)):
-- Loads settings from `.env` file (use `.env.example` as template)
-- `Config.validate()` - Validates required Supabase credentials
-- `Config.validate_embeddings()` - Validates OpenAI API key (optional)
-
-**Database Client** ([database.py](src/redirx/database.py)):
-- `SupabaseClient.get_client()` - Singleton Supabase client
-- `MigrationSessionDB` - CRUD for migration sessions, idempotency support, lease management
-- `WebPageEmbeddingDB` - Insert/search embeddings with vector similarity
-- `URLMappingDB` - Manage URL redirects with confidence scores
-
-**Database Migrations** ([database/migrations/](database/migrations/)):
-- `004_add_listen_notify_trigger.sql` - LISTEN/NOTIFY infrastructure
-- `005_add_lease_columns.sql` - Lease-based locking with `claim_next_job()` and `reclaim_expired_leases()` RPC functions
-- `006_add_idempotency_keys.sql` - Prevent duplicate job creation
-- `029_add_post_cutover_watch.sql` - Redirect monitoring: `redirect_watches`, `watch_checks`, `watch_issues`, plus `claim_next_watch()` and `release_watch_lease()` RPCs
-- `030_add_match_repair.sql` - Advisory repair columns on `url_mappings` (`repaired_url`, `repair_method`, `repair_confidence`, `repair_support`, `repair_evidence`)
-- Run manually in Supabase SQL Editor (see `database/migrations/README.md`)
-
-**Embedding Strategy:**
-- Using OpenAI `text-embedding-3-small` (1536 dims)
-- Cost: ~$0.002 per 200 webpages (negligible for demos)
-- Future: Can add local embeddings (sentence-transformers) if needed
-
-## Background Worker Architecture
-
-**Worker System** ([backend/worker.py](backend/worker.py)):
-- **Push-based** using PostgreSQL LISTEN/NOTIFY (instant job pickup, no polling delay)
-- **Lease-based locking** prevents duplicate processing and enables multiple workers
-- **Automatic retries** with exponential backoff (up to 5 attempts configurable)
-- **Self-healing** via expired lease reclamation
-- **Fallback polling** every 60 seconds in case notifications are missed
-
-**Worker Flow**:
-1. Worker subscribes to `job_queue_events` PostgreSQL channel
-2. When job inserted/updated to `pending`, database sends notification
-3. Worker calls `claim_next_job()` RPC to atomically claim job (FOR UPDATE SKIP LOCKED)
-4. Job status updated to `processing`, lease set (default: 10 minutes)
-5. Pipeline runs with progress updates to database
-6. On completion: release lease, update status to `completed`
-7. On failure: increment attempt count, release lease, retry (or mark `permanently_failed`)
-
-**Configuration** (Environment Variables):
-- `DATABASE_URL` - PostgreSQL direct connection (required for LISTEN/NOTIFY)
-- `WORKER_LEASE_DURATION` - Lease duration in seconds (default: 600)
-- `WORKER_MAX_CONCURRENT` - Max concurrent jobs (default: 1)
-- `WORKER_FALLBACK_INTERVAL` - Fallback poll interval (default: 60)
-- `WORKER_MAX_ATTEMPTS` - Max retry attempts (default: 5)
-- `WATCH_ENABLED` - Run post-cutover monitoring sweeps in this worker (default: true)
-- `WATCH_POLL_INTERVAL` - Seconds between checks for a due watch (default: 60)
-- `WATCH_LEASE_DURATION` - Watch lease in seconds (default: 3600)
-- `WATCH_ALLOWLIST_USER_IDS` - Comma-separated user ids granted Watch regardless of plan (API + worker)
-
-**Idempotency** ([backend/services/pipeline_runner.py](backend/services/pipeline_runner.py)):
-- API generates deterministic `idempotency_key` from `SHA256(user_id + sorted_urls)`
-- Duplicate requests return existing session instead of creating new job
-- Prevents double-processing of identical CSV uploads
-
-## Development Commands
-
-### First-Time Setup
-```bash
-# 1. Create virtual environment (Python 3.12 or 3.13 required)
-python -m venv venv
-# Linux/macOS: source venv/bin/activate
-# Windows: venv\Scripts\activate
-
-# 2. Copy environment templates
-cp .env.example .env          # Backend env vars (Supabase service_role key, OpenAI key, DATABASE_URL)
-cp frontend/.env.example frontend/.env  # Frontend env vars (Supabase anon key)
-
-# 3. Edit .env files with your credentials (see comments in each file)
-# IMPORTANT: Set DATABASE_URL for worker (get from Supabase Dashboard → Connect → Direct connection)
-
-# 4. Run database migrations (in Supabase SQL Editor)
-# See database/migrations/README.md for instructions
-
-# 5. Install dependencies
-pip install -r requirements.txt
-cd frontend && npm install && cd ..
+```sh
+python -m unittest backend.tests.test_jev_core backend.tests.test_jev_database_transport -v
+node scripts/check_pivot_contract.mjs
+npm run test:run --prefix frontend
+npm run build --prefix frontend
+npm test --prefix mcp-server
+npm run typecheck --prefix mcp-server
 ```
 
-### Running Everything (Recommended)
-```bash
-# Single command starts all services:
-python dev.py
-```
-This starts:
-- **Frontend** at http://localhost:3000 (Vite, proxies /api to Flask)
-- **Backend** at http://localhost:5001 (Flask API)
-- **Worker** (push-based with LISTEN/NOTIFY, instant job processing)
-- **Mock sites** at http://localhost:8000 (old) and http://localhost:8001 (new)
+Native lifecycle tests require `PREFLIGHT_TEST_DATABASE_URL` pointing to disposable
+loopback PostgreSQL. Run `backend.tests.test_jev_pipeline`,
+`backend.tests.test_worker_pivot_integration`,
+`backend.tests.test_artifact_decision_projection` and
+`backend.tests.test_migration_run_service` with it. A skipped database suite is not
+acceptance. The opt-in `test_jev_capacity` fixture uses synthetic providers; it does
+not establish production latency, quality or provider availability.
 
-Options:
-```bash
-python dev.py --no-mocks   # Skip mock test sites
-python dev.py --backend    # Backend + worker only
-```
-
-### Running Services Individually
-```bash
-# Frontend
-cd frontend && npm run dev
-
-# Backend API (from project root)
-python -m backend.app
-
-# Worker (from project root)
-python -m backend.worker
-
-# Mock test sites
-python tests/mock_sites/start_servers.py
-```
-
-### Environment Variables
-- **Root `.env`** — Backend config: Supabase (service_role key), OpenAI, CORS, Flask settings
-- **`frontend/.env`** — Frontend config: Supabase (anon key). `VITE_API_BASE_URL` is only needed in production (Vite proxy handles local dev).
-- **Production (Render)** — Set env vars in the Render dashboard, not in files.
-
-### Running Tests
-```bash
-python tests/test_database_connection.py     # Verify DB connection
-python tests/driver.py                       # Run all tests
-python -m unittest tests.stage_tests.html_prune_test  # Specific test
-```
-
-### Deployment (Render)
-- **Frontend**: Static site, build command `cd frontend && npm install && npm run build`, publish dir `frontend/build`
-- **Backend API**: Web service, start command `gunicorn backend.app:create_app()`
-- **Worker**: Background worker, start command `python -m backend.worker`
-- Set `VITE_API_BASE_URL` to the backend URL in the frontend's Render env vars
-
-## Email System
-
-**Powered by [Resend](https://resend.com/)** — transactional and drip emails sent from `noreply@redirx.dev`.
-
-### Architecture
-
-- **`backend/services/email_service.py`** — Core `EmailService` class. All sends are fire-and-forget (errors caught & logged, never raised). Central `send_email()` method checks user preferences, renders Jinja2 templates, calls Resend API, and logs to `email_log` table.
-- **`backend/templates/email/`** — Jinja2 HTML templates with inline CSS for email client compatibility. `_base.html` is the shared layout; all others extend it.
-- **`backend/routes/email_routes.py`** — Flask blueprint (`/api/email/`): unsubscribe, preferences CRUD, nudge cron trigger, admin test sends.
-- **`backend/services/email_nudge_cron.py`** — Onboarding drip emails (day 1, 3, 7). Runnable as `python -m backend.services.email_nudge_cron` or via `POST /api/email/admin/nudge-cron` with `X-Cron-Secret`.
-
-### Email Types
-
-| Type | Trigger | Template |
-|------|---------|----------|
-| `welcome` | First login (in `auth_routes.py`) | `welcome.html` |
-| `mapping_complete` | Job completes successfully (in `worker.py`) | `mapping_complete.html` |
-| `mapping_failed` | Job permanently fails (in `worker.py`) | `mapping_failed.html` |
-| `onboard_nudge` | Cron job (day 1, 3, 7 after signup) | `nudge_day1/3/7.html` |
-| `watch_alert` | Post-cutover monitoring finds new problems (in `watch_service.py`) | `watch_alert.html` |
-
-### Environment Variables
-
-| Variable | Required By | Description |
-|----------|-------------|-------------|
-| `RESEND_API_KEY` | API + Worker | Resend API key |
-| `EMAIL_FROM_ADDRESS` | API + Worker | Sender address (default: `Redirx <noreply@redirx.dev>`) |
-| `APP_BASE_URL` | API + Worker | Base URL for links in emails (default: `http://localhost:3000`) |
-
-### Adding a New Email Type
-
-1. Create a template in `backend/templates/email/` extending `_base.html`
-2. Add a constant to `EmailType` in `email_service.py`
-3. Add a convenience method to `EmailService` (e.g., `send_my_new_email()`)
-4. Call it from the appropriate trigger point (route, worker, cron, etc.)
-5. Add a test case to the admin test endpoint in `email_routes.py`
-
-### Database Tables
-
-- **`email_preferences`** — Per-user opt-out by email type (`user_id + email_type` unique)
-- **`email_log`** — Records every send attempt with Resend message ID, status, error
-- **`user_profiles.welcome_email_sent`** — Boolean flag to ensure welcome email is sent only once
-
-## API Keys (agent access)
-
-Backend has existed since the public API shipped (`/api/keys` GET/POST/DELETE,
-`api_key_service.py`); the UI did not, so `POST /api/keys` had no caller and
-documentation pointing agents at the app went nowhere.
-
-- **`ApiKeysPanel`** — the whole UI. Plaintext is shown once at creation and
-  the copy explains why (only a hash is stored). Deleting is confirmed and
-  says what breaks.
-- **Two entry points, one panel**: the `/api-keys` route for any signed-in
-  account, and a Settings tab for enterprise accounts who live there.
-  `/api-keys` exists because Settings is enterprise-only (`canAccessSettingsAndAccount`)
-  while a **free account can drive Quick Match over the API** — so key
-  management cannot sit behind a plan gate. `/api-keys` is the URL external
-  docs and `llms.txt` should point at.
-- Deep Match over the API is gated to paid plans in `v1_routes.create_migration`,
-  mirroring `pipeline_routes.py`. That gate is what makes self-serve key
-  issuing safe; do not remove one without the other.
-
-## Post-Cutover Monitoring ("Watch")
-
-Exporting a redirect file is a prediction. A watch asks the live site what it
-actually does with each approved old URL, and ranks the failures by the traffic
-they cost.
-
-**Probing** ([src/redirx/redirect_probe.py](src/redirx/redirect_probe.py)):
-- Follows redirects one hop at a time (not `allow_redirects`), because the
-  diagnosis is in the shape of the chain — hop count, permanent vs temporary,
-  and where it actually landed.
-- Re-validates every hop against the SSRF rules: following a redirect means
-  letting another server pick our next URL.
-- HEAD first, retried as GET on statuses that mean "this server dislikes HEAD".
-- **Two normalisations, deliberately different.** `normalize_for_compare`
-  ignores scheme and `www.` so an HSTS hop is not reported as a wrong target.
-  `visit_identity` (loop detection) does not — reusing the former reported
-  github.com and google.com as redirect loops.
-
-**Issue types**: `no_redirect`, `not_found`, `server_error`, `wrong_target`,
-`redirect_chain`, `temporary_redirect`, `redirect_loop`, `unreachable`,
-`blocked`. Each needs an entry in `SEVERITY` and `DESCRIPTIONS` (enforced by a
-test) and in the frontend's `ISSUE_COPY`.
-
-**Service** ([backend/services/watch_service.py](backend/services/watch_service.py)):
-- Issues are current state keyed by URL, not an event log. A standing problem
-  is one row and one email; `alerted_at` gates re-reporting, and a *different*
-  failure at the same URL reopens it.
-- Closing an issue requires having re-probed that URL. Absence from a sweep's
-  findings is not evidence of repair — `MAX_URLS_PER_SWEEP` leaves a large
-  site's tail unchecked.
-- Transient types (`unreachable`, `blocked`) wait for two consecutive sightings
-  before alerting.
-- `fix_rows()` shapes issues as old_url/new_url so `redirect_export` renders
-  the correction in the same formats as the original export.
-
-**Scheduling**: sweeps run in the **worker**, never the API — probing thousands
-of URLs takes tens of minutes and the API is a single sync gunicorn worker. One
-sweep at a time, alongside jobs rather than taking a job slot. Sweeps use their
-own rate-limiter namespace (`WATCH_NAMESPACE`), paced slower than discovery
-because monitoring recurs forever.
-
-**Endpoints**: `/api/watches` (browser) and `/api/v1/migrations/<id>/watch`
-plus `.../watch/fixes` (agent).
-
-**Entitlement**: creating a watch is paid-plan only (`plan_allows_watch` in
-`watch_service.py` — the single definition both routes ask). `WATCH_PLANS` is
-agency/enterprise today; when the standalone ~$29/mo Watch SKU from Pricing V3
-exists, its entitlement belongs there and nowhere else. Only *creation* is
-gated — an existing watch can still be read, paused and resumed if a plan
-lapses. `WATCH_ALLOWLIST_USER_IDS` (comma-separated, set on API **and**
-worker) grants Watch regardless of plan, which is how a design partner gets it
-without also being handed Deep Match.
-
-**Two guard behaviours worth knowing**: `check-now` refuses (409) on a paused
-watch rather than silently resuming it, and alerts are **held while every open
-issue is `no_redirect` and no sweep has ever seen a working redirect** — the
-pre-deploy grace, since "start monitoring" is offered before the user deploys.
-Any working redirect in history (or any other failure type) releases alerts,
-so a post-deploy config wipe still fires.
-
-## Match Repair (low-confidence matches, before export)
-
-~25% of production matches come back `needs_review` (2,062 of 8,344), almost
-all URL-only matches that never saw page content. Escalating those to content
-matching is the paid Deep Match upgrade, so the free path works from evidence
-already on hand: the session's own high-confidence matches describe how the
-site renamed things.
-
-**Learning** ([src/redirx/match_repair.py](src/redirx/match_repair.py)):
-- Strip the tail two confident paths share; whatever prefix remains on each
-  side is the rename that pair demonstrates. Group, then require support
-  (`MIN_SUPPORT`) and consistency (`MIN_CONSISTENCY`).
-- **Tail comparison must tolerate slug rewrites but not section renames.**
-  Byte equality discarded all 274 confident matches of a real Shopify
-  re-platform (`ironpizzelle` vs `iron-pizzelle`); unrestricted fuzziness
-  folded `product`/`products` into the tail and erased the rule. Hence
-  `MIN_FUZZY_SLUG_LENGTH` — long leaves are fuzzy, short sections exact.
-
-**Applying**, strongest first:
-1. The rule's target published verbatim (`exact`).
-2. The closest-named page inside the section the rule identifies (`section`),
-   gated by `SECTION_MIN_SCORE` and a margin over the runner-up.
-
-**The load-bearing guard**: a proposed URL must exist in the session's new-URL
-universe. A wrong rule then proposes nothing instead of authoring a 404.
-
-**Scorer**: `token_set_ratio`, not the matcher's `token_sort_ratio`.
-Migrations *add* words to slugs (brand, size, pack count) and token_sort
-punishes exactly that — `bean-tower` scored 54 against its real destination
-and 70 against an unrelated `oven-towel`, so the repair replaced a correct
-match with a wrong one.
-
-**Advisory only.** Proposals live in their own columns; `new_url`,
-`confidence_score` and `needs_review` are untouched until a human decides.
-Accepting — like approve, edit, and the bulk actions — persists through
-`PATCH /api/results/<sid>/mappings/<mid>` (`pipeline_routes.update_mapping`),
-the single write path for review decisions. This matters beyond the UI: the
-watch defines "correct" as `needs_review = false`, and the v1 export reads the
-DB — before persistence existed, the watch monitored the wrong rows and could
-file `wrong_target` against a correctly deployed human edit.
-
-**Where it runs**: worker post-pass after the pipeline stores mappings
-(`MatchRepairService.repair_session`). Measured 40% of flagged rows get a
-proposal (51% on the real e-commerce re-platform), ~9s for 1,241 rows against
-3,749 candidates.
-
-## File Structure
-
-- `src/redirx/lib.py` - Pipeline orchestration
-- `src/redirx/stages.py` - All stage implementations and helper classes
-- `src/redirx/config.py` - Configuration management (loads from .env)
-- `src/redirx/database.py` - Supabase client and database operations
-- `tests/driver.py` - Test runner entry point
-- `tests/test_database_connection.py` - Database connection verification
-- `tests/stage_tests/` - Unit tests for individual stages
-- `.env.example` - Template for environment variables (copy to `.env`)
+Frontend Vite build is not TypeScript checking. The legacy `dev.py` uses broad
+process-killing patterns and fixed ports; avoid it across simultaneous worktrees.
+Account/project settings remain owner-applied. This guide authorizes no deployment,
+billing activation or production schema change.

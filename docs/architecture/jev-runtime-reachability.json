@@ -26,14 +26,15 @@
     "src/redirx/config.py": [],
     "src/redirx/jev/pipeline.py": [
       "src/redirx/jev/data.py",
-      "src/redirx/jev/jev.py",
+      "src/redirx/jev/ports.py",
       "src/redirx/jev/questions.py"
     ],
     "src/redirx/jev/questions.py": [],
     "src/redirx/jev/jev.py": [],
     "src/redirx/jev/data.py": [],
     "src/redirx/jev/retrieve.py": [
-      "src/redirx/jev/data.py"
+      "src/redirx/jev/data.py",
+      "src/redirx/jev/ports.py"
     ],
     "src/redirx/jev/examples.py": [
       "src/redirx/jev/data.py",
@@ -456,6 +457,7 @@
     ],
     "backend/services/jev_database_transport.py": [
       "src/redirx/config.py"
-    ]
+    ],
+    "src/redirx/jev/ports.py": []
   }
 }

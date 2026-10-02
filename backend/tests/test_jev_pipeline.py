@@ -9,7 +9,9 @@ from uuid import uuid4
 from backend.tests import test_artifact_decision_projection as fixture
 from backend.tests import test_migration_run_service as run_fixture
 from backend.tests.test_migration_planning import A,B,ROOT
-from backend.services.jev_pipeline_service import JevService, DurableStore, JevPipelineRunner
+from backend.services.jev_pipeline_service import JevService
+from backend.services.jev_store import DurableStore
+from backend.services.jev_runner import JevPipelineRunner
 from backend.services.mapping_decision_service import MappingDecisionService
 
 
@@ -247,7 +249,7 @@ class JevWorkerRouting(unittest.IsolatedAsyncioTestCase):
                 jev=stack.enter_context(patch('backend.services.jev_pipeline_service.JevService')).return_value
                 jev.state.return_value={'pass':1}
                 stack.enter_context(patch('backend.services.jev_database_transport.jev_worker_database'))
-                runner=stack.enter_context(patch('backend.services.jev_pipeline_service.JevPipelineRunner')).return_value;runner.run=AsyncMock()
+                runner=stack.enter_context(patch('backend.services.jev_runner.JevPipelineRunner')).return_value;runner.run=AsyncMock()
                 pipeline=stack.enter_context(patch('backend.worker.Pipeline',side_effect=AssertionError('content must never run')))
                 budget=stack.enter_context(patch('backend.worker.reserve_pivot_temporary_capacity'))
                 self.assertEqual(await worker.process_job(job),enabled)

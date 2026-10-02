@@ -24,7 +24,8 @@ review/download paths remain supported.
 | Matching algorithm | `src/redirx/jev/{data,retrieve,examples,pipeline,questions}.py` |
 | Algorithm's external interfaces | `src/redirx/jev/ports.py` |
 | Pinned model client, validation and accounting | `src/redirx/jev/jev.py` |
-| Run orchestration and durable adapters | `backend/services/jev_pipeline_service.py` |
+| Run admission and review state | `backend/services/jev_pipeline_service.py` |
+| Worker execution and durable provider accounting | `backend/services/jev_runner.py`, `jev_store.py` |
 | Queue dispatch and leases | `backend/worker.py` |
 | Ownership, review and exports | `backend/services/migration_*`, `mapping_decision_service.py` |
 | HTTP API | `backend/app.py`, `backend/routes/v2_routes.py` |

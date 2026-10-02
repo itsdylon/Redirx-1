@@ -1,5 +1,3 @@
-import * as XLSX from 'xlsx';
-
 export interface ParseResult {
   urls: string[];
   warnings: string[];
@@ -81,6 +79,8 @@ export function parseXmlSitemap(xmlText: string): ParseResult {
 export async function parseXlsx(file: File): Promise<ParseResult> {
   const result: ParseResult = { urls: [], warnings: [], errors: [] };
 
+  // Load the spreadsheet engine only for an actual Excel import.
+  const XLSX = await import('xlsx');
   const buffer = await file.arrayBuffer();
   const workbook = XLSX.read(buffer, { type: 'array' });
 

@@ -6,6 +6,7 @@ import json
 from collections.abc import Mapping
 
 from .analytics_service import AppEvent, capture
+from .jev_store import read_jev_state
 from .job_limits import PIVOT_CONTENT_MAX_OLD_URLS, PIVOT_CONTENT_MAX_NEW_URLS
 from .migration_planning_service import validate_key
 from .migration_quote_service import _ERRORS, QuoteNotReadyError
@@ -156,8 +157,7 @@ class MigrationRunService:
         run_id = job.get('mcp_run_id')
         if run_id:
             try:
-                from .jev_pipeline_service import JevService
-                jev_state = JevService(self.repository).state(run_id)
+                jev_state = read_jev_state(self.repository.client, run_id)
             except Exception:
                 jev_state = None
         properties = {

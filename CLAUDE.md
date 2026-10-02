@@ -22,9 +22,10 @@ is not a reliable inventory of the current deployment.
 - `src/redirx/jev/jev.py` owns the pinned provider protocol, request validation,
   cache identity, pacing and billable-call accounting. Swapping a provider must
   preserve those guarantees and explicitly version incompatible prompts/caches.
-- `backend/services/jev_pipeline_service.py` adapts owned jobs, audited seeds,
-  durable storage and embedding calls to the algorithm. Blocking work stays off
-  the async worker loop so lease heartbeats continue.
+- `backend/services/jev_pipeline_service.py` owns admission, refinement and review
+  state. `jev_store.py` owns run-scoped persistence and lease-fenced budgets;
+  `jev_runner.py` adapts jobs, audited seeds and embeddings to the algorithm.
+  Blocking work stays off the async worker loop so lease heartbeats continue.
 - `backend/worker.py` owns dispatch and completion. `migration_*` services own
   admission, ownership, review, artifacts and historical workflows. Keep these
   product authorities independent of model decisions and MCP/browser transport.

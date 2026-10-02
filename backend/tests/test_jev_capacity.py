@@ -18,7 +18,7 @@ from backend.tests.test_jev_pipeline import NativeJev
 from backend.tests.test_migration_planning import A
 from backend.services.migration_planning_service import MigrationPlanningService
 from backend.services.inventory_import_service import InventoryImportService
-from backend.services.jev_pipeline_service import JevPipelineRunner,DurableEmbeddingCache
+from backend.services.jev_runner import JevPipelineRunner,DurableEmbeddingCache
 from src.redirx.jev.jev import JevClient,MODEL
 
 class FakeOpenAI:

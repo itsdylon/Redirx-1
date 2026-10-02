@@ -26,8 +26,6 @@ _ACTIONS = {
 _FILTERS = {"all", "needs_review", "unmatched", "approved", "rejected"}
 
 
-class RevisionConflictError(MigrationRepositoryError):
-    code = "revision_conflict"
 
 
 class InventoryIncompleteError(MigrationRepositoryError):

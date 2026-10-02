@@ -365,7 +365,11 @@ class WorkerDispatchTests(unittest.IsolatedAsyncioTestCase):
         worker._lease_extension_loop=AsyncMock(); worker.release_lease=AsyncMock(); worker.session_db=Mock()
         worker._apply_usage_accounting=Mock()
         events=[]
-        service=Mock(); service.authorize_dispatch.side_effect=lambda *_: events.append('authorize')
+        service=Mock()
+        def authorize(*_):
+            events.append('authorize')
+            return {'migration_id': str(uuid4())}
+        service.authorize_dispatch.side_effect=authorize
         service.finalize_session.side_effect=lambda *_: events.append('finalize')
         async def steps(): yield None
         pipeline=SimpleNamespace(total_stages=1,stage_names=['fixture'],current_stage_index=1,iterate=steps)
@@ -377,7 +381,9 @@ class WorkerDispatchTests(unittest.IsolatedAsyncioTestCase):
         with patch('backend.worker.MigrationRunService',return_value=service), patch('backend.worker.DeepPreviewService'), \
              patch('backend.worker.Config.validate_embeddings'), patch('backend.worker.URLMappingDB',return_value=mappings), \
              patch('backend.worker.MatchRepairService'), patch('backend.worker.SupabaseClient.get_client',return_value=client), \
-             patch('backend.worker.Pipeline',side_effect=construct):
+             patch('backend.worker.Pipeline',side_effect=construct), \
+             patch('backend.services.jev_pipeline_service.JevService') as jev:
+            jev.return_value.state.return_value = None  # This fixture exercises the historical engine.
             self.assertTrue(await worker.process_job(job))
         self.assertEqual(events,['authorize','pipeline','finalize'])
         worker._apply_usage_accounting.assert_not_called(); worker.release_lease.assert_not_called()

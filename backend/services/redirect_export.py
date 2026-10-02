@@ -355,22 +355,6 @@ def _transform(
     return to_path(url)
 
 
-def _pairs(
-    mappings: Iterable[dict[str, Any]],
-    url_format: str,
-    old_domain: Optional[str],
-    new_domain: Optional[str],
-) -> list[tuple[str, str]]:
-    selection = select_export_mappings(
-        mappings,
-        url_format=url_format,
-        old_domain=old_domain,
-        new_domain=new_domain,
-    )
-    return [
-        (item["old_rendered"], item["new_rendered"])
-        for item in selection["mappings"]
-    ]
 
 
 def _csv_rows(header: list[str], rows: list[list[str]]) -> str:

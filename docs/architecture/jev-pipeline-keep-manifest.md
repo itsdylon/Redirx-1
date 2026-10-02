@@ -8,6 +8,27 @@ recorded in the release receipt; use `git log -- docs/architecture/jev-pipeline-
 to find the revision carrying this inventory. File provenance hashes are in
 `jev-harness-provenance.json`; repository reachability is in `jev-runtime-reachability.json`.
 
+## Graph-guided cleanup amendment
+
+See [the graph cleanup receipt](jev-graph-cleanup-20261001.md) for source checks
+and validation. The Jev service is now separated into API (`jev_pipeline_service.py`),
+worker (`jev_runner.py`) and persistence (`jev_store.py`) modules. Their protocol,
+limits, leases, cache identity and budget behavior are unchanged. Frontend routes
+load on demand; historical paths remain available. The unused `DiscoveredUrlDB`
+wrapper, `_pairs` helper and `RevisionConflictError` type were deliberately removed.
+This supersedes the older proposal to retain `DiscoveredUrlDB` as future scaffolding;
+`session_discovered_urls`, its migration, and current repository writers remain.
+
+## October 1 cleanup amendment
+
+The original entries below describe the expedited MVP preservation boundary.
+The separately authorized [cleanup audit](jev-cleanup-20261001.md) traces and removes
+unused experimental content helpers, alternate decision policies and evaluator
+fields. Those specific helpers are no longer protected or implemented. URL
+retrieval, the two-pass question protocol, provider accounting, audited seeds and
+all historical/shared application paths remain protected. `src/redirx/jev/ports.py`
+is the new algorithm interface; original provenance hashes remain historical pins.
+
 ## KEEP — Jev core (runtime)
 
 | Exact path / object | Why retained, caller and adaptation | Verification / cleanup constraint |

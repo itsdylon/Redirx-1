@@ -159,7 +159,7 @@ class RunCompletedTests(unittest.TestCase):
         # 'jev_runs' (JevService.state()'s read) by table name, so leaving
         # this unpatched for the non-JEV case would let the pre-read's rows
         # leak into JevService.state() and misclassify the engine.
-        patcher = patch("backend.services.jev_pipeline_service.JevService.state", return_value=jev_state)
+        patcher = patch("backend.services.migration_run_service.read_jev_state", return_value=jev_state)
         patcher.start()
         self.addCleanup(patcher.stop)
         return service

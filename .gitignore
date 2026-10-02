@@ -53,3 +53,7 @@ data/content/
 
 # Playwright MCP scratch output (console logs, page snapshots)
 .playwright-mcp/
+
+# Browser test output
+frontend/playwright-report/
+frontend/test-results/

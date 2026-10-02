@@ -16,3 +16,23 @@ Plan does not import lists. `import_inventory({migration_id,side,urls,idempotenc
 `run_migration` forwards optional explicitly verified `{old_url,new_url}` pairs (at most100) to backend inventory/ownership validation. The UI calls no provider directly. Free bounds are500 old URLs,2000 new URLs,2MiB combined URL text,five new runs per24hours,and three total passes. Backend quota, revision and ownership checks remain authoritative.
 
 Validation:20 native MCP SDK tests, including authenticated import shape/readiness, bounded rejection without HTTP, confirmed-pair forwarding and refinement retries;44 focused frontend/API tests including explicit Jev confirmation, no automatic approval, stale proposals, three-pass boundary and failed-pass resume, same-key refinement retry, plus legacy payment/consent and paginated review regressions. Gateway TypeScript build and frontend Vite production build passed. Vite is not a full frontend typecheck; it reports an existing large-chunk warning. No provider calls or production deployment in this packet.
+
+
+## Graph-guided cleanup amendment
+
+See [the graph cleanup receipt](jev-graph-cleanup-20261001.md) for source checks
+and validation. The Jev service is now separated into API (`jev_pipeline_service.py`),
+worker (`jev_runner.py`) and persistence (`jev_store.py`) modules. Their protocol,
+limits, leases, cache identity and budget behavior are unchanged. Frontend routes
+load on demand; historical paths remain available. The unused `DiscoveredUrlDB`
+wrapper, `_pairs` helper and `RevisionConflictError` type were deliberately removed.
+This supersedes the older proposal to retain `DiscoveredUrlDB` as future scaffolding;
+`session_discovered_urls`, its migration, and current repository writers remain.
+
+## October 1 cleanup amendment
+
+The [cleanup audit](jev-cleanup-20261001.md) removes 29 frontend modules outside
+both application and test import closures, plus their 20 direct dependencies.
+Every companion/historical route and the shared primitives they actually import
+remain. The original phrase "UI primitives" protects those consumers, not a
+requirement to retain unused generated component scaffolding indefinitely.

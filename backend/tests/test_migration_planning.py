@@ -10,7 +10,6 @@ from pathlib import Path
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
-from urllib.parse import urlsplit, urlunsplit
 from uuid import uuid4
 
 from flask import Flask
@@ -58,8 +57,9 @@ class Query:
     def __init__(self, client, table=None, rpc=None, params=None):
         self.client, self.table_name, self.rpc_name, self.params = client, table, rpc, params
         self.filters, self.orders, self.max_rows = [], [], None
+        self.columns = "*"
     def select(self, columns):
-        assert columns == '*'
+        self.columns = columns
         return self
     def eq(self, key, value):
         self.filters.append((key, value)); return self
@@ -85,7 +85,9 @@ class Query:
                     exc.code, exc.message = exc.sqlstate, exc.diag.message_primary
                     raise
             else:
-                stmt = sql.SQL('SELECT * FROM {}').format(sql.Identifier(self.table_name))
+                fields = sql.SQL('*') if self.columns == '*' else sql.SQL(',').join(
+                    sql.Identifier(name.strip()) for name in self.columns.split(','))
+                stmt = sql.SQL('SELECT {} FROM {}').format(fields, sql.Identifier(self.table_name))
                 args = []
                 if self.filters:
                     def column(name):
@@ -116,30 +118,10 @@ class DBClient:
 class DatabaseHTTPAcceptance(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        import psycopg
-        from psycopg import sql
-        cls.admin_dsn = os.environ['PREFLIGHT_TEST_DATABASE_URL']
-        parsed = urlsplit(cls.admin_dsn)
-        if parsed.hostname not in ('127.0.0.1', 'localhost', '::1'):
-            raise RuntimeError('Acceptance requires a local disposable PostgreSQL instance.')
-        cls.database = 'redirx_preflight_test_' + uuid4().hex
-        with psycopg.connect(cls.admin_dsn, autocommit=True) as conn:
-            conn.execute(sql.SQL('CREATE DATABASE {}').format(sql.Identifier(cls.database)))
-        cls.dsn = urlunsplit(parsed._replace(path='/' + cls.database))
-        cls.addClassCleanup(cls.cleanup_db)
-        with psycopg.connect(cls.dsn, autocommit=True) as conn:
-            fixture = (ROOT / 'database/tests/legacy-fixture.sql').read_text()
-            # Roles are cluster-wide and can already exist from another packet.
-            for role in ('anon', 'authenticated', 'service_role'):
-                if conn.execute('SELECT 1 FROM pg_roles WHERE rolname=%s', [role]).fetchone():
-                    fixture = fixture.replace(f'CREATE ROLE {role} NOLOGIN' + (' BYPASSRLS' if role == 'service_role' else '') + ';', '')
-            conn.execute(fixture)
-            for name in ('019_auth_user_delete_cleanup.sql', '026_add_traffic_baseline_and_url_sources.sql',
-                         '031_add_account_usage_events.sql', '032_durable_migrations.sql',
-                         '034_atomic_inventory_import.sql', '035_atomic_migration_planning.sql'):
-                conn.execute((ROOT / 'database/migrations' / name).read_text())
-            conn.execute('INSERT INTO auth.users(id) VALUES (%s),(%s)', [A,B])
-            conn.execute('INSERT INTO user_profiles(id) VALUES (%s),(%s)', [A,B])
+        # The current status route reads run/quote authority through migration 037.
+        # Reuse the queue fixture instead of maintaining a second partial schema.
+        from backend.tests.test_migration_run_service import RunDatabaseAcceptance
+        RunDatabaseAcceptance.setUpClass.__func__(cls)
         cls.repository = MigrationRepository(DBClient(cls.dsn))
 
     @classmethod
@@ -150,10 +132,13 @@ class DatabaseHTTPAcceptance(unittest.TestCase):
             conn.execute(sql.SQL('DROP DATABASE {} WITH (FORCE)').format(sql.Identifier(cls.database)))
 
     def setUp(self):
+        activation = patch.dict(os.environ, {"MCP_PIVOT_ENABLED": "true"})
+        activation.start(); self.addCleanup(activation.stop)
         self.app = Flask(__name__)
         self.app.config.update(TESTING=True, MAX_CONTENT_LENGTH=2_000_000, RATELIMIT_ENABLED=True)
         self.app.register_blueprint(v2_blueprint, url_prefix='/api/v2')
         from backend.extensions import limiter
+        self.addCleanup(setattr, limiter, "enabled", limiter.enabled)
         limiter.enabled = False
         self.http = self.app.test_client()
         self.patches = [

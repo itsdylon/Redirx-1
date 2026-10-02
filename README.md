@@ -1,35 +1,74 @@
-# Redirx: Automated 301 Redirect Generation for Website Migrations
-Redirx is a student project at the Georgia Institute of Technology.
+# RedirX
 
-Redirx is made up of multiple components:
-- A website: Used as the user-facing component of Redirx. Orchestrates the interaction between itself, the Python module, and the SQL database.
-- A SQL database: Used to ensure user data persists across sessions. 
-- A Python module: Used to implement the primary logic behind Redirx
-- A Python script: Used to interact with the website
+RedirX proposes URL redirects for website migrations. The current product is a
+remote MCP service with a browser companion for sign-in, review and downloads.
+The matching engine uses URL retrieval and System One judgments; every proposal
+requires an explicit decision before export.
 
+## Current flow
 
-1. User uploads CSVs (URLs only, maybe status codes)
-2. PRUNING PHASE #1 (no scraping yet)
-   • Exact URL matches (normalized)
-   • Obvious URL patterns
-   • Exclude blog posts (/blog/, /YYYY/, etc.)
-   • Exclude static assets, admin URLs
-   • Exclude 4xx/3xx on old site
-3. Remaining URLs → Queue for scraping
-4. SCRAPE PHASE (only unmatched URLs)
-   • Scrape old site URLs
-   • Scrape new site URLs
-   • Extract: title, h1s, meta description, main content
-   • Store raw content + cleaned text
-2. PRUNING PHASE #2 (basic content scrapping)
-   • Exact HTML matches
-6. EMBEDDING PHASE
-   • Generate vector embeddings from content
-   • Store in pgvector
-7. MATCHING PHASE
-   • Nearest neighbor search (cosine similarity)
-   • Calculate confidence scores
-   • Flag ambiguous cases
-8. Human review interface
+1. Create an owned migration and import old/new URL inventories.
+2. Retrieve candidates using path BM25, URL embeddings and confirmed examples.
+3. Ask Jev to select candidates, then verify a shortlist in a second pass.
+4. Review proposals, confirm or correct destinations, and optionally refine.
+5. Export approved mappings through the existing artifact service.
 
-Test sites can be spun up locally using tests/mock_sites/start_servers.py 
+Current runs use URLs only: no page-body crawl, automatic approval or automatic
+410 decision. Model confidence is an estimate. Historical sessions and their
+review/download paths remain supported.
+
+## Where to work
+
+| Concern | Entry point |
+| --- | --- |
+| Matching algorithm | `src/redirx/jev/{data,retrieve,examples,pipeline,questions}.py` |
+| Algorithm's external interfaces | `src/redirx/jev/ports.py` |
+| Pinned model client, validation and accounting | `src/redirx/jev/jev.py` |
+| Run admission and review state | `backend/services/jev_pipeline_service.py` |
+| Worker execution and durable provider accounting | `backend/services/jev_runner.py`, `jev_store.py` |
+| Queue dispatch and leases | `backend/worker.py` |
+| Ownership, review and exports | `backend/services/migration_*`, `mapping_decision_service.py` |
+| HTTP API | `backend/app.py`, `backend/routes/v2_routes.py` |
+| MCP transport and tools | `mcp-server/src/` |
+| Resource-bound OAuth issuer | `mcp-auth-server/` |
+| Browser companion | `frontend/src/components/PivotCompanionPage.tsx`, `PivotMigrationDetail.tsx` |
+
+Read [CLAUDE.md](CLAUDE.md) for engineering invariants and checks. The
+[Jev runtime inventory](docs/architecture/jev-pipeline-keep-manifest.md) and
+[companion inventory](docs/architecture/jev-companion-keep-manifest.md) explain
+shared and historical dependencies. The [release packet](docs/releases/jev-mvp-implementation.md)
+records the original rollout constraints; it is not proof of today's live state.
+
+## Local work
+
+Python dependencies are in `requirements.txt`; install into an isolated virtual
+environment. Frontend and MCP packages each have their own npm lockfile.
+Use the relevant `.env.example` as a configuration reference, with isolated test
+services. Never point an experimental worker at the production job queue.
+
+`python dev.py` starts the legacy frontend/API/worker/mock-site workflow. It does
+not start the MCP gateway or OAuth issuer and its broad process cleanup is not
+safe for concurrent worktrees. For now, start only the needed services individually:
+
+```sh
+python -m backend.app
+python -m backend.worker
+npm run dev --prefix frontend
+npm run dev --prefix mcp-server
+npm start --prefix mcp-auth-server
+```
+
+For an offline core check, after installing Python dependencies:
+
+```sh
+python -m unittest backend.tests.test_jev_core -v
+node scripts/check_pivot_contract.mjs
+```
+
+See [the cleanup audit](docs/architecture/jev-cleanup-20261001.md) for removed code,
+verification and the next architectural work. No production deployment is implied
+by checking out this repository; `render.yaml` is historically drifted.
+
+## Testing
+
+[CI and local checks](docs/testing.md) cover the application independently of its matching harness.

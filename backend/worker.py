@@ -576,13 +576,14 @@ class RedirxWorker:
                 pivot_migration_id = authorization.get('migration_id')
 
             if pivot_service is not None:
-                from backend.services.jev_pipeline_service import JevService, JevPipelineRunner, enabled as jev_enabled
+                from backend.services.jev_pipeline_service import JevService, enabled as jev_enabled
                 jev_service = JevService(pivot_service.repository)
                 jev_job = jev_service.state(job['mcp_run_id']) is not None
                 if jev_job:
                     if not jev_enabled():
                         from src.redirx.jev.jev import ProviderUnavailable
                         raise ProviderUnavailable('jev_paused')
+                    from backend.services.jev_runner import JevPipelineRunner
                     from backend.services.jev_database_transport import jev_worker_database
                     with jev_worker_database() as jev_client:
                         await JevPipelineRunner(jev_client).run(job,self.worker_id,self.session_db.update_session_progress)

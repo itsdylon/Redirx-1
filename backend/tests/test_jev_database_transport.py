@@ -3,7 +3,7 @@ import unittest
 from unittest.mock import patch
 import httpx
 from backend.services.jev_database_transport import jev_worker_database
-from backend.services.jev_pipeline_service import DurableStore
+from backend.services.jev_store import DurableStore
 
 
 class JevDatabaseTransport(unittest.TestCase):

@@ -82,26 +82,18 @@ experimental and unreferenced pieces independently verified for removal.
 
 ## Verification
 
+The required CI workflow is `.github/workflows/ci.yml`. See
+[`docs/testing.md`](docs/testing.md) for the same local commands and coverage limits.
+It checks product authority, transport, SQL, UI behavior and builds independently of
+model choice or retrieval strategy. Model-quality evaluation is deliberately not a
+CI gate (owner decision, October 1, 2026); do not add one during a harness migration.
+
 Use an isolated checkout/environment. Never copy production credentials into tests.
+`python scripts/ci/backend.py` requires disposable loopback PostgreSQL via
+`PREFLIGHT_TEST_DATABASE_URL` and fails on skipped or empty required suites.
+Frontend Vite build is not TypeScript checking. Existing model-specific and capacity
+tests remain available for targeted work; they are not required CI gates.
 
-```sh
-python -m unittest backend.tests.test_jev_core backend.tests.test_jev_database_transport -v
-node scripts/check_pivot_contract.mjs
-npm run test:run --prefix frontend
-npm run build --prefix frontend
-npm test --prefix mcp-server
-npm run typecheck --prefix mcp-server
-```
-
-Native lifecycle tests require `PREFLIGHT_TEST_DATABASE_URL` pointing to disposable
-loopback PostgreSQL. Run `backend.tests.test_jev_pipeline`,
-`backend.tests.test_worker_pivot_integration`,
-`backend.tests.test_artifact_decision_projection` and
-`backend.tests.test_migration_run_service` with it. A skipped database suite is not
-acceptance. The opt-in `test_jev_capacity` fixture uses synthetic providers; it does
-not establish production latency, quality or provider availability.
-
-Frontend Vite build is not TypeScript checking. The legacy `dev.py` uses broad
-process-killing patterns and fixed ports; avoid it across simultaneous worktrees.
-Account/project settings remain owner-applied. This guide authorizes no deployment,
-billing activation or production schema change.
+The legacy `dev.py` uses broad process-killing patterns and fixed ports; avoid it
+across simultaneous worktrees. Account/project settings remain owner-applied.
+This guide authorizes no deployment, billing activation or production schema change.

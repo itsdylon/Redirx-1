@@ -68,3 +68,7 @@ node scripts/check_pivot_contract.mjs
 See [the cleanup audit](docs/architecture/jev-cleanup-20261001.md) for removed code,
 verification and the next architectural work. No production deployment is implied
 by checking out this repository; `render.yaml` is historically drifted.
+
+## Testing
+
+[CI and local checks](docs/testing.md) cover the application independently of its matching harness.
